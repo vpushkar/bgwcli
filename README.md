@@ -232,6 +232,33 @@ Prune removes router-only services and forwards, forwards before services (the g
 - Re-dump after a firmware upgrade and `diff` against the old file before trusting `restore`.
 - Old schema-1 dumps (before 2026-09-19) are rejected on load with a re-dump message.
 
+### The `--include-lan` flag
+
+`--include-lan` is an opt-in on `diff` and `restore` that adds the LAN Ethernet port settings page
+(`etherlan.ha`) to what is compared and written back. Everything else in the dump is always in scope;
+only this page is excluded unless you ask for it.
+
+The page holds two settings per physical port, the configured media (speed/duplex) and the MDI-X mode:
+
+```
+enet1_port1_media=auto  enet1_port1_mdix=auto
+enet2_port2_media=auto  enet2_port2_mdix=auto
+enet3_port3_media=auto  enet3_port3_mdix=auto
+enet4_port4_media=auto  enet4_port4_mdix=auto
+```
+
+`dump` always captures these fields, so the file is complete either way. `diff` without the flag ignores
+them; with it, a port forced to, say, 100M full duplex on the router shows up as a difference, and
+`restore --include-lan --commit --confirm RESTORE` posts the page's Save to put the dumped values back.
+
+It is off by default for two reasons. Forcing a port speed or MDI-X mode is the one restore action that can
+cut the wire you are connected through, so it must never happen as a side effect of restoring firewall or
+Wi-Fi settings. And it is the only form page whose live restore has not been exercised: the `diff
+--include-lan` path was verified against the gateway (no differences), the write path has not.
+
+Practical rule: leave it off. Use it only when you deliberately configured a port and want that in the
+round trip, and run the first `--include-lan` commit from a client that is not on the port being changed.
+
 ## Router Command Tree
 
 All of these commands accept `--json`. Parsed page JSON includes a `summary` object with the same high-value fields used by the terminal view, plus the underlying values, tables, controls, buttons, and forms. Use `--forms` to include form controls in normal terminal output.
