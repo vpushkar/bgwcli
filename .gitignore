@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+tests/fixtures/router-html/
+tests/fixtures/parsed/
+tests/fixtures/expected/
+bgw-*.json
+*.dump.json
+/dumps/
+.venv*/

@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bgwcli"
+version = "0.1.0"
+description = "Python CLI for the AT&T BGW320 gateway (idiomatic rewrite of BGW320-CLI)"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Volodymyr Pushkar" }]
+readme = "README.md"
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/vpushkar/bgwcli"
+Repository = "https://github.com/vpushkar/bgwcli"
+Issues = "https://github.com/vpushkar/bgwcli/issues"
+
+[project.scripts]
+bgwcli = "bgwcli.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/test_cli.py" = ["E501"]
+"tests/test_operations.py" = ["E501"]
+"tests/test_client.py" = ["E501"]
+"scripts/e2e.py" = ["E501"]
