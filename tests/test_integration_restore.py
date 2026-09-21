@@ -70,7 +70,7 @@ from bgwcli.snapshot_diff import diff_snapshots
 from bgwcli.types import ParsedPage
 
 META = SnapshotMeta(firmware="4.27.7", ts="t", router_host="r")
-OPTIONS = RestoreOptions(prune=False, include_lan=False, include_secrets=False)
+OPTIONS = RestoreOptions(prune=False, include_secrets=False)
 PRUNE = replace(OPTIONS, prune=True)
 MAC = "02:0a:0b:0c:0d:04"
 
@@ -122,7 +122,7 @@ def dump_no_service_adds() -> Snapshot:
 
 
 def plan(snap: Snapshot, pages: Mapping[str, ParsedPage], options: RestoreOptions = OPTIONS) -> list[RestoreStep]:
-    return build_restore_plan(diff_snapshots(snap, live(pages), include_lan=options.include_lan), snap, pages, options)
+    return build_restore_plan(diff_snapshots(snap, live(pages), pages=options.pages), snap, pages, options)
 
 
 def kinds(steps: list[RestoreStep]) -> list[str]:
@@ -398,14 +398,16 @@ def test_c1_a_blocked_for_pending_adds_remove_does_not_consume_the_one_remove_pe
         assert step.blocked is not None and "pending adds" in step.blocked
 
 
-def test_i7_the_etherlan_form_is_not_planned_without_include_lan():
+def test_i7_the_etherlan_form_is_not_planned_when_pages_leaves_it_out():
     snap = replace(dump(), forms={**dump().forms, "etherlan": {"lan_mtu": "1400"}})
-    assert not [s for s in plan(snap, live_pages()) if s.page == "etherlan"]
+    steps = plan(snap, live_pages(), replace(OPTIONS, pages=("services", "apphosting", "dosprotect")))
+    assert not [s for s in steps if s.page == "etherlan"]
+    assert not [s for s in plan(dump(), live_pages()) if s.page == "etherlan"]  # not captured -> not planned
 
 
-def test_i7_include_lan_plans_exactly_one_etherlan_form_save():
+def test_i7_an_etherlan_form_captured_in_the_dump_plans_exactly_one_form_save():
     snap = replace(dump(), forms={**dump().forms, "etherlan": {"lan_mtu": "1400"}})
-    lan_steps = [s for s in plan(snap, live_pages(), replace(OPTIONS, include_lan=True)) if s.page == "etherlan"]
+    lan_steps = [s for s in plan(snap, live_pages()) if s.page == "etherlan"]
     assert len(lan_steps) == 1
     step = lan_steps[0]
     assert step.kind == "form" and step.button == "Save"
@@ -826,7 +828,7 @@ def test_identical_unchecked_state_on_both_sides_is_not_a_difference():
         forwards=snapshot.forwards,
         forms={"dosprotect": {"reflexive": "on", "algsip": UNCHECKED}},
     )
-    assert diff_snapshots(wanted, snapshot, include_lan=False).forms == {}
+    assert diff_snapshots(wanted, snapshot).forms == {}
 
 
 def test_a_text_field_whose_dump_value_is_literally_unchecked_is_assigned_not_omitted():
@@ -869,6 +871,6 @@ def test_end_to_end_plan_from_real_pages_executes_and_converges_against_the_post
     # After the router applied the adds it renders the snapshot.test.ts pages again: converged without
     # --prune (Stale stays), not converged with --prune.
     after = extract_snapshot(dump_pages, ts="t2", router_host="r")
-    assert restore_converged(diff_snapshots(wanted, after, include_lan=False), prune=False) is True
+    assert restore_converged(diff_snapshots(wanted, after), prune=False) is True
     still_stale = extract_snapshot(pages, ts="t2", router_host="r")
-    assert restore_converged(diff_snapshots(wanted, still_stale, include_lan=False), prune=True) is False
+    assert restore_converged(diff_snapshots(wanted, still_stale), prune=True) is False

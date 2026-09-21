@@ -17,9 +17,11 @@ from page_builders import (
     table,
 )
 
-from bgwcli.errors import SnapshotExtractionError
+from bgwcli.errors import SnapshotExtractionError, UsageError
 from bgwcli.snapshot import (
+    CORE_FORM_PAGES,
     FORM_PAGES,
+    OPTIONAL_FORM_PAGES,
     SNAPSHOT_PAGES,
     UNCHECKED,
     SnapshotForward,
@@ -29,7 +31,9 @@ from bgwcli.snapshot import (
     extract_snapshot,
     forward_key,
     reservation_key,
+    resolve_include,
     service_key,
+    snapshot_pages_for,
 )
 from bgwcli.types import ParsedPage
 
@@ -79,6 +83,53 @@ def test_snapshot_pages_and_form_pages_are_fixed():
     ]
     # New form pages (2026-09-20): Subnets & DHCP, IP Passthrough, Wi-Fi MAC Filtering modes.
     assert list(FORM_PAGES) == ["dosprotect", "wconfig", "etherlan", "dhcpserver", "ippass", "wmacauth"]
+    assert CORE_FORM_PAGES == ("dosprotect", "wconfig")
+    assert OPTIONAL_FORM_PAGES == ("etherlan", "dhcpserver", "ippass", "wmacauth")
+    assert (*CORE_FORM_PAGES, *OPTIONAL_FORM_PAGES) == FORM_PAGES
+
+
+def test_resolve_include_none_all_list_and_unknown():
+    assert resolve_include(None) == ()
+    assert resolve_include("") == ()
+    assert resolve_include("all") == OPTIONAL_FORM_PAGES
+    assert resolve_include("ALL") == OPTIONAL_FORM_PAGES
+    # Canonical OPTIONAL_FORM_PAGES order regardless of how they were named; csv or list input.
+    assert resolve_include("dhcpserver, etherlan") == ("etherlan", "dhcpserver")
+    assert resolve_include(["dhcpserver", "etherlan"]) == ("etherlan", "dhcpserver")
+    assert resolve_include([]) == ()
+    assert resolve_include(["all"]) == OPTIONAL_FORM_PAGES
+    # Core pages are always captured; naming one explicitly is accepted and ignored.
+    assert resolve_include("wconfig,ippass,dosprotect") == ("ippass",)
+    with pytest.raises(UsageError) as info:
+        resolve_include("dhcpserver,nope")
+    assert "nope" in str(info.value)
+    assert all(name in str(info.value) for name in OPTIONAL_FORM_PAGES)
+
+
+def test_snapshot_pages_for_never_lists_an_optional_page_that_was_not_included():
+    assert snapshot_pages_for(()) == tuple(p for p in SNAPSHOT_PAGES if p not in OPTIONAL_FORM_PAGES)
+    assert "wconfig_unified" in snapshot_pages_for(()) and "packetfilter" in snapshot_pages_for(())
+    assert snapshot_pages_for(("dhcpserver",)) == tuple(
+        p for p in SNAPSHOT_PAGES if p not in ("etherlan", "ippass", "wmacauth")
+    )
+    assert snapshot_pages_for(OPTIONAL_FORM_PAGES) == SNAPSHOT_PAGES
+
+
+def test_extract_snapshot_captures_optional_pages_only_when_included():
+    lan = page("etherlan", fields=[field("lan_mtu", "text", "1500")], tables=[{"a": "1", "b": "2", "c": "3"}])
+    dhcp = page("dhcpserver", selects=[select("dhcp", ["off", "on"], selected="on")])
+    without = extract_snapshot(pages(etherlan=lan, dhcpserver=dhcp), ts=TS, router_host=HOST)
+    assert "etherlan" not in without.forms and "dhcpserver" not in without.forms
+    assert "etherlan" not in without.tables
+    assert "dosprotect" in without.forms  # core pages are always captured
+    partial = extract_snapshot(pages(etherlan=lan, dhcpserver=dhcp), ts=TS, router_host=HOST, include=["dhcpserver"])
+    assert partial.forms["dhcpserver"] == {"dhcp": "on"}
+    assert "etherlan" not in partial.forms and "etherlan" not in partial.tables
+    full = extract_snapshot(pages(etherlan=lan, dhcpserver=dhcp), ts=TS, router_host=HOST, include=OPTIONAL_FORM_PAGES)
+    assert full.forms["etherlan"] == {"lan_mtu": "1500"}
+    assert full.tables["etherlan"] == [{"a": "1", "b": "2", "c": "3"}]
+    # An included page the router did not serve is simply absent, not an error.
+    assert "ippass" not in full.forms
 
 
 def test_extract_snapshot_parses_custom_services_from_a_port_range_table():
@@ -246,7 +297,12 @@ def test_extract_snapshot_captures_advanced_wifi_form_values_without_disabled_or
 
 def test_extract_snapshot_documentary_tables_include_packetfilter_buttons():
     pf = page("packetfilter", buttons=[button("AddDropRule", "Add a 'Drop' Rule"), button("noname", "")])
-    s = snap(packetfilter=pf, etherlan=page("etherlan", tables=[{"a": "1", "b": "2", "c": "3"}]))
+    s = extract_snapshot(
+        pages(packetfilter=pf, etherlan=page("etherlan", tables=[{"a": "1", "b": "2", "c": "3"}])),
+        ts=TS,
+        router_host=HOST,
+        include=("etherlan",),
+    )
     assert s.tables["packetfilter"] == [{"button": "Add a 'Drop' Rule"}, {"button": "noname"}]
     assert s.tables["etherlan"] == [{"a": "1", "b": "2", "c": "3"}]
     assert "dosprotect" not in s.tables
@@ -343,6 +399,6 @@ def test_wmacauth_filter_list_is_documentary_and_its_modes_are_form_fields():
         ],
         tables=[{"Radio": "2.4 GHz", "Network": "Home", "Filtering": "none"}],
     )
-    s = extract_snapshot({"wmacauth": wm}, ts="t", router_host="r")
+    s = extract_snapshot({"wmacauth": wm}, ts="t", router_host="r", include=("wmacauth",))
     assert s.forms["wmacauth"] == {"wmacr1user": "none", "wmacr2user": "deny"}
     assert s.tables["wmacauth"] == [{"Radio": "2.4 GHz", "Network": "Home", "Filtering": "none"}]

@@ -9,10 +9,10 @@ delete what the dump was meant to preserve.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
-from .errors import SnapshotExtractionError
+from .errors import SnapshotExtractionError, UsageError
 from .types import ParsedPage, ParsedSelect
 
 
@@ -70,11 +70,17 @@ SNAPSHOT_PAGES: tuple[str, ...] = (
     "ippass",
     "wmacauth",
 )
-# Form pages restored field-by-field. dhcpserver (Subnets & DHCP), ippass (IP Passthrough) and
-# wmacauth (Wi-Fi MAC Filtering modes) were added 2026-09-20 for factory-reset recovery.
-FORM_PAGES: tuple[str, ...] = ("dosprotect", "wconfig", "etherlan", "dhcpserver", "ippass", "wmacauth")
+# Form pages restored field-by-field. Core pages are always captured by `dump`; optional pages
+# only when named with `--include` (etherlan can cut the wire you are on, dhcpserver can move the
+# gateway; ippass and wmacauth change how the LAN/Wi-Fi admits clients). dhcpserver (Subnets &
+# DHCP), ippass (IP Passthrough) and wmacauth (Wi-Fi MAC Filtering modes) were added 2026-09-20
+# for factory-reset recovery.
+CORE_FORM_PAGES: tuple[str, ...] = ("dosprotect", "wconfig")
+OPTIONAL_FORM_PAGES: tuple[str, ...] = ("etherlan", "dhcpserver", "ippass", "wmacauth")
+FORM_PAGES: tuple[str, ...] = (*CORE_FORM_PAGES, *OPTIONAL_FORM_PAGES)
 # wmacauth: the MAC filter list (Radio/Network/Filtering rows) is a table with Add/Remove semantics
 # like packet filters, so it is recorded but not restored; only the mode selects are form fields.
+# The etherlan/wmacauth tables travel with their (optional) form page.
 _DOCUMENTARY_TABLE_PAGES: tuple[str, ...] = ("packetfilter", "ipalloc", "etherlan", "wmacauth")
 
 IPV4_PATTERN = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
@@ -104,11 +110,51 @@ RESERVATION_COLUMNS: Mapping[str, tuple[str, ...]] = {
 }
 
 
+def split_include(value: str | Sequence[str] | None) -> list[str]:
+    """Normalize a `--include` value (csv string or already-split list) to a list of page ids."""
+    if value is None:
+        return []
+    parts = value.split(",") if isinstance(value, str) else [part for name in value for part in name.split(",")]
+    return [name.strip() for name in parts if name.strip()]
+
+
+def resolve_include(value: str | Sequence[str] | None) -> tuple[str, ...]:
+    """`dump --include <csv|all>` -> the optional form pages to capture, in OPTIONAL_FORM_PAGES order.
+
+    Core page names are accepted and ignored (they are always captured); anything else is a usage error.
+    """
+    names = split_include(value)
+    if not names:
+        return ()
+    if len(names) == 1 and names[0].lower() == "all":
+        return OPTIONAL_FORM_PAGES
+    unknown = [name for name in names if name not in FORM_PAGES]
+    if unknown:
+        raise UsageError(
+            f"--include: unknown page(s) {', '.join(unknown)}; valid optional pages are "
+            f"{', '.join(OPTIONAL_FORM_PAGES)} (or all)"
+        )
+    return tuple(page for page in OPTIONAL_FORM_PAGES if page in names)
+
+
+def snapshot_pages_for(include: Iterable[str]) -> tuple[str, ...]:
+    """Pages `dump` fetches: every snapshot page except the optional form pages not included."""
+    included = set(include)
+    return tuple(page for page in SNAPSHOT_PAGES if page not in OPTIONAL_FORM_PAGES or page in included)
+
+
 def extract_snapshot(
-    pages: Mapping[str, ParsedPage], *, ts: str, router_host: str, all_clients: bool = False
+    pages: Mapping[str, ParsedPage],
+    *,
+    ts: str,
+    router_host: str,
+    all_clients: bool = False,
+    include: Iterable[str] = (),
 ) -> Snapshot:
+    included = set(include)
+    captured_forms = [page for page in FORM_PAGES if page in CORE_FORM_PAGES or page in included]
     forms: dict[str, dict[str, str]] = {}
-    for page in FORM_PAGES:
+    for page in captured_forms:
         parsed = pages.get(page)
         if parsed is not None:
             forms[page] = _form_values(parsed)
@@ -116,6 +162,9 @@ def extract_snapshot(
     for page in _DOCUMENTARY_TABLE_PAGES:
         parsed = pages.get(page)
         if parsed is None:
+            continue
+        # etherlan/wmacauth tables document an optional form page; they are only kept with it.
+        if page in OPTIONAL_FORM_PAGES and page not in included:
             continue
         rows = [dict(row) for row in parsed.tables]
         if page == "packetfilter":

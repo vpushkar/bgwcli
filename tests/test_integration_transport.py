@@ -204,7 +204,7 @@ def test_restore_plan_from_live_pages_executes_over_http_and_records_locations(g
 
     wanted = replace(live, services=[*live.services, SnapshotService("Extra", 7000, 7000, 7000, "UDP")])
     options = RestoreOptions()
-    steps = build_restore_plan(diff_snapshots(wanted, live, include_lan=False), wanted, pages, options)
+    steps = build_restore_plan(diff_snapshots(wanted, live), wanted, pages, options)
     assert [f"{s.page}:{s.kind}" for s in steps] == ["services:add-service", "packetfilter:skip"]
 
     execution = execute_restore(client, steps)

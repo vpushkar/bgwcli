@@ -65,8 +65,10 @@ from .session import (
     router_session_identity,
     with_router_session,
 )
-from .snapshot import SNAPSHOT_PAGES, extract_snapshot
-from .snapshot_diff import diff_snapshots
+from .snapshot import OPTIONAL_FORM_PAGES, Snapshot, extract_snapshot, snapshot_pages_for
+from .snapshot import resolve_include as resolve_dump_include
+from .snapshot_diff import diff_snapshots, pages_missing_from_dump
+from .snapshot_diff import resolve_include as resolve_restore_include
 from .sweep import SweepOptions, SweepProgressEvent, strip_large_payloads, sweep_router, write_sweep_artifacts
 from .types import ParsedPage
 
@@ -115,7 +117,9 @@ class Command:
     out_dir: str | None = None
     prune: bool = False
     all_clients: bool = False
-    include_lan: bool = False
+    # --include <csv|all>: dump = optional form pages to capture besides the core; diff/restore = the
+    # pages to compare/restore (None = everything present in the dump). Resolved per command.
+    include: list[str] | None = None
     exit_code: int = field(default=0, compare=False)
 
     def output(self, value: Any, table_printer: Callable[[], None]) -> None:
@@ -527,42 +531,65 @@ def _run_submit(client: Any, command: Command) -> None:
 
 
 def _run_dump(client: Any, command: Command) -> None:
-    parsed, failures = _fetch_snapshot_pages(client)
+    include = resolve_dump_include(command.include)
+    parsed, failures = _fetch_snapshot_pages(client, snapshot_pages_for(include))
     if failures:
         _report_fetch_failures(command, failures)
         return
-    snapshot = extract_snapshot(parsed, **_snapshot_meta(command), all_clients=command.all_clients)
+    snapshot = extract_snapshot(
+        parsed, **_snapshot_meta(command), all_clients=command.all_clients, include=include
+    )
     path = command.out_dir or str(default_dump_path())
     write_dump_file(path, snapshot)
     command.output(fmt.snapshot_summary_output(snapshot, path), lambda: fmt.print_snapshot_summary(snapshot, path))
 
 
+def _dump_optional_pages(dump: Snapshot) -> tuple[str, ...]:
+    """Optional form pages the dump captured: the only optional pages diff/restore fetch and compare."""
+    return tuple(page for page in OPTIONAL_FORM_PAGES if page in dump.forms)
+
+
+def _warn_missing_pages(missing: list[str]) -> None:
+    for page in missing:
+        sys.stderr.write(f"warning: page '{page}' is not present in the dump; nothing to compare/restore\n")
+
+
 def _run_diff(client: Any, command: Command) -> None:
     dump = read_dump_file(_require_arg(command, "dump file"))
-    parsed, failures = _fetch_snapshot_pages(client)
+    pages = resolve_restore_include(command.include)
+    missing = pages_missing_from_dump(dump, pages)
+    _warn_missing_pages(missing)
+    optional = _dump_optional_pages(dump)
+    parsed, failures = _fetch_snapshot_pages(client, snapshot_pages_for(optional))
     if failures:
         _report_fetch_failures(command, failures)
         return
-    live = extract_snapshot(parsed, **_snapshot_meta(command))
-    diff = diff_snapshots(dump, live, include_lan=command.include_lan)
+    live = extract_snapshot(parsed, **_snapshot_meta(command), include=optional)
+    diff = diff_snapshots(dump, live, pages=pages)
     command.exit_code = 0 if diff.identical else 1
-    command.output(fmt.display_diff(diff, command.options.include_secrets), lambda: fmt.print_snapshot_diff(diff))
+    command.output(
+        {**fmt.display_diff(diff, command.options.include_secrets), "missingPages": missing},
+        lambda: fmt.print_snapshot_diff(diff),
+    )
 
 
 def _run_restore(client: Any, command: Command) -> None:
     if command.commit and command.confirm != RESTORE_CONFIRM_TOKEN:
         raise UsageError(f"Refusing to restore. Re-run with --commit --confirm {RESTORE_CONFIRM_TOKEN}.")
     dump = read_dump_file(_require_arg(command, "dump file"))
-    parsed, failures = _fetch_snapshot_pages(client)
+    pages = resolve_restore_include(command.include)
+    missing = pages_missing_from_dump(dump, pages)
+    _warn_missing_pages(missing)
+    optional = _dump_optional_pages(dump)
+    fetch_pages = snapshot_pages_for(optional)
+    parsed, failures = _fetch_snapshot_pages(client, fetch_pages)
     if failures:
         _report_fetch_failures(command, failures)
         return
     include_secrets = command.options.include_secrets
-    restore_options = RestoreOptions(
-        prune=command.prune, include_lan=command.include_lan, include_secrets=include_secrets
-    )
-    live = extract_snapshot(parsed, **_snapshot_meta(command))
-    diff = diff_snapshots(dump, live, include_lan=command.include_lan)
+    restore_options = RestoreOptions(prune=command.prune, include_secrets=include_secrets, pages=pages)
+    live = extract_snapshot(parsed, **_snapshot_meta(command), include=optional)
+    diff = diff_snapshots(dump, live, pages=pages)
     steps = build_restore_plan(diff, dump, parsed, restore_options)
 
     if not command.commit:
@@ -573,16 +600,20 @@ def _run_restore(client: Any, command: Command) -> None:
             fmt.print_operation(plan)
 
         command.output(
-            {"steps": fmt.display_restore_steps(steps, include_secrets), "operation": fmt.operation_output(plan)},
+            {
+                "steps": fmt.display_restore_steps(steps, include_secrets),
+                "operation": fmt.operation_output(plan),
+                "missingPages": missing,
+            },
             print_plan,
         )
         return
 
     on_step = None if command.options.json else fmt.print_restore_step_result
     execution = execute_restore(client, steps, on_step)
-    after_parsed, after_failures = _fetch_snapshot_pages(client)
+    after_parsed, after_failures = _fetch_snapshot_pages(client, fetch_pages)
     after_diff = (
-        diff_snapshots(dump, extract_snapshot(after_parsed, **_snapshot_meta(command)), include_lan=command.include_lan)
+        diff_snapshots(dump, extract_snapshot(after_parsed, **_snapshot_meta(command), include=optional), pages=pages)
         if not after_failures
         else None
     )
@@ -606,6 +637,7 @@ def _run_restore(client: Any, command: Command) -> None:
             "diff": fmt.display_diff(after_diff, include_secrets) if after_diff is not None else None,
             "verificationFailures": fmt.summarize_fetch_failures(after_failures),
             "operation": fmt.operation_output(result),
+            "missingPages": missing,
         },
         print_result,
     )
@@ -745,10 +777,12 @@ def _run_sweep(client: Any, command: Command, *, force_compact: bool = False) ->
     return [strip_large_payloads(page) for page in pages]
 
 
-def _fetch_snapshot_pages(client: Any) -> tuple[dict[str, ParsedPage], list[ParsedPageResult]]:
+def _fetch_snapshot_pages(
+    client: Any, pages: Sequence[str]
+) -> tuple[dict[str, ParsedPage], list[ParsedPageResult]]:
     parsed: dict[str, ParsedPage] = {}
     failures: list[ParsedPageResult] = []
-    for page in SNAPSHOT_PAGES:
+    for page in pages:
         result = fetch_parsed_page(client, page, include_secrets=True)
         if result.ok and result.parsed is not None:
             parsed[page] = result.parsed
@@ -856,7 +890,13 @@ _COMMAND_OPTIONS: tuple[tuple[tuple[str, ...], dict[str, Any]], ...] = (
             "help": "dump: keep every client row in the documentary IP Allocation table (default: Fixed only)",
         },
     ),
-    (("--include-lan",), {"action": _FLAG, "help": "Include the LAN (etherlan) form in diff/restore"}),
+    (
+        ("--include",),
+        {
+            "metavar": "<csv|all>",
+            "help": "dump: optional pages to capture besides the core; diff/restore: pages to compare/restore",
+        },
+    ),
 )
 
 
@@ -903,9 +943,9 @@ _SUBCOMMANDS: tuple[tuple[str, str], ...] = (
     ("set", "set <page> KEY=VALUE...: dry-run config mutation; --commit --confirm TOKEN to POST."),
     ("submit", "submit <page> <button> [KEY=VALUE...]: dry-run a form/button submit."),
     ("status", "Core status pages."),
-    ("dump", "dump [--out <file>]: capture a configuration snapshot to an owner-only JSON file."),
-    ("diff", "diff <dumpfile> [--include-lan]: compare a dump with the live router."),
-    ("restore", "restore <dumpfile> [--prune] [--include-lan] [--commit --confirm RESTORE]."),
+    ("dump", "dump [--out <file>] [--include <csv|all>]: capture a configuration snapshot to an owner-only JSON file."),
+    ("diff", "diff <dumpfile> [--include <csv|all>]: compare a dump with the live router."),
+    ("restore", "restore <dumpfile> [--prune] [--include <csv|all>] [--commit --confirm RESTORE]."),
     ("help", "Show the full help text."),
     ("fixtures-capture", argparse.SUPPRESS),
 )
@@ -967,6 +1007,9 @@ def parse_args(argv: list[str]) -> Command:
     pages = None
     if opt("pages") is not None:
         pages = [page.strip() for page in opt("pages").split(",") if page.strip()]
+    include = None
+    if opt("include") is not None:
+        include = [page.strip() for page in opt("include").split(",") if page.strip()]
 
     return Command(
         name=name,
@@ -986,7 +1029,7 @@ def parse_args(argv: list[str]) -> Command:
         out_dir=opt("out_dir"),
         prune=opt("prune", False),
         all_clients=opt("all_clients", False),
-        include_lan=opt("include_lan", False),
+        include=include,
     )
 
 
@@ -1104,29 +1147,40 @@ Diagnostics operations:
     Actually send the diagnostic request. traceroute/nslookup use the same DIAG token.
 
 Backup:
-  bgwcli dump [--out <file>] [--all-clients]
-    The documentary IP Allocation table keeps only Fixed Allocation rows by default;
-    --all-clients keeps every client row.
-    Capture services, NAT/Gaming forwards, host reservations, Advanced Wi-Fi
-    and firewall/Wi-Fi/LAN forms to an owner-only JSON file. For dump, --out
-    is the output FILE path.
+  bgwcli dump [--out <file>] [--include <csv|all>] [--all-clients]
+    Capture services, NAT/Gaming forwards, host reservations and the core form
+    pages Firewall Advanced (dosprotect) and Advanced Wi-Fi (wconfig) to an
+    owner-only JSON file. For dump, --out is the output FILE path.
+    --include adds optional form pages: etherlan (LAN ports), dhcpserver
+    (Subnets & DHCP), ippass (IP Passthrough), wmacauth (Wi-Fi MAC filtering
+    modes); `bgwcli dump --include all` captures every page and is the
+    recommended baseline for factory-reset recovery. Pages not included are
+    not fetched. The documentary IP Allocation table keeps only Fixed
+    Allocation rows by default; --all-clients keeps every client row.
 
-  bgwcli diff <dumpfile> [--include-lan]
+  bgwcli diff <dumpfile> [--include <csv|all>]
     Compare a dump with the live router. Exit 0 identical, 1 different, 2 error.
+    Every section and form page present in the dump is compared; --include
+    restricts that to the listed page ids (services, apphosting, ipalloc,
+    dosprotect, wconfig, etherlan, dhcpserver, ippass, wmacauth). A requested
+    page the dump never captured prints a warning on stderr and is skipped.
 
-  bgwcli restore <dumpfile> [--prune] [--include-lan]
+  bgwcli restore <dumpfile> [--prune] [--include <csv|all>]
     Dry-run the plan that replays missing services/forwards/reservations and
     changed forms, in order: services -> forwards -> reservations -> firewall
-    advanced -> Advanced Wi-Fi -> LAN.
+    advanced -> Advanced Wi-Fi -> Wi-Fi MAC filtering -> IP Passthrough -> LAN
+    ports -> Subnets & DHCP (last: a LAN address change moves the gateway and
+    the step carries a warning). --include restricts the plan like diff; a
+    requested page missing from the dump becomes a skip step.
 
   bgwcli restore <dumpfile> --commit --confirm RESTORE
     Apply the plan, then re-diff. Exit 0 once everything in the dump is present
     on the router (router-only extras are left alone unless --prune is given).
     Note: reservations are never released by --prune, only added or corrected.
-    LAN settings stay untouched without --include-lan. Removes are deferred on
-    any page that still has an add to make, so adds and prunes may need two runs.
-    A step shown as applied means the router accepted the POST; the diff printed
-    at the end is the authoritative success signal.
+    Optional pages are only restored when the dump captured them. Removes are
+    deferred on any page that still has an add to make, so adds and prunes may
+    need two runs. A step shown as applied means the router accepted the POST;
+    the diff printed at the end is the authoritative success signal.
 
 Global options:
   --host <host>             Router host. Default: BGW_HOST, ROUTER_IP, or 192.168.1.254
@@ -1138,7 +1192,7 @@ Global options:
   --out <dir>               Write sweep raw HTML and parsed JSON artifacts to disk. For dump it is a file path
   --prune                   Let restore remove router services/forwards missing from the dump
                             (deferred on pages that still have an add pending)
-  --include-lan             Include the LAN (etherlan) form in diff/restore
+  --include <csv|all>       dump: optional pages to capture besides the core; diff/restore: pages to compare/restore
   --timeout <ms>            Request timeout. Default: 15000
   --delay <ms>              Delay between audit/scan/sweep requests. Default: 750
   --limit <n>               Limit displayed rows. Default: 20

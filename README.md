@@ -118,9 +118,9 @@ Global options are accepted before or after the command name (`bgwcli --json che
 
 | Command | What it does |
 | --- | --- |
-| `bgwcli dump [--out <file>] [--all-clients]` | Captures custom services, NAT/Gaming forwards (device label resolved to MAC), host reservations (Fixed Allocation rows), and the form pages Firewall Advanced (`dosprotect`), Advanced Wi-Fi (`wconfig`), LAN ports (`etherlan`), Subnets & DHCP (`dhcpserver`), IP Passthrough (`ippass`) and Wi-Fi MAC Filtering modes (`wmacauth`) to an owner-only JSON file. Packet-filter rules and the MAC filter list are recorded as documentary tables only. |
-| `bgwcli diff <dumpfile> [--include-lan]` | Read-only comparison of the dump with the live router. Exit 0 when identical, 1 when different, 2 on error. |
-| `bgwcli restore <dumpfile> [--prune] [--include-lan] [--commit --confirm RESTORE]` | Dry-run by default: prints the ordered plan (services → forwards → reservations → firewall advanced → Advanced Wi-Fi → LAN). Only adds what is missing and only saves forms whose values differ. `--prune` also removes router rows not in the dump, but a page that still has an addition to make has its removes deferred, so adds and prunes can need two runs. `--prune` never releases a reservation back to DHCP — extra reservations are reported by `diff` only, releasing one stays a manual UI action. Live runs need both `--commit` and `--confirm RESTORE`; the run stops at the first rejected POST and ends with a diff. A step marked `applied` means the router accepted the POST — the convergence diff printed at the end is the authoritative success signal. Packet-filter rules are captured as text only and never restored. |
+| `bgwcli dump [--out <file>] [--include <csv\|all>] [--all-clients]` | Captures custom services, NAT/Gaming forwards (device label resolved to MAC), host reservations (Fixed Allocation rows) and the core form pages Firewall Advanced (`dosprotect`) and Advanced Wi-Fi (`wconfig`) to an owner-only JSON file. `--include` adds the optional form pages LAN ports (`etherlan`), Subnets & DHCP (`dhcpserver`), IP Passthrough (`ippass`) and Wi-Fi MAC Filtering modes (`wmacauth`); `--include all` captures every page. Pages not included are not fetched. Packet-filter rules and the MAC filter list are recorded as documentary tables only. |
+| `bgwcli diff <dumpfile> [--include <csv\|all>]` | Read-only comparison of the dump with the live router: every section and every form page present in the dump. `--include` restricts the comparison to the listed page ids (`services`, `apphosting`, `ipalloc` and the form page ids); a requested page the dump never captured prints a warning on stderr and is skipped. Exit 0 when identical, 1 when different, 2 on error. |
+| `bgwcli restore <dumpfile> [--prune] [--include <csv\|all>] [--commit --confirm RESTORE]` | Dry-run by default: prints the ordered plan (services → forwards → reservations → firewall advanced → Advanced Wi-Fi → Wi-Fi MAC filtering → IP Passthrough → LAN ports → Subnets & DHCP). Only adds what is missing and only saves forms whose values differ; optional pages are restored only when the dump captured them, and `--include` restricts the plan like `diff` (a requested page missing from the dump becomes a `skip` step). `--prune` also removes router rows not in the dump, but a page that still has an addition to make has its removes deferred, so adds and prunes can need two runs. `--prune` never releases a reservation back to DHCP — extra reservations are reported by `diff` only, releasing one stays a manual UI action. Live runs need both `--commit` and `--confirm RESTORE`; the run stops at the first rejected POST and ends with a diff. A step marked `applied` means the router accepted the POST — the convergence diff printed at the end is the authoritative success signal. Packet-filter rules are captured as text only and never restored. |
 
 Dump files are schema 2 JSON, byte-compatible with the TypeScript CLI: a dump written by either tool
 diffs clean and restores with the other. Schema-1 dumps are refused on load.
@@ -152,20 +152,20 @@ printf '%s' "$CODE" | bgwcli dump --out ~/bgw-baseline.json --access-code-stdin
 **1. Take a baseline and verify it matches the router**
 
 ```
-$ bgwcli dump --out ~/bgw-baseline.json
+$ bgwcli dump --include all --out ~/bgw-baseline.json
 Dump written: /Users/you/bgw-baseline.json
 Firmware: 6.35.8
 Services: 4
 Forwards: 4
 Reservations: 4
-Forms: dosprotect, wconfig, etherlan
-Tables: packetfilter, ipalloc, etherlan
+Forms: dosprotect, wconfig, etherlan, dhcpserver, ippass, wmacauth
+Tables: packetfilter, ipalloc, etherlan, wmacauth
 
 $ bgwcli diff ~/bgw-baseline.json
 No differences.
 ```
 
-The file is mode 0600 and contains Wi-Fi keys in clear text; treat it like a credential. Keep `--all-clients` off unless you want DHCP-only devices recorded in the documentary IP Allocation table.
+The file is mode 0600 and contains Wi-Fi keys in clear text; treat it like a credential. Without `--include`, only the core pages (`dosprotect`, `wconfig`) are captured — see "Choosing what to back up and restore" below. Keep `--all-clients` off unless you want DHCP-only devices recorded in the documentary IP Allocation table.
 
 **2. What is in the file**
 
@@ -243,6 +243,10 @@ mask, DHCP range and lease). What it does not cover: the device access code (bac
 value), packet-filter rules and the MAC filter list (both recorded in the dump under `tables`, re-enter
 them by hand), Public Subnet, Remote Access, Voice.
 
+The baseline for this scenario is `bgwcli dump --include all`: only a dump that captured the optional
+pages can put Subnets & DHCP, IP Passthrough, MAC-filtering modes and the LAN ports back (a core-only
+dump restores services, forwards, reservations, Firewall Advanced and Advanced Wi-Fi).
+
 ```
 export BGW_ACCESS_CODE='<sticker code>'          # a reset restores the printed access code
 bgwcli check && bgwcli auth
@@ -263,32 +267,40 @@ closing diff cannot re-fetch it, and you reconnect to the new address before run
 Run the recovery from a wired client. Afterwards take a fresh dump as the new baseline, since the
 firmware changed.
 
-### The `--include-lan` flag
+### Choosing what to back up and restore
 
-`--include-lan` is an opt-in on `diff` and `restore` that adds the LAN Ethernet port settings page
-(`etherlan.ha`) to what is compared and written back. Everything else in the dump is always in scope;
-only this page is excluded unless you ask for it.
+`dump` always captures the sections `diff`/`restore` act on (custom services, NAT/Gaming forwards, fixed
+reservations) plus the two **core** form pages, Firewall Advanced (`dosprotect`) and Advanced Wi-Fi
+(`wconfig`). Four form pages are **optional** and only captured when named with `--include`:
 
-The page holds two settings per physical port, the configured media (speed/duplex) and the MDI-X mode:
+| Page id | Router page | Why it is opt-in |
+| --- | --- | --- |
+| `etherlan` | LAN Ethernet ports (speed/duplex, MDI-X per port) | Forcing a port mode can cut the wire you are connected through. Its write path has not been exercised live; run a first commit from a client that is not on the port being changed. |
+| `dhcpserver` | Subnets & DHCP (LAN address, mask, DHCP range, lease) | A different LAN address moves the gateway; the closing diff cannot re-fetch it. Still restored **last**, and the step carries a `warning:` line with the new address. |
+| `ippass` | IP Passthrough mode | Changes how the WAN address is handed to a LAN device. |
+| `wmacauth` | Wi-Fi MAC Filtering modes (allow/deny/none per network) | A `deny`/`allow` mode restored before the filter list exists can lock Wi-Fi clients out. The list itself is documentary. |
 
 ```
-enet1_port1_media=auto  enet1_port1_mdix=auto
-enet2_port2_media=auto  enet2_port2_mdix=auto
-enet3_port3_media=auto  enet3_port3_mdix=auto
-enet4_port4_media=auto  enet4_port4_mdix=auto
+bgwcli dump --out ~/bgw-baseline.json                           # core only
+bgwcli dump --include dhcpserver,ippass --out ~/bgw-baseline.json
+bgwcli dump --include all --out ~/bgw-baseline.json             # every page: the factory-reset baseline
 ```
 
-`dump` always captures these fields, so the file is complete either way. `diff` without the flag ignores
-them; with it, a port forced to, say, 100M full duplex on the router shows up as a difference, and
-`restore --include-lan --commit --confirm RESTORE` posts the page's Save to put the dumped values back.
+Pages not included are not fetched, and a page the dump did not capture is never compared or written:
+`diff` and `restore` act on everything present in the dump. `--include` on `diff`/`restore` narrows that to
+the listed page ids — `services`, `apphosting` (forwards), `ipalloc` (reservations) and the form page ids
+(`all` or no flag = everything in the dump):
 
-It is off by default for two reasons. Forcing a port speed or MDI-X mode is the one restore action that can
-cut the wire you are connected through, so it must never happen as a side effect of restoring firewall or
-Wi-Fi settings. And it is the only form page whose live restore has not been exercised: the `diff
---include-lan` path was verified against the gateway (no differences), the write path has not.
+```
+bgwcli diff ~/bgw-baseline.json --include services,apphosting
+bgwcli restore ~/bgw-baseline.json --include dhcpserver          # dry-run of that one page
+```
 
-Practical rule: leave it off. Use it only when you deliberately configured a port and want that in the
-round trip, and run the first `--include-lan` commit from a client that is not on the port being changed.
+A requested page the dump never captured is reported, not guessed at: `diff` and `restore` print
+`warning: page '<x>' is not present in the dump; nothing to compare/restore` on stderr, the restore plan
+shows a `skip` step for it, and `--json` output lists it under `missingPages`. An unknown page id is a
+usage error (exit 1) before the router is touched. Exit codes are unchanged: `diff` 0/1/2, `restore` 0 once
+everything selected from the dump is present on the router.
 
 ## Router Command Tree
 

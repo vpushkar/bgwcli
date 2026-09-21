@@ -31,6 +31,7 @@ from bgwcli.errors import SnapshotExtractionError
 from bgwcli.parser import parse_page
 from bgwcli.snapshot import (
     FORM_PAGES,
+    OPTIONAL_FORM_PAGES,
     SNAPSHOT_PAGES,
     UNCHECKED,
     SnapshotForward,
@@ -250,28 +251,30 @@ def full_pages() -> dict[str, ParsedPage]:
     return {page: parse_page(page, body, include_secrets=True) for page, body in html.items()}
 
 
+# The TypeScript CLI always captured etherlan; the Python dump only does with `--include etherlan`
+# (or `all`), which is what these byte-identity tests model.
 def test_dump_json_from_the_real_parser_is_byte_identical_to_the_typescript_dump():
-    snap = extract_snapshot(full_pages(), ts=TS, router_host=ROUTER_HOST)
+    snap = extract_snapshot(full_pages(), ts=TS, router_host=ROUTER_HOST, include=("etherlan",))
     assert dump_json_text(snap) == TS_DUMP_JSON
 
 
 def test_dump_file_round_trip_write_read_diff_identical(tmp_env):
-    snap = extract_snapshot(full_pages(), ts=TS, router_host=ROUTER_HOST)
+    snap = extract_snapshot(full_pages(), ts=TS, router_host=ROUTER_HOST, include=OPTIONAL_FORM_PAGES)
     path = tmp_env / "dumps" / "nested" / "bgw-dump.json"
     write_dump_file(path, snap)
     assert path.read_text(encoding="utf-8") == TS_DUMP_JSON
     loaded = read_dump_file(path)
     assert loaded == snap
-    assert diff_snapshots(loaded, snap, include_lan=True).identical is True
-    assert diff_snapshots(snap, loaded, include_lan=True).identical is True
+    assert diff_snapshots(loaded, snap).identical is True
+    assert diff_snapshots(snap, loaded).identical is True
 
 
 def test_a_dump_written_by_the_typescript_cli_loads_and_diffs_clean_against_a_live_python_snapshot(tmp_env):
     path = tmp_env / "ts-dump.json"
     path.write_text(TS_DUMP_JSON, encoding="utf-8")
     dump = read_dump_file(path)
-    live = extract_snapshot(full_pages(), ts="later", router_host=ROUTER_HOST)
-    diff = diff_snapshots(dump, live, include_lan=True)
+    live = extract_snapshot(full_pages(), ts="later", router_host=ROUTER_HOST, include=OPTIONAL_FORM_PAGES)
+    diff = diff_snapshots(dump, live)
     assert diff.identical is True
     assert diff.firmware_changed is False
     # Ordering inside forms is also the TS order (fields, then unchecked, then selects).
@@ -305,7 +308,7 @@ def test_diff_between_the_snapshot_pages_and_the_restore_pages_is_real_drift_not
         ts=TS,
         router_host=ROUTER_HOST,
     )
-    diff = diff_snapshots(dump, live, include_lan=False)
+    diff = diff_snapshots(dump, live)
     assert [s.name for s in diff.services.missing] == ["Mosh"]
     assert [s.name for s in diff.services.extra] == ["Stale"]
     assert [f.service for f in diff.forwards.missing] == ["Mosh"]

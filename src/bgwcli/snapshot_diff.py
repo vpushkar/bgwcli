@@ -6,6 +6,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Generic, TypeVar
 
+from .errors import UsageError
 from .snapshot import (
     FORM_PAGES,
     Snapshot,
@@ -15,9 +16,13 @@ from .snapshot import (
     forward_key,
     reservation_key,
     service_key,
+    split_include,
 )
 
 T = TypeVar("T")
+
+# Page ids `diff`/`restore --include` accept: the three table sections plus every form page.
+RESTORABLE_PAGES: tuple[str, ...] = ("services", "apphosting", "ipalloc", *FORM_PAGES)
 @dataclass(frozen=True)
 class FormFieldDiff:
     field: str
@@ -55,16 +60,48 @@ class SnapshotDiff:
     firmware_changed: bool
 
 
-def compared_form_pages(*, include_lan: bool) -> list[str]:
-    return [page for page in FORM_PAGES if include_lan or page != "etherlan"]
+def resolve_include(value: str | Sequence[str] | None) -> tuple[str, ...] | None:
+    """`diff`/`restore --include <csv|all>` -> restorable page ids in RESTORABLE_PAGES order.
+
+    None when nothing (or `all`) was asked for, meaning everything present in the dump.
+    """
+    names = split_include(value)
+    if not names or (len(names) == 1 and names[0].lower() == "all"):
+        return None
+    unknown = [name for name in names if name not in RESTORABLE_PAGES]
+    if unknown:
+        raise UsageError(
+            f"--include: unknown page(s) {', '.join(unknown)}; valid pages are {', '.join(RESTORABLE_PAGES)} (or all)"
+        )
+    return tuple(page for page in RESTORABLE_PAGES if page in names)
 
 
-def diff_snapshots(dump: Snapshot, live: Snapshot, *, include_lan: bool) -> SnapshotDiff:
-    services = _set_difference(dump.services, live.services, service_key)
-    forwards = _set_difference(dump.forwards, live.forwards, forward_key)
-    reservations = _diff_reservations(dump.reservations, live.reservations)
+def pages_missing_from_dump(dump: Snapshot, pages: Sequence[str] | None) -> list[str]:
+    """Requested form pages the dump never captured (the sections are never "missing")."""
+    if pages is None:
+        return []
+    return [page for page in FORM_PAGES if page in pages and page not in dump.forms]
+
+
+def _selected(pages: Sequence[str] | None, page: str) -> bool:
+    return pages is None or page in pages
+
+
+def diff_snapshots(dump: Snapshot, live: Snapshot, *, pages: Sequence[str] | None = None) -> SnapshotDiff:
+    """Compare every section and every form page PRESENT IN THE DUMP; `pages` narrows that to a selection."""
+    services = (
+        _set_difference(dump.services, live.services, service_key) if _selected(pages, "services") else EntryDiff()
+    )
+    forwards = (
+        _set_difference(dump.forwards, live.forwards, forward_key) if _selected(pages, "apphosting") else EntryDiff()
+    )
+    reservations = (
+        _diff_reservations(dump.reservations, live.reservations) if _selected(pages, "ipalloc") else ReservationDiff()
+    )
     forms: dict[str, list[FormFieldDiff]] = {}
-    for page in compared_form_pages(include_lan=include_lan):
+    for page in FORM_PAGES:
+        if not _selected(pages, page):
+            continue
         dump_form = dump.forms.get(page)
         live_form = live.forms.get(page)
         # A dump cannot claim a page it never captured. Schema-1 dumps predate `forms.wconfig`, so

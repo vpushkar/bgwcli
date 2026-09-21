@@ -30,7 +30,7 @@ from .snapshot import (
     SnapshotService,
     find_column,
 )
-from .snapshot_diff import FormFieldDiff, SnapshotDiff, compared_form_pages
+from .snapshot_diff import FormFieldDiff, SnapshotDiff, pages_missing_from_dump
 from .types import ParsedPage
 
 RestoreStepKind = Literal["add-service", "add-forward", "remove-service", "remove-forward", "reserve", "form", "skip"]
@@ -75,8 +75,10 @@ class RestoreStep:
 @dataclass(frozen=True)
 class RestoreOptions:
     prune: bool = False
-    include_lan: bool = False
     include_secrets: bool = False
+    # Restorable page ids selected with `--include`; None plans every section and every form page
+    # present in the dump. Sections: services, apphosting (forwards), ipalloc (reservations).
+    pages: tuple[str, ...] | None = None
 
 
 # The single shape for the follow-up Save POST, shared by the dry-run printer and the executor.
@@ -126,9 +128,10 @@ def build_restore_plan(
     options: RestoreOptions,
 ) -> list[RestoreStep]:
     steps: list[RestoreStep] = []
-    # Only plan form saves for the pages the diff actually compared, so restore can never write a
-    # page diff deliberately left out (etherlan without --include-lan).
-    compared_forms = set(compared_form_pages(include_lan=options.include_lan))
+    # The plan honours the --include selection itself (not only through the diff it was handed), so
+    # restore can never write a page the operator deliberately left out.
+    selected = options.pages
+    missing = set(pages_missing_from_dump(dump, selected))
 
     def push(step: RestoreStep) -> None:
         if step.page in DANGEROUS_PAGES:
@@ -136,33 +139,56 @@ def build_restore_plan(
         steps.append(replace(step, order=len(steps) + 1))
 
     for page in RESTORE_PAGE_ORDER:
+        if page in missing:
+            push(
+                RestoreStep(
+                    order=_UNORDERED,
+                    kind="skip",
+                    page=page,
+                    description=f"page '{page}' requested with --include but not present in the dump",
+                )
+            )
+            continue
+        # Section removes are planned under apphosting; with a selection, services removes still
+        # need the apphosting branch to run when only `services` is selected (guarded below).
+        if selected is not None and page not in selected and (page != "apphosting" or "services" not in selected):
+            continue
         if page == "services":
             for service in diff.services.missing:
                 push(_add_service_step(service, live_pages, options))
             # Service removes are deferred until after the apphosting removes: the gateway silently
             # rejects deleting a custom service that still has a forward (observed live 2026-09-19).
         elif page == "apphosting":
+            forwards_selected = selected is None or "apphosting" in selected
             pending_services = {s.service_name or "" for s in steps if s.kind == "add-service" and s.blocked is None}
-            for forward in diff.forwards.missing:
-                push(_forward_step(forward, live_pages, options, pending_services))
+            if forwards_selected:
+                for forward in diff.forwards.missing:
+                    push(_forward_step(forward, live_pages, options, pending_services))
             if options.prune:
-                forward_removes = [
-                    _remove_step(page, "remove-forward", f.service, live_pages, options, f.device_label)
-                    for f in diff.forwards.extra
-                ]
-                for step in _apply_remove_limit(_block_removes_behind_adds(forward_removes, steps, page)):
-                    push(step)
-                service_removes = [
-                    _remove_step("services", "remove-service", s.name, live_pages, options) for s in diff.services.extra
-                ]
-                for step in _apply_remove_limit(_block_removes_behind_adds(service_removes, steps, "services")):
-                    push(step)
+                if forwards_selected:
+                    forward_removes = [
+                        _remove_step(page, "remove-forward", f.service, live_pages, options, f.device_label)
+                        for f in diff.forwards.extra
+                    ]
+                    for step in _apply_remove_limit(_block_removes_behind_adds(forward_removes, steps, page)):
+                        push(step)
+                if selected is None or "services" in selected:
+                    service_removes = [
+                        _remove_step("services", "remove-service", s.name, live_pages, options)
+                        for s in diff.services.extra
+                    ]
+                    for step in _apply_remove_limit(_block_removes_behind_adds(service_removes, steps, "services")):
+                        push(step)
         elif page == "ipalloc":
             for reservation in diff.reservations.missing:
                 push(_reserve_step(reservation, None, live_pages))
             for change in diff.reservations.changed:
                 push(_reserve_step(SnapshotReservation(mac=change.mac, ip=change.dump_ip), change.live_ip, live_pages))
         elif page == "packetfilter":
+            # Documentary-only note; with an explicit selection (packetfilter is not restorable) it
+            # would be noise, so it is only emitted for a full plan.
+            if selected is not None:
+                continue
             rows = len(dump.tables.get("packetfilter", []))
             push(
                 RestoreStep(
@@ -173,8 +199,6 @@ def build_restore_plan(
                 )
             )
         else:
-            if page not in compared_forms:
-                continue
             changes = diff.forms.get(page)
             if not changes:
                 continue

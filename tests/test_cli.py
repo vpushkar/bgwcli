@@ -160,9 +160,12 @@ def test_help_explains_operation_safety_and_high_value_commands(capsys, argv):
         "bgwcli session status | clear-cache", "--include-parsed", "--pages <csv>", "--out <dir>",
         "--wait-for-session", "Operations are dry-run by default:", "Diagnostics operations:",
         "--access-code-stdin", "Fallbacks are intentionally narrow", "dump [--out <file>]", "diff <dumpfile>",
-        "restore <dumpfile>", "--confirm RESTORE", "--prune", "--include-lan", "reservations are never released",
+        "restore <dumpfile>", "--confirm RESTORE", "--prune", "--include <csv|all>", "dump --include all",
+        "reservations are never released",
     ]:
         assert needle in out, needle
+    # The only --include* options are the page selector and the two pre-existing global flags.
+    assert set(re.findall(r"--include(?:-\w+)?", out)) == {"--include", "--include-secrets", "--include-parsed"}
     assert "bgw " not in out.replace("bgwcli ", "")
 
 
@@ -659,7 +662,10 @@ def live_pages():
 def snapshot_fetcher(monkeypatch, fake):
     holder = {"pages": live_pages()}
 
+    holder["fetched"] = []
+
     def fetch(client, page, include_secrets=False):
+        holder["fetched"].append(page)
         parsed = holder["pages"].get(page)
         if parsed is None:
             return ParsedPageResult(page, False, error=f"{page}.ha timed out")
@@ -746,7 +752,8 @@ def test_restore_dry_run_plan(capsys, fake, snapshot_fetcher, tmp_path):
 
     code, payload, _ = run_json(capsys, ["restore", str(out), "--json"])
     assert code == 0
-    assert set(payload) == {"steps", "operation"}
+    assert set(payload) == {"steps", "operation", "missingPages"}
+    assert payload["missingPages"] == []
     kinds = [step["kind"] for step in payload["steps"]]
     assert "add-service" in kinds and "add-forward" in kinds
     assert all("rawPayload" not in step for step in payload["steps"])
@@ -766,7 +773,7 @@ def test_restore_commit_posts_and_exits_1_when_not_converged(capsys, fake, snaps
 
     code, payload, err = run_json(capsys, ["restore", str(out), "--commit", "--confirm", "RESTORE", "--json"])
     assert code == 1  # the fake router never changes, so the re-diff still shows Mosh missing
-    assert set(payload) == {"execution", "diff", "verificationFailures", "operation"}
+    assert set(payload) == {"execution", "diff", "verificationFailures", "operation", "missingPages"}
     assert payload["execution"]["steps"][0]["status"] == "applied"
     assert payload["execution"]["steps"][0]["location"] is None
     assert payload["diff"]["identical"] is False and payload["verificationFailures"] == []
@@ -874,6 +881,109 @@ def test_dump_defaults_to_fixed_rows_and_all_clients_flag_keeps_dhcp_rows(capsys
     assert default["reservations"] == everything["reservations"]
     code, text, _ = run(capsys, ["help"])
     assert "--all-clients" in text and "--reservations-only" not in text
+
+
+def test_dump_captures_core_pages_only_unless_include_names_optional_pages(capsys, fake, snapshot_fetcher, tmp_path):
+    core, some, everything = tmp_path / "core.json", tmp_path / "some.json", tmp_path / "all.json"
+    code, payload, _ = run_json(capsys, ["dump", "--out", str(core), "--json"])
+    assert code == 0 and payload["forms"] == ["dosprotect", "wconfig"]
+    assert json.loads(core.read_text())["forms"].keys() == {"dosprotect", "wconfig"}
+    # Optional pages are never fetched when not included.
+    assert not {"etherlan", "dhcpserver", "ippass", "wmacauth"} & set(snapshot_fetcher["fetched"])
+    assert "packetfilter" in snapshot_fetcher["fetched"] and "ipalloc" in snapshot_fetcher["fetched"]
+
+    snapshot_fetcher["fetched"].clear()
+    code, payload, _ = run_json(capsys, ["dump", "--out", str(some), "--include", "dhcpserver", "--json"])
+    assert code == 0 and payload["forms"] == ["dosprotect", "wconfig", "dhcpserver"]
+    assert "dhcpserver" in snapshot_fetcher["fetched"] and "etherlan" not in snapshot_fetcher["fetched"]
+
+    code, payload, _ = run_json(capsys, ["dump", "--out", str(everything), "--include", "all", "--json"])
+    assert code == 0
+    assert payload["forms"] == ["dosprotect", "wconfig", "etherlan", "dhcpserver", "ippass", "wmacauth"]
+    assert "etherlan" in payload["tables"] and "wmacauth" in payload["tables"]
+    code, text, _ = run(capsys, ["dump", "--out", str(tmp_path / "t.json"), "--include", "ippass,wmacauth"])
+    assert code == 0 and "Forms: dosprotect, wconfig, ippass, wmacauth" in text
+
+
+def test_dump_rejects_an_unknown_include_page_before_touching_the_router(capsys, fake, snapshot_fetcher, tmp_path):
+    code, _, err = run(capsys, ["dump", "--out", str(tmp_path / "d.json"), "--include", "dhcpserver,nope"])
+    assert code == 1 and "nope" in err and "etherlan, dhcpserver, ippass, wmacauth" in err
+    assert snapshot_fetcher["fetched"] == [] and not (tmp_path / "d.json").exists()
+
+
+def test_diff_include_restricts_the_comparison_and_warns_about_pages_missing_from_the_dump(
+    capsys, fake, snapshot_fetcher, tmp_path
+):
+    out = tmp_path / "dump.json"
+    assert run(capsys, ["dump", "--out", str(out)])[0] == 0  # core only: no dhcpserver in the dump
+    snapshot_fetcher["pages"]["services"] = services_page(rows=[("custom_ssh", "2483-2483", "22", "TCP")])
+
+    code, _, err = run(capsys, ["diff", str(out)])
+    assert code == 1 and err == ""
+    code, text, err = run(capsys, ["diff", str(out), "--include", "dosprotect"])
+    assert code == 0 and text == "No differences.\n" and err == ""
+    code, text, err = run(capsys, ["diff", str(out), "--include", "services,dosprotect"])
+    assert code == 1 and "- missing service Mosh" in text
+
+    snapshot_fetcher["fetched"].clear()
+    code, payload, err = run_json(capsys, ["diff", str(out), "--include", "dhcpserver,wconfig", "--json"])
+    assert code == 0 and payload["identical"] is True
+    assert payload["missingPages"] == ["dhcpserver"]
+    assert err == "warning: page 'dhcpserver' is not present in the dump; nothing to compare/restore\n"
+    # Optional pages the dump did not capture are never fetched for a diff.
+    assert "dhcpserver" not in snapshot_fetcher["fetched"] and "etherlan" not in snapshot_fetcher["fetched"]
+    assert "wconfig" in snapshot_fetcher["fetched"]
+
+    code, payload, err = run_json(capsys, ["diff", str(out), "--json"])
+    assert payload["missingPages"] == [] and err == ""
+    code, _, err = run(capsys, ["diff", str(out), "--include", "packetfilter"])
+    assert code == 1 and "packetfilter" in err and "Unknown" not in err and snapshot_fetcher["fetched"]
+
+
+def test_diff_and_restore_compare_optional_pages_the_dump_captured(capsys, fake, snapshot_fetcher, tmp_path):
+    out = tmp_path / "dump.json"
+    assert run(capsys, ["dump", "--out", str(out), "--include", "dhcpserver"])[0] == 0
+    snapshot_fetcher["pages"]["dhcpserver"] = page(
+        "dhcpserver", title="Subnets & DHCP", selects=[select("dhcp", ["off", "on"], selected="off")],
+        buttons=[button("Save", "Save")],
+    )
+    snapshot_fetcher["fetched"].clear()
+    code, payload, err = run_json(capsys, ["diff", str(out), "--json"])
+    assert code == 1 and payload["forms"]["dhcpserver"] == [{"field": "dhcp", "dump": "on", "live": "off"}]
+    assert "dhcpserver" in snapshot_fetcher["fetched"] and "ippass" not in snapshot_fetcher["fetched"]
+
+    code, payload, err = run_json(capsys, ["restore", str(out), "--include", "dhcpserver", "--json"])
+    assert code == 0 and payload["missingPages"] == [] and err == ""
+    assert [(s["page"], s["kind"]) for s in payload["steps"]] == [("dhcpserver", "form")]
+    assert payload["steps"][0]["warning"] and "gateway" in payload["steps"][0]["warning"]
+
+
+def test_restore_include_plans_a_skip_step_for_a_page_missing_from_the_dump(capsys, fake, snapshot_fetcher, tmp_path):
+    out = tmp_path / "dump.json"
+    assert run(capsys, ["dump", "--out", str(out)])[0] == 0
+    snapshot_fetcher["pages"]["services"] = services_page(rows=[("custom_ssh", "2483-2483", "22", "TCP")])
+
+    code, payload, err = run_json(capsys, ["restore", str(out), "--include", "dhcpserver", "--json"])
+    assert code == 0
+    assert payload["missingPages"] == ["dhcpserver"]
+    assert err == "warning: page 'dhcpserver' is not present in the dump; nothing to compare/restore\n"
+    assert [(s["page"], s["kind"]) for s in payload["steps"]] == [("dhcpserver", "skip")]
+    assert payload["steps"][0]["description"] == "page 'dhcpserver' requested with --include but not present in the dump"
+    assert payload["operation"]["dryRun"] is True and fake["client"].posts == []
+
+    code, text, err = run(capsys, ["restore", str(out), "--include", "dhcpserver"])
+    assert code == 0 and "skip" in text and "not present in the dump" in text
+    assert err.startswith("warning: page 'dhcpserver' is not present in the dump")
+    assert "add-service" not in text  # services were not selected
+
+    # A committed run with a selection only posts the selected pages and reports the missing ones too.
+    code, payload, err = run_json(
+        capsys, ["restore", str(out), "--include", "dosprotect,dhcpserver", "--commit", "--confirm", "RESTORE", "--json"]
+    )
+    assert code == 0 and payload["missingPages"] == ["dhcpserver"] and payload["diff"]["identical"] is True
+    assert fake["client"].posts == []  # dosprotect is identical, dhcpserver skipped, services out of scope
+    code, _, err = run(capsys, ["restore", str(out), "--include", "bogus"])
+    assert code == 1 and "bogus" in err
 
 
 def test_diagnostics_commit_polls_the_diag_page_when_the_post_answers_with_a_redirect(capsys, fake, monkeypatch):

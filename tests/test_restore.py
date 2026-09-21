@@ -53,7 +53,7 @@ from bgwcli.snapshot_diff import (
 )
 from bgwcli.types import ParsedPage
 
-OPTIONS = RestoreOptions(prune=False, include_lan=False, include_secrets=False)
+OPTIONS = RestoreOptions(prune=False, include_secrets=False)
 PRUNE = replace(OPTIONS, prune=True)
 
 CUSTOM_SSH = ("custom_ssh", "2483-2483", "22", "TCP")
@@ -113,9 +113,7 @@ def live_snapshot(pages: dict[str, ParsedPage]) -> Snapshot:
 
 
 def plan(snap: Snapshot, pages: dict[str, ParsedPage], options: RestoreOptions = OPTIONS) -> list[RestoreStep]:
-    return build_restore_plan(
-        diff_snapshots(snap, live_snapshot(pages), include_lan=options.include_lan), snap, pages, options
-    )
+    return build_restore_plan(diff_snapshots(snap, live_snapshot(pages), pages=options.pages), snap, pages, options)
 
 
 def find(steps: list[RestoreStep], kind: str, contains: str | None = None) -> RestoreStep:
@@ -184,7 +182,6 @@ def test_build_restore_plan_refuses_dangerous_pages(monkeypatch):
     # The page order is fixed, so this can only be reached by tampering with it; the guard still
     # has to hold because a plan step for a dangerous page must never become postable.
     monkeypatch.setattr(restore, "RESTORE_PAGE_ORDER", (*RESTORE_PAGE_ORDER, "restart"))
-    monkeypatch.setattr(restore, "compared_form_pages", lambda include_lan: ["dosprotect", "wconfig", "restart"])
     diff = SnapshotDiff(
         identical=False,
         services=EntryDiff(),
@@ -346,7 +343,7 @@ def test_remove_of_a_row_that_vanished_is_blocked():
     pages = live_pages()
     live = live_snapshot(pages)
     stale_gone = {**pages, "services": services_page(rows=[CUSTOM_SSH])}
-    diff = diff_snapshots(dump_no_service_adds(), live, include_lan=False)
+    diff = diff_snapshots(dump_no_service_adds(), live)
     remove = find(build_restore_plan(diff, dump_no_service_adds(), stale_gone, PRUNE), "remove-service")
     assert remove.blocked == "no Remove button found for row 'Stale'"
 
@@ -584,14 +581,20 @@ def test_c1_a_blocked_for_pending_adds_remove_does_not_consume_the_one_remove_pe
         assert step.blocked is not None and "pending adds" in step.blocked
 
 
-def test_i7_the_etherlan_form_is_not_planned_without_include_lan():
-    snap = replace(dump(), forms={**dump().forms, "etherlan": {"lan_mtu": "1400"}})
-    assert not any(s.page == "etherlan" for s in plan(snap, live_pages()))
+def test_i7_the_etherlan_form_is_not_planned_when_the_dump_did_not_capture_it():
+    assert "etherlan" not in dump().forms
+    assert not any(s.page == "etherlan" for s in plan(dump(), live_pages()))
 
 
-def test_i7_include_lan_plans_exactly_one_etherlan_form_save():
+def test_i7_the_etherlan_form_is_not_planned_when_pages_leaves_it_out():
     snap = replace(dump(), forms={**dump().forms, "etherlan": {"lan_mtu": "1400"}})
-    lan_steps = [s for s in plan(snap, live_pages(), replace(OPTIONS, include_lan=True)) if s.page == "etherlan"]
+    steps = plan(snap, live_pages(), replace(OPTIONS, pages=("services", "dosprotect")))
+    assert not any(s.page == "etherlan" for s in steps)
+
+
+def test_i7_an_etherlan_form_captured_in_the_dump_plans_exactly_one_form_save():
+    snap = replace(dump(), forms={**dump().forms, "etherlan": {"lan_mtu": "1400"}})
+    lan_steps = [s for s in plan(snap, live_pages()) if s.page == "etherlan"]
     assert len(lan_steps) == 1
     assert lan_steps[0].kind == "form"
     assert lan_steps[0].button == "Save"
@@ -1168,7 +1171,7 @@ def test_identical_unchecked_state_on_both_sides_is_not_a_difference():
     wanted = replace(
         dump_no_service_adds(), forwards=live.forwards, forms={"dosprotect": {"reflexive": "on", "algsip": UNCHECKED}}
     )
-    assert diff_snapshots(wanted, live, include_lan=False).forms == {}
+    assert diff_snapshots(wanted, live).forms == {}
 
 
 def test_a_text_field_whose_dump_value_is_literally_unchecked_is_assigned_not_omitted():
@@ -1189,6 +1192,31 @@ def test_a_text_field_whose_dump_value_is_literally_unchecked_is_assigned_not_om
     assert form_step.raw_payload == {"display_label": UNCHECKED, "Save": "Save"}
 
 
+def test_pages_restricts_the_plan_to_the_selected_sections_and_pages():
+    only_dos = plan(dump(), live_pages(), replace(OPTIONS, pages=("dosprotect",)))
+    assert [f"{s.page}:{s.kind}" for s in only_dos] == ["dosprotect:form"]
+    only_services = plan(dump(), live_pages(), replace(OPTIONS, pages=("services",)))
+    assert [f"{s.page}:{s.kind}" for s in only_services] == ["services:add-service"]
+    only_forwards = plan(dump(), live_pages(), replace(PRUNE, pages=("apphosting",)))
+    assert {s.kind for s in only_forwards} <= {"add-forward", "remove-forward"} and only_forwards
+    # The plan honours the selection even when handed an unrestricted diff.
+    unrestricted = diff_snapshots(dump(), live_snapshot(live_pages()))
+    steps = build_restore_plan(unrestricted, dump(), live_pages(), replace(OPTIONS, pages=("dosprotect",)))
+    assert [f"{s.page}:{s.kind}" for s in steps] == ["dosprotect:form"]
+    # Everything (None) still carries the documentary packetfilter skip step.
+    assert any(s.page == "packetfilter" and s.kind == "skip" for s in plan(dump(), live_pages()))
+
+
+def test_a_requested_page_missing_from_the_dump_becomes_a_skip_step_in_page_order():
+    steps = plan(dump(), live_pages(), replace(OPTIONS, pages=("dhcpserver", "dosprotect", "wconfig")))
+    assert [f"{s.page}:{s.kind}" for s in steps] == ["dosprotect:form", "wconfig:skip", "dhcpserver:skip"]
+    assert steps[1].description == "page 'wconfig' requested with --include but not present in the dump"
+    assert steps[-1].description == "page 'dhcpserver' requested with --include but not present in the dump"
+    assert steps[-1].order == 3 and steps[-1].blocked is None and steps[-1].raw_payload is None
+    # Sections are never "missing": an empty reservations list plans nothing and skips nothing.
+    assert plan(dump(), live_pages(), replace(OPTIONS, pages=("ipalloc",))) == []
+
+
 def test_dhcpserver_step_runs_last_and_warns_when_the_gateway_address_changes():
     from page_builders import field, hidden, page, select
 
@@ -1204,12 +1232,12 @@ def test_dhcpserver_step_runs_last_and_warns_when_the_gateway_address_changes():
         buttons=[button("Save", "Save")],
     )
     pages = {**live_pages(), "dhcpserver": dhcp}
-    live = extract_snapshot(pages, ts="t", router_host="r")
+    live = extract_snapshot(pages, ts="t", router_host="r", include=("dhcpserver",))
     from dataclasses import replace as _replace
     base = dump_no_service_adds()
     moved = {**live.forms["dhcpserver"], "ipaddr": "192.168.2.254", "dhcpstart": "192.168.2.64"}
     wanted = _replace(base, forwards=live.forwards, forms={**live.forms, "dhcpserver": moved})
-    steps = build_restore_plan(diff_snapshots(wanted, live, include_lan=False), wanted, pages, RestoreOptions())
+    steps = build_restore_plan(diff_snapshots(wanted, live), wanted, pages, RestoreOptions())
     form_steps = [s for s in steps if s.kind == "form"]
     assert form_steps and form_steps[-1].page == "dhcpserver"          # restored last
     assert steps[-1].page == "dhcpserver"
