@@ -66,9 +66,16 @@ SNAPSHOT_PAGES: tuple[str, ...] = (
     "wconfig",
     "wconfig_unified",
     "etherlan",
+    "dhcpserver",
+    "ippass",
+    "wmacauth",
 )
-FORM_PAGES: tuple[str, ...] = ("dosprotect", "wconfig", "etherlan")
-_DOCUMENTARY_TABLE_PAGES: tuple[str, ...] = ("packetfilter", "ipalloc", "etherlan")
+# Form pages restored field-by-field. dhcpserver (Subnets & DHCP), ippass (IP Passthrough) and
+# wmacauth (Wi-Fi MAC Filtering modes) were added 2026-09-20 for factory-reset recovery.
+FORM_PAGES: tuple[str, ...] = ("dosprotect", "wconfig", "etherlan", "dhcpserver", "ippass", "wmacauth")
+# wmacauth: the MAC filter list (Radio/Network/Filtering rows) is a table with Add/Remove semantics
+# like packet filters, so it is recorded but not restored; only the mode selects are form fields.
+_DOCUMENTARY_TABLE_PAGES: tuple[str, ...] = ("packetfilter", "ipalloc", "etherlan", "wmacauth")
 
 IPV4_PATTERN = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
 MAC_PATTERN = re.compile(r"^([0-9a-f]{2}:){5}[0-9a-f]{2}$", re.IGNORECASE)
@@ -307,10 +314,23 @@ def _extract_forwards(parsed: ParsedPage) -> list[SnapshotForward]:
 #    omits them (that is how a browser posts an unchecked box), but a dump that omitted them could
 #    not tell "the owner had this off" from "this field did not exist yet", so restore could never
 #    re-uncheck a box. A radio group keeps its checked member; unchecked siblings never overwrite it.
+# Controls that live on a form page but are not configuration: wmacauth's add-a-MAC sub-form (its
+# results are the documentary filter-list table). Excluded from dumps and never restored.
+_FORM_FIELD_EXCLUDES: dict[str, tuple[str, ...]] = {
+    "wmacauth": ("macaddress", "maclist", "ssid11", "ssid12", "ssid21"),
+}
+
+
+def _excluded_field(page: str, name: str) -> bool:
+    return name in _FORM_FIELD_EXCLUDES.get(page, ())
+
+
 def _form_values(parsed: ParsedPage) -> dict[str, str]:
     values: dict[str, str] = {}
     unchecked: list[str] = []
     for f in parsed.fields:
+        if _excluded_field(parsed.page, f.name):
+            continue
         if f.name in ("nonce", "hashpassword"):
             continue
         if _normalize(f.name).startswith("wpspin"):
@@ -335,6 +355,8 @@ def _form_values(parsed: ParsedPage) -> dict[str, str]:
         if name not in values:
             values[name] = UNCHECKED
     for s in parsed.selects:
+        if _excluded_field(parsed.page, s.name):
+            continue
         if not s.disabled:
             values[s.name] = s.value
     for t in parsed.textareas:

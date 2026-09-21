@@ -194,9 +194,19 @@ def test_restore_order_and_save_buttons_are_fixed():
         "packetfilter",
         "dosprotect",
         "wconfig",
+        "wmacauth",
+        "ippass",
         "etherlan",
+        "dhcpserver",
     ]
-    assert dict(FORM_SAVE_BUTTONS) == {"dosprotect": "Save", "wconfig": "Save", "etherlan": "Save"}
+    assert dict(FORM_SAVE_BUTTONS) == {
+        "dosprotect": "Save",
+        "wconfig": "Save",
+        "etherlan": "Save",
+        "dhcpserver": "Save",
+        "ippass": "Save",
+        "wmacauth": "Save",
+    }
 
 
 def test_build_restore_plan_adds_only_missing_services_and_forwards_in_order_with_add_payloads():

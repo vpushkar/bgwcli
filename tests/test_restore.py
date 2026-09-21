@@ -136,9 +136,19 @@ def test_restore_order_and_save_buttons_are_fixed():
         "packetfilter",
         "dosprotect",
         "wconfig",
+        "wmacauth",
+        "ippass",
         "etherlan",
+        "dhcpserver",  # last: a gateway-address change here would cut every later request
     ]
-    assert dict(FORM_SAVE_BUTTONS) == {"dosprotect": "Save", "wconfig": "Save", "etherlan": "Save"}
+    assert dict(FORM_SAVE_BUTTONS) == {
+        "dosprotect": "Save",
+        "wconfig": "Save",
+        "etherlan": "Save",
+        "dhcpserver": "Save",
+        "ippass": "Save",
+        "wmacauth": "Save",
+    }
 
 
 def test_build_restore_plan_adds_only_missing_services_and_forwards_in_order_with_add_payloads():
@@ -1177,3 +1187,32 @@ def test_a_text_field_whose_dump_value_is_literally_unchecked_is_assigned_not_om
     form_step = find(plan(wanted, pages), "form", "dosprotect")
     # The sentinel only means "off" for a checkable control; for the text input it is the literal value.
     assert form_step.raw_payload == {"display_label": UNCHECKED, "Save": "Save"}
+
+
+def test_dhcpserver_step_runs_last_and_warns_when_the_gateway_address_changes():
+    from page_builders import field, hidden, page, select
+
+    dhcp = page(
+        "dhcpserver",
+        title="Subnets & DHCP",
+        fields=[
+            hidden("nonce", "n"),
+            field("ipaddr", "text", "192.168.1.254"),
+            field("dhcpstart", "text", "192.168.1.64"),
+        ],
+        selects=[select("dhcp", ["off", "on"], selected="on")],
+        buttons=[button("Save", "Save")],
+    )
+    pages = {**live_pages(), "dhcpserver": dhcp}
+    live = extract_snapshot(pages, ts="t", router_host="r")
+    from dataclasses import replace as _replace
+    base = dump_no_service_adds()
+    moved = {**live.forms["dhcpserver"], "ipaddr": "192.168.2.254", "dhcpstart": "192.168.2.64"}
+    wanted = _replace(base, forwards=live.forwards, forms={**live.forms, "dhcpserver": moved})
+    steps = build_restore_plan(diff_snapshots(wanted, live, include_lan=False), wanted, pages, RestoreOptions())
+    form_steps = [s for s in steps if s.kind == "form"]
+    assert form_steps and form_steps[-1].page == "dhcpserver"          # restored last
+    assert steps[-1].page == "dhcpserver"
+    dhcp_step = form_steps[-1]
+    assert dhcp_step.raw_payload["ipaddr"] == "192.168.2.254" and dhcp_step.raw_payload["Save"] == "Save"
+    assert dhcp_step.warning and "192.168.2.254" in dhcp_step.warning and "gateway" in dhcp_step.warning.lower()

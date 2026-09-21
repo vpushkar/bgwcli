@@ -27,8 +27,9 @@ def snap(**overrides) -> Snapshot:
 
 
 def test_compared_form_pages_skips_etherlan_unless_include_lan():
-    assert compared_form_pages(include_lan=False) == ["dosprotect", "wconfig"]
-    assert compared_form_pages(include_lan=True) == ["dosprotect", "wconfig", "etherlan"]
+    everything = ["dosprotect", "wconfig", "etherlan", "dhcpserver", "ippass", "wmacauth"]
+    assert compared_form_pages(include_lan=True) == everything
+    assert compared_form_pages(include_lan=False) == ["dosprotect", "wconfig", "dhcpserver", "ippass", "wmacauth"]
 
 
 def test_identical_snapshots_produce_an_empty_diff():

@@ -118,7 +118,7 @@ Global options are accepted before or after the command name (`bgwcli --json che
 
 | Command | What it does |
 | --- | --- |
-| `bgwcli dump [--out <file>] [--all-clients]` | Captures custom services, NAT/Gaming forwards (device label resolved to MAC at dump time), host reservations, and the Firewall Advanced, Advanced Wi-Fi and LAN form values to an owner-only (0600) JSON file. Default location `$BGW_DUMP_DIR` or `~/.local/state/bgw/dumps/`. The file contains Wi-Fi secrets; console output does not. |
+| `bgwcli dump [--out <file>] [--all-clients]` | Captures custom services, NAT/Gaming forwards (device label resolved to MAC), host reservations (Fixed Allocation rows), and the form pages Firewall Advanced (`dosprotect`), Advanced Wi-Fi (`wconfig`), LAN ports (`etherlan`), Subnets & DHCP (`dhcpserver`), IP Passthrough (`ippass`) and Wi-Fi MAC Filtering modes (`wmacauth`) to an owner-only JSON file. Packet-filter rules and the MAC filter list are recorded as documentary tables only. |
 | `bgwcli diff <dumpfile> [--include-lan]` | Read-only comparison of the dump with the live router. Exit 0 when identical, 1 when different, 2 on error. |
 | `bgwcli restore <dumpfile> [--prune] [--include-lan] [--commit --confirm RESTORE]` | Dry-run by default: prints the ordered plan (services → forwards → reservations → firewall advanced → Advanced Wi-Fi → LAN). Only adds what is missing and only saves forms whose values differ. `--prune` also removes router rows not in the dump, but a page that still has an addition to make has its removes deferred, so adds and prunes can need two runs. `--prune` never releases a reservation back to DHCP — extra reservations are reported by `diff` only, releasing one stays a manual UI action. Live runs need both `--commit` and `--confirm RESTORE`; the run stops at the first rejected POST and ends with a diff. A step marked `applied` means the router accepted the POST — the convergence diff printed at the end is the authoritative success signal. Packet-filter rules are captured as text only and never restored. |
 
@@ -231,6 +231,37 @@ Prune removes router-only services and forwards, forwards before services (the g
 - Re-dump after any change you make in the web UI, so the baseline is the state you want to keep.
 - Re-dump after a firmware upgrade and `diff` against the old file before trusting `restore`.
 - Old schema-1 dumps (before 2026-09-19) are rejected on load with a re-dump message.
+
+### Factory-reset recovery
+
+The scenario the dump exists for: a firmware update or support call factory-resets the gateway.
+
+What the reset destroys and `restore` puts back: custom services, NAT/Gaming forwards, fixed IP
+reservations, Firewall Advanced flags, the whole Advanced Wi-Fi page (SSID, password, bands, max
+clients), Wi-Fi MAC-filtering modes, IP Passthrough mode, and the Subnets & DHCP page (LAN address,
+mask, DHCP range and lease). What it does not cover: the device access code (back to the sticker
+value), packet-filter rules and the MAC filter list (both recorded in the dump under `tables`, re-enter
+them by hand), Public Subnet, Remote Access, Voice.
+
+```
+export BGW_ACCESS_CODE='<sticker code>'          # a reset restores the printed access code
+bgwcli check && bgwcli auth
+bgwcli diff ~/bgw-baseline.json                  # everything missing is listed; exit 1
+bgwcli restore ~/bgw-baseline.json               # read the plan, especially blocked/warning lines
+bgwcli restore ~/bgw-baseline.json --commit --confirm RESTORE
+```
+
+The first commit restores services, forwards and reservations for devices the router already lists
+(wired ones), the firewall flags and Advanced Wi-Fi, which brings your SSID and password back so Wi-Fi
+clients start reconnecting. Wait a few minutes and run the same commit again: the Wi-Fi devices are now
+in the router's list, so their forwards and reservations apply. Repeat until the closing diff prints
+`No differences.`
+
+Subnets & DHCP is restored last, on purpose. If your dump carries a LAN address different from the
+router's current one, the plan shows a `warning:` line on that step: saving it moves the gateway, the
+closing diff cannot re-fetch it, and you reconnect to the new address before running `diff` again.
+Run the recovery from a wired client. Afterwards take a fresh dump as the new baseline, since the
+firmware changed.
 
 ### The `--include-lan` flag
 

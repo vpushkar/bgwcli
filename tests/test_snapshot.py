@@ -73,8 +73,12 @@ def test_snapshot_pages_and_form_pages_are_fixed():
         "wconfig",
         "wconfig_unified",
         "etherlan",
+        "dhcpserver",
+        "ippass",
+        "wmacauth",
     ]
-    assert list(FORM_PAGES) == ["dosprotect", "wconfig", "etherlan"]
+    # New form pages (2026-09-20): Subnets & DHCP, IP Passthrough, Wi-Fi MAC Filtering modes.
+    assert list(FORM_PAGES) == ["dosprotect", "wconfig", "etherlan", "dhcpserver", "ippass", "wmacauth"]
 
 
 def test_extract_snapshot_parses_custom_services_from_a_port_range_table():
@@ -313,3 +317,32 @@ def test_ipalloc_table_defaults_to_fixed_rows_and_all_clients_keeps_dhcp_rows():
     assert all("fixed" in row["Allocation"].lower() for row in default.tables["ipalloc"])
     assert any("dhcp" in row["Allocation"].lower() for row in everything.tables["ipalloc"])
     assert default.reservations == everything.reservations
+
+
+def test_wmacauth_filter_list_is_documentary_and_its_modes_are_form_fields():
+    """MAC Filtering: the allow/deny/none mode selects restore as form fields (the gateway enables
+    them only once the MAC list is non-empty; disabled ones are skipped like any disabled control).
+    The add-a-MAC sub-form (macaddress, maclist helper dropdown, ssid* checkboxes) is NOT
+    configuration, and the filter list itself (Radio/Network/Filtering rows) is recorded as a
+    documentary table, not restored."""
+    from page_builders import field, hidden, page, select
+
+    wm = page(
+        "wmacauth",
+        title="Wi-Fi MAC Filtering",
+        fields=[
+            hidden("nonce", "n"),
+            field("macaddress", "text", ""),
+            field("ssid11", "checkbox", "", checked=False),
+        ],
+        selects=[
+            select("wmacr1user", ["allow", "deny", "none"], selected="none"),
+            select("wmacr2user", ["allow", "deny", "none"], selected="deny"),
+            select("wmacr1guest", ["allow", "deny", "none"], selected="none", disabled=True),
+            select("maclist", ["Select from this list", "aa:bb:cc:dd:ee:01"], selected="Select from this list"),
+        ],
+        tables=[{"Radio": "2.4 GHz", "Network": "Home", "Filtering": "none"}],
+    )
+    s = extract_snapshot({"wmacauth": wm}, ts="t", router_host="r")
+    assert s.forms["wmacauth"] == {"wmacr1user": "none", "wmacr2user": "deny"}
+    assert s.tables["wmacauth"] == [{"Radio": "2.4 GHz", "Network": "Home", "Filtering": "none"}]

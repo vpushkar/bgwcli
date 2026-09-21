@@ -1155,6 +1155,8 @@ def print_restore_plan(steps: Iterable[RestoreStep], stream: TextIO | None = Non
             out.write(f"    blocked: {_line(step.blocked)}\n")
         elif step.deferred is not None:
             out.write(f"    deferred: {_line(step.deferred.reason)}\n")
+        if step.warning:
+            out.write(f"    warning: {_line(step.warning)}\n")
         elif step.display_payload is not None:
             out.write(f"    payload: {_line(_compact_json(step.display_payload))}\n")
         if not step.blocked and step.follow_up is not None:

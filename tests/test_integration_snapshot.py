@@ -76,8 +76,11 @@ def test_snapshot_pages_and_form_pages_include_wconfig_and_ipalloc():
         "wconfig",
         "wconfig_unified",
         "etherlan",
+        "dhcpserver",
+        "ippass",
+        "wmacauth",
     ]
-    assert list(FORM_PAGES) == ["dosprotect", "wconfig", "etherlan"]
+    assert list(FORM_PAGES) == ["dosprotect", "wconfig", "etherlan", "dhcpserver", "ippass", "wmacauth"]
 
 
 def test_parser_output_matches_the_shape_the_snapshot_module_relies_on():

@@ -69,6 +69,7 @@ class RestoreStep:
     follow_up: RestoreFollowUp | None = None
     deferred: RestoreDeferredForward | None = None
     service_name: str | None = None
+    warning: str | None = None
 
 
 @dataclass(frozen=True)
@@ -96,9 +97,24 @@ RESTORE_PAGE_ORDER: tuple[str, ...] = (
     "packetfilter",
     "dosprotect",
     "wconfig",
+    "wmacauth",
+    "ippass",
     "etherlan",
+    # Last on purpose: saving a changed LAN address (ipaddr/ipmask) moves the gateway, which would
+    # cut every request that came after it.
+    "dhcpserver",
 )
-FORM_SAVE_BUTTONS: Mapping[str, str] = {"dosprotect": "Save", "wconfig": "Save", "etherlan": "Save"}
+FORM_SAVE_BUTTONS: Mapping[str, str] = {
+    "dosprotect": "Save",
+    "wconfig": "Save",
+    "etherlan": "Save",
+    "dhcpserver": "Save",
+    "ippass": "Save",
+    "wmacauth": "Save",
+}
+# dhcpserver fields whose change moves or renumbers the LAN; the step carries a warning so the
+# operator knows to reconnect to the new address (the closing diff will fail to re-fetch).
+_LAN_MOVING_FIELDS = ("ipaddr", "ipmask", "dhcp")
 
 _UNORDERED = 0  # placeholder `order` for steps before _push numbers them
 
@@ -184,20 +200,32 @@ def build_restore_plan(
                 f" -> {redact_value(c.field, c.dump if c.dump is not None else '<absent>', options.include_secrets)}"
                 for c in applied
             )
-            push(
-                _without_fields(
-                    _planned(
-                        page,
-                        "form",
-                        f"save {page}: {shown}",
-                        FORM_SAVE_BUTTONS.get(page, "Save"),
-                        assignments,
-                        live_pages,
-                        options,
-                    ),
-                    omit,
-                )
+            step = _without_fields(
+                _planned(
+                    page,
+                    "form",
+                    f"save {page}: {shown}",
+                    FORM_SAVE_BUTTONS.get(page, "Save"),
+                    assignments,
+                    live_pages,
+                    options,
+                ),
+                omit,
             )
+            if page == "dhcpserver":
+                moving = {c.field: c.dump for c in applied if c.field in _LAN_MOVING_FIELDS}
+                if moving:
+                    new_ip = moving.get("ipaddr")
+                    where = f"; reconnect to {new_ip} afterwards" if new_ip else ""
+                    step = replace(
+                        step,
+                        warning=(
+                            "this save changes the gateway LAN address/DHCP ("
+                            + ", ".join(f"{k}={v}" for k, v in moving.items())
+                            + f"); the router will move and the closing diff cannot re-fetch it{where}"
+                        ),
+                    )
+            push(step)
     return steps
 
 

@@ -12,7 +12,7 @@ import json
 import re
 
 import pytest
-from page_builders import apphosting_page, dosprotect_page, page, select, services_page, sysinfo_page
+from page_builders import apphosting_page, button, dosprotect_page, page, select, services_page, sysinfo_page
 
 from bgwcli import cli
 from bgwcli.client import session_pool_full_error
@@ -645,6 +645,10 @@ def live_pages():
         "services": services_page(),
         "apphosting": apphosting_page(),
         "dosprotect": dosprotect_page(selects=[select("flood_protect", [("on", "On"), ("off", "Off")])]),
+        # Form pages added 2026-09-20; minimal shapes with a Save button so dump/diff/restore fetch them.
+        "dhcpserver": page("dhcpserver", title="Subnets & DHCP", selects=[select("dhcp", ["off", "on"], selected="on")], buttons=[button("Save", "Save")]),
+        "ippass": page("ippass", title="IP Passthrough", selects=[select("allocmode", ["normal", "passthrough"], selected="normal")], buttons=[button("Save", "Save")]),
+        "wmacauth": page("wmacauth", title="Wi-Fi MAC Filtering", selects=[select("wmacr1user", ["allow", "deny", "none"], selected="none")], buttons=[button("Save", "Save")]),
     }
     for name in ("ipalloc", "packetfilter", "wconfig", "wconfig_unified", "etherlan"):
         pages[name] = page(name, title=name)
