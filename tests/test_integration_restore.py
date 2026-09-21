@@ -349,12 +349,14 @@ def test_duplicate_rows_sharing_a_name_block_the_remove_instead_of_guessing():
         assert step.blocked is not None and "ambiguous" in step.blocked
 
 
-def test_form_step_description_reports_only_the_fields_actually_being_applied():
+def test_form_step_description_reports_every_field_being_applied_including_live_disabled_ones():
     pages = live_pages(dosprotect=TWO_FIELD_DOSPROTECT_HTML)
     custom = replace(dump(), forms={"dosprotect": {"flood_protect": "on", "log_attacks": "yes"}})
     form = only(plan(custom, pages), "form")
-    assert form.assignments == ["log_attacks=yes"]
-    assert "flood_protect" not in form.description
+    # flood_protect is disabled live but dumped as "on"; since this save also changes an enabled
+    # field, the dumped value rides along (2026-09-21 rule) and is reported.
+    assert sorted(form.assignments) == ["flood_protect=on", "log_attacks=yes"]
+    assert "flood_protect" in form.description
     assert "log_attacks" in form.description
 
 

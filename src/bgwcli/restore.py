@@ -203,9 +203,17 @@ def build_restore_plan(
             if not changes:
                 continue
             disabled_fields = _disabled_field_names(live_pages.get(page))
-            applied = [c for c in changes if c.dump is not None and c.field not in disabled_fields]
-            if not applied:
+            dumped = [c for c in changes if c.dump is not None]
+            enabled_changes = [c for c in dumped if c.field not in disabled_fields]
+            if not enabled_changes:
                 continue
+            # A control the live page renders disabled is normally left alone. But the dump captured
+            # it while it was enabled, and the same save is changing an enabled field on this page —
+            # typically the one that re-enables it (wconfig: security11 defwpa -> wpa re-enables
+            # key11). The server does not know a field was rendered disabled, so post the dumped
+            # value in the same POST; otherwise a factory-reset recovery restores the SSID with the
+            # router's default password (observed live 2026-09-21).
+            applied = dumped
             # A dump value of UNCHECKED on a checkbox/radio means "this box was off": the browser
             # expresses that by not posting the field at all, so those keys are removed from the
             # payload instead of assigned. The decision is keyed on the LIVE control type, never on

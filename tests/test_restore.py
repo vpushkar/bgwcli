@@ -348,7 +348,7 @@ def test_remove_of_a_row_that_vanished_is_blocked():
     assert remove.blocked == "no Remove button found for row 'Stale'"
 
 
-def test_finding_4_form_step_description_reports_only_the_fields_actually_being_applied():
+def test_finding_4_form_step_description_reports_every_field_being_applied_including_live_disabled_ones():
     pages = {
         **live_pages(),
         "dosprotect": dosprotect_page(
@@ -358,8 +358,10 @@ def test_finding_4_form_step_description_reports_only_the_fields_actually_being_
     }
     custom = replace(dump(), forms={"dosprotect": {"flood_protect": "on", "log_attacks": "yes"}})
     form_step = find(plan(custom, pages), "form")
-    assert form_step.assignments == ["log_attacks=yes"]
-    assert "flood_protect" not in form_step.description
+    # flood_protect is disabled live but dumped as "on"; since this save also changes an enabled
+    # field, the dumped value rides along (2026-09-21 rule) and is reported.
+    assert sorted(form_step.assignments) == ["flood_protect=on", "log_attacks=yes"]
+    assert "flood_protect" in form_step.description
     assert "log_attacks" in form_step.description
 
 
@@ -1244,3 +1246,43 @@ def test_dhcpserver_step_runs_last_and_warns_when_the_gateway_address_changes():
     dhcp_step = form_steps[-1]
     assert dhcp_step.raw_payload["ipaddr"] == "192.168.2.254" and dhcp_step.raw_payload["Save"] == "Save"
     assert dhcp_step.warning and "192.168.2.254" in dhcp_step.warning and "gateway" in dhcp_step.warning.lower()
+
+
+def test_form_step_includes_dumped_values_for_live_disabled_fields_when_the_same_save_enables_them():
+    """Live factory-reset recovery 2026-09-21: the reset router renders key11/key21 disabled while
+    security11/21 is `defwpa`. The dump captured the keys while they were enabled. Skipping disabled
+    controls left the SSID restored with the router's DEFAULT password. When a form save also changes
+    an enabled field on the page, dumped values for live-disabled fields must ride along in the same
+    POST (the server does not know a field was rendered disabled)."""
+    from page_builders import button, field, hidden, page, select
+
+    wconfig = page(
+        "wconfig",
+        title="Advanced Wi-Fi",
+        fields=[hidden("nonce", "n"), field("key11", "text", "", disabled=True), field("maxclients", "text", "80")],
+        selects=[select("security11", ["defwpa", "wpa"], selected="defwpa")],
+        buttons=[button("Save", "Save...")],
+    )
+    pages = {**live_pages(), "wconfig": wconfig}
+    live = extract_snapshot(pages, ts="t", router_host="r")
+    wconfig_form = {"security11": "wpa", "key11": "s3cret", "maxclients": "80"}
+    wanted = replace(dump_no_service_adds(), forwards=live.forwards, forms={**live.forms, "wconfig": wconfig_form})
+    steps = build_restore_plan(diff_snapshots(wanted, live), wanted, pages, RestoreOptions())
+    form = next(s for s in steps if s.kind == "form" and s.page == "wconfig")
+    assert form.raw_payload["security11"] == "wpa" and form.raw_payload["key11"] == "s3cret"
+
+
+def test_form_step_still_skips_a_page_whose_only_differing_field_is_disabled():
+    from page_builders import button, field, hidden, page
+
+    wconfig = page(
+        "wconfig",
+        title="Advanced Wi-Fi",
+        fields=[hidden("nonce", "n"), field("key11", "text", "", disabled=True)],
+        buttons=[button("Save", "Save...")],
+    )
+    pages = {**live_pages(), "wconfig": wconfig}
+    live = extract_snapshot(pages, ts="t", router_host="r")
+    wanted = replace(dump_no_service_adds(), forwards=live.forwards, forms={**live.forms, "wconfig": {"key11": "s3cret"}})  # noqa: E501
+    steps = build_restore_plan(diff_snapshots(wanted, live), wanted, pages, RestoreOptions())
+    assert not [s for s in steps if s.kind == "form" and s.page == "wconfig"]
