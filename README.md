@@ -121,6 +121,7 @@ Global options are accepted before or after the command name (`bgwcli --json che
 | `bgwcli dump [--out <file>] [--include <csv\|all>] [--all-clients]` | Captures custom services, NAT/Gaming forwards (device label resolved to MAC), host reservations (Fixed Allocation rows) and the core form pages Firewall Advanced (`dosprotect`) and Advanced Wi-Fi (`wconfig`) to an owner-only JSON file. `--include` adds the optional form pages LAN ports (`etherlan`), Subnets & DHCP (`dhcpserver`), IP Passthrough (`ippass`) and Wi-Fi MAC Filtering modes (`wmacauth`); `--include all` captures every page. Pages not included are not fetched. Packet-filter rules and the MAC filter list are recorded as documentary tables only. |
 | `bgwcli diff <dumpfile> [--include <csv\|all>]` | Read-only comparison of the dump with the live router: every section and every form page present in the dump. `--include` restricts the comparison to the listed page ids (`services`, `apphosting`, `ipalloc` and the form page ids); a requested page the dump never captured prints a warning on stderr and is skipped. Exit 0 when identical, 1 when different, 2 on error. |
 | `bgwcli restore <dumpfile> [--prune] [--include <csv\|all>] [--commit --confirm RESTORE]` | Dry-run by default: prints the ordered plan (services → forwards → reservations → firewall advanced → Advanced Wi-Fi → Wi-Fi MAC filtering → IP Passthrough → LAN ports → Subnets & DHCP). Only adds what is missing and only saves forms whose values differ; optional pages are restored only when the dump captured them, and `--include` restricts the plan like `diff` (a requested page missing from the dump becomes a `skip` step). `--prune` also removes router rows not in the dump, but a page that still has an addition to make has its removes deferred, so adds and prunes can need two runs. `--prune` never releases a reservation back to DHCP — extra reservations are reported by `diff` only, releasing one stays a manual UI action. Live runs need both `--commit` and `--confirm RESTORE`; the run stops at the first rejected POST and ends with a diff. A step marked `applied` means the router accepted the POST — the convergence diff printed at the end is the authoritative success signal. Packet-filter rules are captured as text only and never restored. |
+| `bgwcli autorestore <dumpfile> [--commit --confirm RESTORE] [--max-passes N] [--wait S] [--on-any-diff] [--include <csv\|all>]` | Unattended factory-reset recovery for a systemd timer. Diffs the live router against the dump and restores it (never `--prune`) only when the difference looks like a factory reset: every dumped service, forward and reservation missing, or the primary access code rejected and `BGW_FALLBACK_ACCESS_CODE` accepted. Ordinary drift is reported as `no-reset` and left alone. See [Automatic recovery](#automatic-recovery-autorestore). |
 
 Dump files are schema 2 JSON, byte-compatible with the TypeScript CLI: a dump written by either tool
 diffs clean and restores with the other. Schema-1 dumps are refused on load.
@@ -302,6 +303,91 @@ shows a `skip` step for it, and `--json` output lists it under `missingPages`. A
 usage error (exit 1) before the router is touched. Exit codes are unchanged: `diff` 0/1/2, `restore` 0 once
 everything selected from the dump is present on the router.
 
+## Automatic recovery (autorestore)
+
+`bgwcli autorestore <dumpfile>` is the factory-reset runbook above as a watchdog: run it from a systemd
+timer on an always-on LAN host (a Raspberry Pi) and the configuration comes back by itself within
+minutes of AT&T resetting the gateway, without you noticing the Wi-Fi went away. It fetches the same
+pages `diff`/`restore` use, diffs them against the dump and only then decides whether to act.
+
+**What triggers it.** A run counts as a factory reset only when the difference is total loss:
+
+- every dumped custom service is missing **and** every dumped NAT/Gaming forward is missing **and**
+  every dumped reservation is missing (a section the dump has no entries for does not vote; a dump
+  with no sections at all falls back to "every dumped form page differs"), or
+- the primary access code is rejected and the login succeeds with `BGW_FALLBACK_ACCESS_CODE` — a reset
+  reverts the gateway to the printed sticker code, so needing it is a reset signal on its own.
+
+`--on-any-diff` widens that to "any difference"; use it only if nothing is ever changed from the UI.
+
+**What it never does.** It never uses `--prune`, so router-only entries survive every pass. It never
+acts on ordinary drift: one service you deleted by hand, an edited firewall flag, a re-addressed
+reservation all report `no-reset` (exit 0) with the diff, and are left exactly as they are. It never
+restores anything the dump did not capture, and `--include` narrows it like `diff`/`restore`. It
+never reboots the gateway, changes the access code or touches packet-filter rules.
+
+**How it runs.** Dry-run by default: a detected reset prints the restore plan and exits 1, nothing is
+sent. With `--commit --confirm RESTORE` it runs `restore` passes — services, forwards, reservations,
+then the form pages with Subnets & DHCP last and its warning intact — re-diffs after each, sleeps
+`--wait` seconds (default 120) between passes while devices reconnect and their forwards become
+restorable, and stops after `--max-passes` (default 3). The access code is resolved as for every other
+command (`BGW_ACCESS_CODE`, `--access-code-stdin`); `BGW_FALLBACK_ACCESS_CODE` is only tried after the
+primary one is rejected. An unreachable router (mid-reboot, unplugged) exits 0 with one log line so the
+timer stays quiet.
+
+| Exit | Status | Meaning |
+| --- | --- | --- |
+| `0` | `no-reset` | Router matches the dump, or differs in a way that is not a reset. Nothing sent. |
+| `1` | `restore-needed` | Dry-run: a reset was detected; the printed plan is what `--commit` would send. |
+| `0` | `converged` | `--commit`: everything in the dump is back on the router. |
+| `1` | `not-converged` | `--commit`: passes exhausted with entries still missing (the next timer tick retries). |
+| `0` | `router-unreachable` | Connection error or a page that could not be read before anything was written. |
+| `2` | `error` | The router was written to but the closing pages could not be re-read; check by hand. |
+
+`--json` prints `status`, `reason`, `exitCode`, `detected`, `usedFallbackCode`, `missing` counts per
+section at detection time, one summary per `passes` entry (`applied`/`blocked`/`failed`/`skipped`/
+`notRun`/`converged`), the redacted final `diff`, the `plan` and `missingPages` like `diff` does.
+
+Install as a user unit on a Raspberry Pi with [deploy/README.md](deploy/README.md) (`deploy/bgw-autorestore.service`,
+`deploy/bgw-autorestore.timer`, `deploy/autorestore.env.example`). The one habit that keeps the watchdog
+from fighting you: run `bgwcli dump --include all --out ~/bgw-baseline.json` after every deliberate
+change, so the baseline is always the state you want back.
+
+A worked example, the run after a reset (the Wi-Fi devices are still offline in pass 1, so their
+forwards and reservations wait for pass 2):
+
+```
+$ bgwcli autorestore ~/bgw-baseline.json --commit --confirm RESTORE --wait 60
+access code reverted; factory reset suspected
+factory reset detected: access code reverted; factory reset suspected; services 2/2 missing; forwards 2/2 missing; reservations 2/2 missing
+pass 1/3: 9 steps
+[1] applied services (302)
+[2] applied services (302)
+[3] applied apphosting (302)
+[4] blocked apphosting (device host-a not in NAT/Gaming device list)
+[5] applied ipalloc (302)
+[6] blocked ipalloc (Allocate button for 02:0a:0b:0c:0d:03 not present on IP Allocation page)
+[7] applied dosprotect (302)
+[8] applied wconfig (302 -> /cgi-bin/wconfig.ha)
+[9] applied dhcpserver (302)
+pass 1/3: 7 applied, 2 blocked, 0 failed, 0 not run
+not yet converged; waiting 60s before pass 2
+pass 2/3: 3 steps
+[1] skipped packetfilter
+[2] applied apphosting (302)
+[3] applied ipalloc (302)
+pass 2/3: 2 applied, 0 blocked, 0 failed, 0 not run
+converged after pass 2
+No configuration differences.
+Firmware differs between dump and router.
+$ echo $?
+0
+```
+
+The same command on an untouched router prints `no-reset: no differences` and exits 0; after you remove
+one service by hand it prints `no-reset: services 1/2 missing; forwards 0/2 missing; reservations 0/2
+missing` plus the diff, still exit 0, still nothing sent.
+
 ## Router Command Tree
 
 All of these commands accept `--json`. Parsed page JSON includes a `summary` object with the same high-value fields used by the terminal view, plus the underlying values, tables, controls, buttons, and forms. Use `--forms` to include form controls in normal terminal output.
@@ -432,6 +518,7 @@ Identical to the TypeScript CLI, so one shell setup serves both:
 | --- | --- | --- |
 | `BGW_HOST` / `ROUTER_IP` | Router host (`--host`) | `192.168.1.254` |
 | `BGW_ACCESS_CODE` | Device access code; the usual way to authenticate (`--access-code-stdin` is the alternative for scripts) | unset |
+| `BGW_FALLBACK_ACCESS_CODE` | `autorestore` only: the sticker code a factory reset reverts to; tried once when the primary code is rejected, and needing it counts as a reset signal | unset |
 | `BGW_TIMEOUT_MS` | Request timeout (`--timeout`) | `15000` |
 | `BGW_INSECURE_TLS` | `0` enforces TLS validation (same as `--strict-tls`) | accept self-signed |
 | `BGW_WAIT_FOR_SESSION` | `1` waits when the web session pool is full (`--wait-for-session`) | off |
@@ -561,9 +648,9 @@ All MAC addresses, device labels and SSIDs in the test fixtures and in the READM
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Success (`diff`: identical; `restore --commit`: converged). |
-| `1` | Negative answer: `diff` found differences, `restore --commit` did not converge, usage errors, and confirmation refusals. |
-| `2` | Could not answer: authentication/connection failures, session pool full, unreadable dump file, snapshot extraction failure, or a page that could not be fetched. |
+| `0` | Success (`diff`: identical; `restore --commit`: converged; `autorestore`: no reset, converged, or router unreachable). |
+| `1` | Negative answer: `diff` found differences, `restore --commit` did not converge, `autorestore` needs or did not finish a restore, usage errors, and confirmation refusals. |
+| `2` | Could not answer: authentication/connection failures, session pool full, unreadable dump file, snapshot extraction failure, or a page that could not be fetched (`autorestore`: only after the router was written to; before that an unreachable router is exit 0). |
 
 ## Differences from bgw
 

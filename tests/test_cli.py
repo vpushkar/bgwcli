@@ -16,7 +16,7 @@ from page_builders import apphosting_page, button, dosprotect_page, page, select
 
 from bgwcli import cli
 from bgwcli.client import session_pool_full_error
-from bgwcli.errors import RouterConnectionError
+from bgwcli.errors import RouterAuthError, RouterConnectionError
 from bgwcli.fetch import ParsedPageResult
 from bgwcli.types import HttpResponse
 
@@ -147,6 +147,7 @@ ALL_COMMANDS = [
     "check", "auth", "sitemap", "coverage", "tabs", "actions", "session", "action", "sweep", "scan", "schema",
     "audit", "readiness", "section", "device", "broadband", "home-network", "voice", "firewall", "diagnostics",
     "page", "inspect", "devices", "wifi", "nat", "logs", "set", "submit", "status", "dump", "diff", "restore",
+    "autorestore",
 ]
 
 
@@ -817,6 +818,164 @@ def test_restore_surfaces_pages_it_could_not_refetch(capsys, fake, snapshot_fetc
     code, text, _ = run(capsys, ["restore", str(out), "--commit", "--confirm", "RESTORE"])
     assert code == 1
     assert "Post-restore verification incomplete" in text and "Page unavailable: services" in text
+
+
+# ---------------------------------------------------------------------------------------------
+# autorestore
+
+
+def _reset_router(snapshot_fetcher):
+    """Make the live pages look factory-reset: every dumped service/forward/reservation gone."""
+    snapshot_fetcher["pages"]["services"] = services_page(rows=[])
+    snapshot_fetcher["pages"]["apphosting"] = apphosting_page(rows=[])
+
+
+def test_autorestore_refuses_commit_without_confirm_before_reading_the_dump(capsys, fake, snapshot_fetcher):
+    code, _, err = run(capsys, ["autorestore", "/nonexistent-bgw-dump.json", "--commit", "--host", "127.0.0.1"])
+    assert code == 1
+    assert "Refusing to autorestore. Re-run with --commit --confirm RESTORE." in err
+    assert "/nonexistent-bgw-dump.json" not in err
+    assert "client" not in fake or fake["client"].posts == []
+    code, _, err = run(capsys, ["autorestore"])
+    assert code == 1 and "Missing dump file." in err
+
+
+def test_autorestore_no_reset_exits_0_and_never_posts(capsys, fake, snapshot_fetcher, tmp_path):
+    out = tmp_path / "dump.json"
+    assert run(capsys, ["dump", "--out", str(out)])[0] == 0
+    code, payload, err = run_json(capsys, ["autorestore", str(out), "--commit", "--confirm", "RESTORE", "--json"])
+    assert code == 0 and payload["status"] == "no-reset" and payload["exitCode"] == 0
+    assert payload["detected"] is False and payload["usedFallbackCode"] is False
+    assert payload["missing"] == {"services": 0, "forwards": 0, "reservations": 0, "forms": 0}
+    assert payload["missingPages"] == [] and payload["diff"]["identical"] is True and payload["plan"] is None
+    assert fake["client"].posts == [] and err == ""
+
+    # ordinary drift: one service removed by hand stays no-reset even with --commit
+    snapshot_fetcher["pages"]["services"] = services_page(rows=[("custom_ssh", "2483-2483", "22", "TCP")])
+    code, text, _ = run(capsys, ["autorestore", str(out), "--commit", "--confirm", "RESTORE"])
+    assert code == 0 and text.startswith("no-reset: services 1/2 missing") and "- missing service Mosh" in text
+    assert fake["client"].posts == []
+
+
+def test_autorestore_dry_run_reports_restore_needed_with_exit_1_and_no_post(capsys, fake, snapshot_fetcher, tmp_path):
+    out = tmp_path / "dump.json"
+    assert run(capsys, ["dump", "--out", str(out)])[0] == 0
+    _reset_router(snapshot_fetcher)
+    code, payload, _ = run_json(capsys, ["autorestore", str(out), "--json"])
+    assert code == 1 and payload["status"] == "restore-needed" and payload["exitCode"] == 1
+    assert payload["detected"] is True and payload["passes"] == []
+    assert payload["missing"]["services"] == 2 and payload["missing"]["forwards"] == 2
+    assert [step["kind"] for step in payload["plan"]].count("add-service") == 2
+    assert all("rawPayload" not in step for step in payload["plan"])
+    assert fake["client"].posts == []
+
+    code, text, _ = run(capsys, ["autorestore", str(out)])
+    assert code == 1 and "restore-needed: services 2/2 missing; forwards 2/2 missing" in text
+    assert "[1] services add-service" in text and "- missing service" in text
+    assert fake["client"].posts == []
+
+
+def test_autorestore_commit_runs_passes_and_exits_1_when_not_converged(capsys, fake, snapshot_fetcher, tmp_path, monkeypatch):
+    out = tmp_path / "dump.json"
+    assert run(capsys, ["dump", "--out", str(out)])[0] == 0
+    _reset_router(snapshot_fetcher)
+    fake["client"].post_body = "<html><title>Custom Services</title></html>"
+    sleeps: list[float] = []
+    monkeypatch.setattr("bgwcli.autorestore._sleep", sleeps.append)
+
+    argv = ["autorestore", str(out), "--commit", "--confirm", "RESTORE", "--max-passes", "2", "--wait", "5", "--json"]
+    code, payload, err = run_json(capsys, argv)
+    assert code == 1 and payload["status"] == "not-converged" and payload["exitCode"] == 1
+    assert [p["pass"] for p in payload["passes"]] == [1, 2] and payload["passes"][0]["applied"] >= 2
+    assert sleeps == [5]  # once, between the two passes
+    assert fake["client"].posts and fake["client"].posts[0][0] == "services"
+    assert payload["diff"]["identical"] is False and err == ""
+
+    fake["client"].posts.clear()
+    code, text, _ = run(capsys, ["autorestore", str(out), "--commit", "--confirm", "RESTORE", "--max-passes", "1"])
+    assert code == 1
+    assert "factory reset detected: services 2/2 missing" in text and "pass 1/1:" in text
+    assert "[1] applied services" in text and "not-converged" in text and "- missing service Mosh" in text
+
+
+def test_autorestore_uses_the_fallback_access_code_and_treats_it_as_a_reset(capsys, fake, snapshot_fetcher, tmp_path, monkeypatch):
+    built: list[FakeClient] = []
+
+    class CodeCheckingClient(FakeClient):
+        def __init__(self, code):
+            super().__init__()
+            self.code = code
+
+        def login(self):
+            if self.code != "sticker":
+                raise RouterAuthError("Login failed: the access code was rejected.")
+            self.logged_in = True
+
+    def factory(options, access_code, *, on_session_wait=None, user_agent="bgw/0.1.0"):
+        client = CodeCheckingClient(access_code)
+        built.append(client)
+        return client
+
+    monkeypatch.setattr(cli, "_client_factory", factory)
+    monkeypatch.setenv("BGW_ACCESS_CODE", "primary")
+    out = tmp_path / "dump.json"
+    assert run(capsys, ["dump", "--out", str(out)])[0] == 0  # dump never logs in on the fake
+    built.clear()
+
+    # No fallback configured: the auth failure is fatal like everywhere else (exit 2).
+    code, _, err = run(capsys, ["autorestore", str(out)])
+    assert code == 2 and "rejected" in err and [c.code for c in built] == ["primary"]
+    built.clear()
+
+    monkeypatch.setenv("BGW_FALLBACK_ACCESS_CODE", "sticker")
+    code, payload, _ = run_json(capsys, ["autorestore", str(out), "--json"])
+    assert [c.code for c in built] == ["primary", "sticker"] and built[1].logged_in is True
+    assert code == 1 and payload["status"] == "restore-needed" and payload["usedFallbackCode"] is True
+    assert payload["detected"] is True and payload["reason"].startswith("access code reverted; factory reset suspected")
+    assert all(step["kind"] == "skip" for step in payload["plan"])  # router still matches the dump: nothing to replay
+
+    # With --commit the (empty) first pass converges immediately: exit 0.
+    code, text, _ = run(capsys, ["autorestore", str(out), "--commit", "--confirm", "RESTORE"])
+    assert code == 0 and "access code reverted; factory reset suspected" in text and "converged after pass 1" in text
+    assert all(c.posts == [] for c in built)
+
+    # Same fallback as primary is not a fallback at all.
+    monkeypatch.setenv("BGW_FALLBACK_ACCESS_CODE", "primary")
+    code, _, err = run(capsys, ["autorestore", str(out)])
+    assert code == 2 and "rejected" in err
+
+
+def test_autorestore_unreachable_router_is_quiet_and_exits_0(capsys, fake, snapshot_fetcher, tmp_path):
+    out = tmp_path / "dump.json"
+    assert run(capsys, ["dump", "--out", str(out)])[0] == 0
+
+    def boom():
+        raise RouterConnectionError("connect EHOSTUNREACH 192.168.1.254:443")
+
+    fake["client"].login = boom
+    code, text, err = run(capsys, ["autorestore", str(out), "--commit", "--confirm", "RESTORE"])
+    assert code == 0 and err == ""
+    assert text == "router-unreachable: connect EHOSTUNREACH 192.168.1.254:443\n"
+    code, payload, err = run_json(capsys, ["autorestore", str(out), "--json"])
+    assert code == 0 and payload["status"] == "router-unreachable" and payload["exitCode"] == 0 and err == ""
+
+    # a hung page before any POST is treated the same way
+    fake["client"].login = lambda: None
+    snapshot_fetcher["pages"].pop("services")
+    code, payload, _ = run_json(capsys, ["autorestore", str(out), "--json"])
+    assert code == 0 and payload["status"] == "router-unreachable" and "services" in payload["reason"]
+
+
+def test_autorestore_rejects_bad_numeric_options_before_router_access(capsys, fake, snapshot_fetcher, tmp_path):
+    code, _, err = run(capsys, ["autorestore", "x.json", "--max-passes", "0"])
+    assert code == 1 and "--max-passes must be a finite number greater than or equal to 1." in err
+    code, _, err = run(capsys, ["autorestore", "x.json", "--wait", "-1"])
+    assert code == 1 and "--wait must be a finite number greater than or equal to 0." in err
+    assert snapshot_fetcher["fetched"] == []
+
+
+def test_autorestore_uses_the_session_coordinator():
+    assert cli.uses_session_coordinator("autorestore") is True
 
 
 def test_restore_uses_the_session_coordinator_and_local_commands_do_not():

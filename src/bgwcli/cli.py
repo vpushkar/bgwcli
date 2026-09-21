@@ -10,6 +10,7 @@ dump file, snapshot extraction, page unavailable).
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -20,6 +21,7 @@ from typing import Any
 from . import format as fmt
 from .actions import ROUTER_ACTIONS, display_action_payload, get_action
 from .audit import build_audit, capture_fixture_pack
+from .autorestore import AutorestoreOptions, result_output, run_autorestore
 from .client import BGW320Client, pool_full_metadata, session_pool_full_error
 from .config import GlobalOptions, env_default_options, resolve_access_code
 from .devices import fetch_device_list
@@ -75,6 +77,8 @@ from .types import ParsedPage
 USER_AGENT = "bgw/0.1.0"
 FIXTURE_USER_AGENT = "bgw-fixture-capture/0.1.0"
 RESTORE_CONFIRM_TOKEN = "RESTORE"
+# autorestore: the printed sticker code the gateway reverts to after a factory reset.
+FALLBACK_ACCESS_CODE_ENV = "BGW_FALLBACK_ACCESS_CODE"
 
 PAGE_FETCH_FAILED = 2
 
@@ -90,7 +94,7 @@ LOCAL_COMMANDS = frozenset({"actions", "coverage", "section", "session", "sitema
 COMMAND_NAMES: tuple[str, ...] = (
     "check", "auth", "sitemap", "coverage", "tabs", "actions", "session", "action", "sweep", "scan", "schema",
     "audit", "readiness", "section", *SECTION_COMMANDS, "page", "inspect", "devices", "wifi", "nat", "logs",
-    "set", "submit", "status", "dump", "diff", "restore", "help", "fixtures-capture",
+    "set", "submit", "status", "dump", "diff", "restore", "autorestore", "help", "fixtures-capture",
 )
 
 # Injection seam for tests: (options, access_code, *, on_session_wait, user_agent) -> client.
@@ -120,6 +124,10 @@ class Command:
     # --include <csv|all>: dump = optional form pages to capture besides the core; diff/restore = the
     # pages to compare/restore (None = everything present in the dump). Resolved per command.
     include: list[str] | None = None
+    # autorestore: restore passes, seconds between passes, treat any difference as a reset.
+    max_passes: int = 3
+    wait_seconds: int = 120
+    on_any_diff: bool = False
     exit_code: int = field(default=0, compare=False)
 
     def output(self, value: Any, table_printer: Callable[[], None]) -> None:
@@ -311,6 +319,10 @@ def run_command(client: Any, command: Command) -> None:  # noqa: C901 - one flat
 
     if name == "restore":
         _run_restore(client, command)
+        return
+
+    if name == "autorestore":
+        _run_autorestore(client, command)
         return
 
     raise UsageError(f"Unknown command: {name}\nRun bgwcli help.")
@@ -643,6 +655,68 @@ def _run_restore(client: Any, command: Command) -> None:
     )
 
 
+def _run_autorestore(client: Any, command: Command) -> None:
+    """Timer-driven factory-reset recovery (see autorestore.py). Login with fallback lives here: when
+    the primary access code is rejected and BGW_FALLBACK_ACCESS_CODE is set, the client is rebuilt
+    with the fallback and login retried once; using it is itself a reset signal."""
+    if command.commit and command.confirm != RESTORE_CONFIRM_TOKEN:
+        raise UsageError(f"Refusing to autorestore. Re-run with --commit --confirm {RESTORE_CONFIRM_TOKEN}.")
+    dump = read_dump_file(_require_arg(command, "dump file"))
+    pages = resolve_restore_include(command.include)
+    missing = pages_missing_from_dump(dump, pages)
+    _warn_missing_pages(missing)
+    json_mode = command.options.json
+    fallback = os.environ.get(FALLBACK_ACCESS_CODE_ENV) or None
+    primary = command.access_code or getattr(getattr(client, "options", None), "access_code", None)
+
+    def login_with_fallback() -> tuple[Any, bool]:
+        try:
+            client.login()
+            return client, False
+        except RouterSessionPoolFullError:
+            raise
+        except RouterAuthError:
+            # Only a rejected primary code can mean "the router reverted to the sticker code"; a
+            # missing primary or an identical fallback would just fail the same way again.
+            if not fallback or not primary or fallback == primary:
+                raise
+            on_session_wait = None if json_mode else _print_session_wait
+            fallback_client = _client_factory(
+                command.options, fallback, on_session_wait=on_session_wait, user_agent=USER_AGENT
+            )
+            fallback_client.login()
+            return fallback_client, True
+
+    def log(line: str) -> None:
+        if not json_mode:
+            sys.stdout.write(f"{line}\n")
+
+    result = run_autorestore(
+        login_with_fallback,
+        dump,
+        AutorestoreOptions(
+            commit=command.commit,
+            max_passes=command.max_passes,
+            wait_seconds=command.wait_seconds,
+            on_any_diff=command.on_any_diff,
+            pages=pages,
+        ),
+        fetch_pages=_fetch_snapshot_pages,
+        log=log,
+        on_step=None if json_mode else fmt.print_restore_step_result,
+        **_snapshot_meta(command),
+    )
+    command.exit_code = result.exit_code
+
+    def print_result() -> None:
+        if result.status == "restore-needed" and result.plan is not None:
+            fmt.print_restore_plan(result.plan)
+        if result.final_diff is not None:
+            fmt.print_snapshot_diff(result.final_diff)
+
+    command.output({**result_output(result), "missingPages": missing}, print_result)
+
+
 def _run_fixture_capture(client: Any, command: Command) -> None:
     """Hidden port of scripts/capture-router-fixtures.ts: sanitized fixture pack under --out (tests/fixtures)."""
     # The access code was already resolved once when the client was built; resolving again would
@@ -897,6 +971,12 @@ _COMMAND_OPTIONS: tuple[tuple[tuple[str, ...], dict[str, Any]], ...] = (
             "help": "dump: optional pages to capture besides the core; diff/restore: pages to compare/restore",
         },
     ),
+    (("--max-passes",), {"metavar": "<n>", "help": "autorestore: restore passes before giving up. Default: 3"}),
+    (("--wait",), {"metavar": "<seconds>", "help": "autorestore: pause between passes. Default: 120"}),
+    (
+        ("--on-any-diff",),
+        {"action": _FLAG, "help": "autorestore: treat any difference as a reset (not only total loss)"},
+    ),
 )
 
 
@@ -946,6 +1026,11 @@ _SUBCOMMANDS: tuple[tuple[str, str], ...] = (
     ("dump", "dump [--out <file>] [--include <csv|all>]: capture a configuration snapshot to an owner-only JSON file."),
     ("diff", "diff <dumpfile> [--include <csv|all>]: compare a dump with the live router."),
     ("restore", "restore <dumpfile> [--prune] [--include <csv|all>] [--commit --confirm RESTORE]."),
+    (
+        "autorestore",
+        "autorestore <dumpfile> [--commit --confirm RESTORE] [--max-passes N] [--wait S] [--on-any-diff]: "
+        "restore the dump only after a detected factory reset (systemd timer).",
+    ),
     ("help", "Show the full help text."),
     ("fixtures-capture", argparse.SUPPRESS),
 )
@@ -1030,6 +1115,9 @@ def parse_args(argv: list[str]) -> Command:
         prune=opt("prune", False),
         all_clients=opt("all_clients", False),
         include=include,
+        max_passes=_numeric(opt("max_passes"), "--max-passes", 1) if opt("max_passes") is not None else 3,
+        wait_seconds=_numeric(opt("wait"), "--wait", 0) if opt("wait") is not None else 120,
+        on_any_diff=opt("on_any_diff", False),
     )
 
 
@@ -1182,6 +1270,23 @@ Backup:
     need two runs. A step shown as applied means the router accepted the POST;
     the diff printed at the end is the authoritative success signal.
 
+Automatic recovery (for a systemd timer):
+  bgwcli autorestore <dumpfile> [--max-passes 3] [--wait 120] [--on-any-diff] [--include <csv|all>]
+    Diff the live router against the dump and decide whether it was factory-reset:
+    only when EVERY dumped service, forward and reservation is missing (a dump
+    without those sections: every dumped form page differs). Ordinary drift, a
+    single removed entry or an edited value, is reported as no-reset and left
+    alone. Dry-run by default: prints the plan and exits 1 when a restore is
+    needed, 0 when not. --on-any-diff treats any difference as a reset.
+    Set BGW_FALLBACK_ACCESS_CODE to the sticker code: when the primary code is
+    rejected the login is retried once with it, and needing it is itself a
+    reset signal. An unreachable router exits 0 with one line (timers stay quiet).
+
+  bgwcli autorestore <dumpfile> --commit --confirm RESTORE
+    Run restore passes (never --prune) until the closing diff converges, sleeping
+    --wait seconds between passes, at most --max-passes times. Exit 0 converged,
+    1 not converged, 2 error after the router was written to. See deploy/README.md.
+
 Global options:
   --host <host>             Router host. Default: BGW_HOST, ROUTER_IP, or 192.168.1.254
   --access-code-stdin       Read the device access code from stdin
@@ -1193,6 +1298,9 @@ Global options:
   --prune                   Let restore remove router services/forwards missing from the dump
                             (deferred on pages that still have an add pending)
   --include <csv|all>       dump: optional pages to capture besides the core; diff/restore: pages to compare/restore
+  --max-passes <n>          autorestore: restore passes before giving up. Default: 3
+  --wait <seconds>          autorestore: pause between passes. Default: 120
+  --on-any-diff             autorestore: treat any difference as a reset, not only total loss
   --timeout <ms>            Request timeout. Default: 15000
   --delay <ms>              Delay between audit/scan/sweep requests. Default: 750
   --limit <n>               Limit displayed rows. Default: 20

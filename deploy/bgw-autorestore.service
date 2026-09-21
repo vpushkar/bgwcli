@@ -1,0 +1,21 @@
+# bgwcli autorestore: put the baseline dump back after AT&T factory-resets the gateway.
+# User unit (systemctl --user). Install steps: deploy/README.md.
+[Unit]
+Description=bgwcli autorestore - restore ~/bgw-baseline.json after a gateway factory reset
+Documentation=https://github.com/vpushkar/bgwcli
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# BGW_ACCESS_CODE, BGW_FALLBACK_ACCESS_CODE (sticker code), optional BGW_TIMEOUT_MS / BGW_HOST.
+EnvironmentFile=%h/.config/bgw/autorestore.env
+ExecStart=%h/.local/bin/bgwcli autorestore %h/bgw-baseline.json --commit --confirm RESTORE
+# Exit 1 (not converged) is a real answer, not a unit failure: the next timer tick retries.
+SuccessExitStatus=1
+# Restore passes sleep --wait seconds between each other (default 120s x 3 passes).
+TimeoutStartSec=20min
+Nice=10
+
+[Install]
+WantedBy=default.target

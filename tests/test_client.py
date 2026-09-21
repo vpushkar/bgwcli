@@ -715,3 +715,39 @@ def test_slow_pages_get_a_longer_default_timeout_unless_the_timeout_was_set_expl
     seen.clear()
     make_client(FakeTransport(handler), timeout_ms=1000, timeout_explicit=True).get_cgi_page("home", auth=False)
     assert seen["/cgi-bin/home.ha"] == 1000
+
+
+def test_login_verifies_the_session_when_the_router_does_not_redirect_to_home():
+    """A wrong access code does not always come back as a 'Login Failed' page: the gateway can answer
+    the login POST with 200 and an ordinary-looking page while leaving the session unauthenticated,
+    so the first protected GET returns the login page (observed live 2026-09-20). login() must verify
+    the session against a protected page and raise RouterAuthError, so callers such as
+    `autorestore`'s fallback access code get their turn and no unauthenticated session is cached."""
+    login_html = login_nonce_html("abc123")
+
+    def handler(req, n):
+        path = urlsplit(req.url).path
+        if req.method == "POST" and path == "/cgi-bin/login.ha":
+            return html("<title>Please wait</title><p>Processing your request.</p>", status=200)  # no redirect, not a login page
+        if path == "/cgi-bin/login.ha":
+            return html(login_html)
+        return html(login_html)  # every protected page: still the login page
+
+    client = make_client(FakeTransport(handler))
+    with pytest.raises(RouterAuthError):
+        client.login()
+    assert client.has_authenticated_session() is False
+
+
+def test_login_accepts_a_200_answer_when_a_protected_page_then_renders():
+    def handler(req, n):
+        path = urlsplit(req.url).path
+        if req.method == "POST" and path == "/cgi-bin/login.ha":
+            return html("<title>Welcome</title>", status=200, headers={"set-cookie": "SessionID=ok; Path=/"})
+        if path == "/cgi-bin/login.ha":
+            return html(login_nonce_html("abc123"))
+        return html("<title>Custom Services</title><table></table>")
+
+    client = make_client(FakeTransport(handler))
+    client.login()
+    assert client.has_authenticated_session() is True

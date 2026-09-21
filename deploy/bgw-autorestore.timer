@@ -1,0 +1,13 @@
+# Runs bgw-autorestore.service 5 minutes after boot and every 15 minutes while up.
+# Persistent=true catches up a tick missed while the Pi was off.
+[Unit]
+Description=Run bgwcli autorestore periodically
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

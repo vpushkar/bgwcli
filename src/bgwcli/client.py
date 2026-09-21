@@ -164,6 +164,8 @@ class RouterClientOptions:
 # Pages that legitimately take longer than the 15 s default on this gateway (measured live
 # 2026-09-20: home.ha 17-18 s, lanstatistics.ha 23-29 s). Used as a floor for the implicit default
 # only; an explicit --timeout / BGW_TIMEOUT_MS is always honored as-is.
+# Protected page used to verify a login that did not answer with the usual 302 -> home.ha.
+_LOGIN_PROBE_PAGE = "services"
 SLOW_PAGE_TIMEOUT_MS: dict[str, int] = {"home": 45000, "lanstatistics": 45000}
 _CGI_PAGE_IN_PATH = re.compile(r"^/cgi-bin/([a-z0-9_]+)\.ha", re.IGNORECASE)
 
@@ -414,6 +416,14 @@ class BGW320Client:
             self._authenticated = True
             return
         if looks_like_login(response.body) or re.search(r"Login Failed|Access Code Required", response.body, re.I):
+            raise RouterAuthError("Login failed. Check the device access code.")
+        # No redirect to home.ha and no explicit failure: the gateway can answer a wrong code with an
+        # ordinary 200 page while leaving the session unauthenticated (observed live 2026-09-20).
+        # Verify against a protected page so a rejected code fails HERE, where callers (e.g. the
+        # autorestore fallback code) can react, and so no unauthenticated session is ever cached.
+        probe = self._request(f"/cgi-bin/{_LOGIN_PROBE_PAGE}.ha", "GET")
+        if looks_like_login(probe.body):
+            self._authenticated = False
             raise RouterAuthError("Login failed. Check the device access code.")
         self._authenticated = True
 
