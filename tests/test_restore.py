@@ -51,7 +51,7 @@ from bgwcli.snapshot_diff import (
     SnapshotDiff,
     diff_snapshots,
 )
-from bgwcli.types import ParsedPage
+from bgwcli.types import HttpResponse, ParsedPage
 
 OPTIONS = RestoreOptions(prune=False, include_secrets=False)
 PRUNE = replace(OPTIONS, prune=True)
@@ -741,7 +741,7 @@ def test_execute_restore_performs_allocate_reads_the_entry_form_then_posts_save(
         post=lambda p, f: post_response(302, "/cgi-bin/ipalloc.ha"), get=lambda p: get_response(200, "entry")
     )
     execution = execute_restore(client, [reserve_fake(MAC, "192.168.1.67")])
-    assert client.gets == ["ipalloc"]
+    assert client.gets == ["ipalloc", "ipalloc"]  # entry form, then the post-redirect banner check
     assert client.posted == [
         ("ipalloc", {f"Allocate_{MAC}": "Allocate"}),
         ("ipalloc", {f"alloc_{MAC}": "192.168.1.67", "Save": "Save"}),
@@ -1084,7 +1084,8 @@ def test_execute_restore_re_reads_the_dropdown_and_posts_a_deferred_forward_once
     fake_parser["apphosting"] = apphosting_with_star_mosh()
     client = FakeClient(get=lambda p: get_response(200, "apphosting"))
     execution = execute_restore(client, deferred_steps())
-    assert client.gets == ["apphosting"]
+    # services 302 -> banner check; apphosting dropdown re-read + banner check; dosprotect banner check
+    assert client.gets == ["services", "apphosting", "apphosting", "dosprotect"]
     assert [p for p, _ in client.posted] == ["services", "apphosting", "dosprotect"]
     assert client.posted[1][1].items() >= {"service": "*Mosh", "device": "aa:bb:cc:dd:ee:02", "Add": "Add"}.items()
     assert [s.status for s in execution.steps] == ["applied", "applied", "applied"]
@@ -1286,3 +1287,77 @@ def test_form_step_still_skips_a_page_whose_only_differing_field_is_disabled():
     wanted = replace(dump_no_service_adds(), forwards=live.forwards, forms={**live.forms, "wconfig": {"key11": "s3cret"}})  # noqa: E501
     steps = build_restore_plan(diff_snapshots(wanted, live), wanted, pages, RestoreOptions())
     assert not [s for s in steps if s.kind == "form" and s.page == "wconfig"]
+
+
+ERROR_BANNER_HTML = """<html><body><form method="post" action="/cgi-bin/apphosting.ha">
+<input type="hidden" name="nonce" value="n">
+<img id="error-message-icon" src="/images/icon_error.png" alt="alert" />
+<div id="error-message-text">
+ A required setting is empty
+<br /> A required setting is empty
+<br />
+</div><select name="service"><option value="*Mosh">*Mosh</option></select>
+<select name="device"><option value="aa:bb:cc:dd:ee:02">host-b</option></select>
+<input type="submit" name="Add" value="Add"></form></body></html>"""
+
+
+def test_execute_restore_reports_a_step_failed_when_the_redirect_target_carries_the_routers_error_banner():
+    """Live factory-reset recovery 2026-09-21: every forward add answered 302 -> apphosting.ha and the
+    router silently dropped it, showing 'A required setting is empty' in its error banner on the
+    redirect target. A 302 is not success; the step must read the target page once and fail with
+    the banner text instead of reporting `applied`."""
+    posted: list[str] = []
+
+    class Client:
+        def post_cgi_page(self, page, fields):
+            posted.append(page)
+            return HttpResponse(302, "Found", {"location": "/cgi-bin/apphosting.ha"}, "", "https://r/cgi-bin/apphosting.ha")
+
+        def get_cgi_page(self, page, *, auth=True):
+            return HttpResponse(200, "OK", {}, ERROR_BANNER_HTML, f"https://r/cgi-bin/{page}.ha")
+
+    step = RestoreStep(
+        order=1,
+        kind="add-forward",
+        page="apphosting",
+        description="add forward Mosh -> host-b",
+        button="Add",
+        raw_payload={"service": "*Mosh", "device": "aa:bb:cc:dd:ee:02", "Add": "Add"},
+    )
+    execution = execute_restore(Client(), [step])
+    result = execution.steps[0]
+    assert result.status == "failed"
+    assert "A required setting is empty" in (result.error or "")
+    assert result.status_code == 302
+    assert execution.stopped_at == 1
+
+
+def test_execute_restore_keeps_applied_when_the_redirect_target_has_no_error_banner():
+    class Client:
+        def post_cgi_page(self, page, fields):
+            return HttpResponse(302, "Found", {"location": "/cgi-bin/apphosting.ha"}, "", "https://r/cgi-bin/apphosting.ha")
+
+        def get_cgi_page(self, page, *, auth=True):
+            return HttpResponse(200, "OK", {}, "<html><body><table><tr><th>Service</th></tr></table></body></html>", f"https://r/cgi-bin/{page}.ha")
+
+    step = RestoreStep(
+        order=1, kind="add-forward", page="apphosting", description="add", button="Add", raw_payload={"Add": "Add"}
+    )
+    assert execute_restore(Client(), [step]).steps[0].status == "applied"
+
+
+def test_router_error_banner_ignores_the_success_banner_and_requires_the_error_icon():
+    """The gateway reuses <div id="error-message-text"> for informational messages: after a save it
+    reads 'Changes saved' with no icon; real errors are preceded by
+    <img id="error-message-icon" src="/images/icon_error.png"> (observed live 2026-09-21)."""
+    from bgwcli.restore import router_error_banner
+
+    success = '<div id="error-message"> <div id="error-message-text"> Changes saved </div> </div>'
+    error = (
+        '<div id="error-message"> <img id="error-message-icon" src="/images/icon_error.png" alt="alert" />'
+        ' <div id="error-message-text"> A required setting is empty <br />'
+        " A required setting is empty <br /> </div> </div>"
+    )
+    assert router_error_banner(success) is None
+    assert router_error_banner(error) == "A required setting is empty A required setting is empty"
+    assert router_error_banner("<html><body>no banner</body></html>") is None

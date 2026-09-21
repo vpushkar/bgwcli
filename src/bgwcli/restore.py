@@ -660,6 +660,40 @@ def _location(headers: Mapping[str, Any] | None) -> str | None:
     return None
 
 
+_ERROR_BANNER = re.compile(
+    r'<img[^>]*id="error-message-icon"[^>]*icon_error[^>]*>\s*<div[^>]*id="error-message-text"[^>]*>(.*?)</div>',
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def router_error_banner(html: str) -> str | None:
+    """The gateway reports a rejected form on the redirect target as a banner, not as an HTTP error:
+    `<img id="error-message-icon" src="/images/icon_error.png"> <div id="error-message-text"> A required
+    setting is empty ...</div>` (observed live 2026-09-21 on NAT/Gaming adds that answered 302). The same
+    text element also carries informational messages such as 'Changes saved' — those come WITHOUT the
+    error icon and are not errors. Returns the collapsed error text or None."""
+    match = _ERROR_BANNER.search(html)
+    if not match:
+        return None
+    text = re.sub(r"<[^>]+>", " ", match.group(1))
+    text = re.sub(r"\s+", " ", text).strip()
+    return text or None
+
+
+def error_banner_after_redirect(client: Any, location: str | None) -> str | None:
+    """After a 302 to an ordinary CGI page, read that page once and return its error banner text."""
+    if not location:
+        return None
+    match = _CGI_PAGE.search(location)
+    if match is None:
+        return None
+    try:
+        page = client.get_cgi_page(match.group(1))
+    except Exception:  # noqa: BLE001 - verification only; a failed re-read must not mask the POST result
+        return None
+    return router_error_banner(page.body)
+
+
 def _accepted(status_code: int) -> bool:
     return status_code == 200 or 300 <= status_code < 400
 
@@ -711,9 +745,20 @@ def execute_restore(
                     if result.status == "failed":
                         stopped_at = step.order
                 else:
-                    result = RestoreStepResult(
-                        **base, status="applied", status_code=response.status_code, location=location
-                    )
+                    redirected = 300 <= response.status_code < 400
+                    banner = error_banner_after_redirect(client, location) if redirected else None
+                    if banner:
+                        # A 302 only means the POST was accepted; the router reports a rejected form
+                        # as a banner on the redirect target, so surface it as a failure here.
+                        result = RestoreStepResult(
+                            **base, status="failed", status_code=response.status_code, location=location,
+                            error=f"router rejected the change: {banner}",
+                        )
+                        stopped_at = step.order
+                    else:
+                        result = RestoreStepResult(
+                            **base, status="applied", status_code=response.status_code, location=location
+                        )
             except Exception as exc:  # noqa: BLE001 - any transport failure becomes a failed step
                 result = RestoreStepResult(**base, status="failed", error=str(exc))
                 stopped_at = step.order
@@ -748,6 +793,12 @@ def _run_deferred_forward(client: RestorePoster, step: RestoreStep, base: dict[s
         response = client.post_cgi_page("apphosting", resolved.raw_payload)
         location = _location(response.headers)
         if _accepted(response.status_code):
+            banner = error_banner_after_redirect(client, location) if 300 <= response.status_code < 400 else None
+            if banner:
+                return RestoreStepResult(
+                    **base, status="failed", status_code=response.status_code, location=location,
+                    error=f"router rejected the change: {banner}",
+                )
             return RestoreStepResult(**base, status="applied", status_code=response.status_code, location=location)
         return RestoreStepResult(
             **base,
@@ -849,6 +900,12 @@ def _run_follow_up(client: RestorePoster, follow_up: RestoreFollowUp, base: dict
     )
     location = _location(response.headers)
     if _accepted(response.status_code):
+        banner = error_banner_after_redirect(client, location) if 300 <= response.status_code < 400 else None
+        if banner:
+            return RestoreStepResult(
+                **base, status="failed", status_code=response.status_code, location=location,
+                error=f"router rejected the change: {banner}",
+            )
         return RestoreStepResult(**base, status="applied", status_code=response.status_code, location=location)
     return RestoreStepResult(
         **base,

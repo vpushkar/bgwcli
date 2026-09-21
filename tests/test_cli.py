@@ -1176,7 +1176,7 @@ def test_set_commit_posts_the_save_button_and_verifies_the_change(capsys, fake):
     page, fields = fake["client"].posts[0]
     assert page == "dosprotect" and fields["icmp_downstream_echo_rqst_drop_wan"] == "on" and fields["Save"] == "Save"
     assert payload["committed"] is True and payload["verified"] is True
-    assert fake["client"].gets.count("dosprotect") == 2  # plan fetch + verification re-read
+    assert fake["client"].gets.count("dosprotect") == 3  # plan fetch, post-redirect banner check, verification re-read
 
 
 def test_set_commit_reports_a_discarded_change_with_exit_1(capsys, fake):
@@ -1260,3 +1260,14 @@ def test_timeout_flag_marks_the_timeout_explicit_and_default_does_not(capsys, fa
     assert fake["options"].timeout_ms == 15000 and fake["options"].timeout_explicit is False
     run(capsys, ["check", "--timeout", "2500"])
     assert fake["options"].timeout_ms == 2500 and fake["options"].timeout_explicit is True
+
+
+def test_submit_commit_fails_loudly_when_the_router_shows_its_error_banner_after_the_redirect(capsys, fake):
+    banner = """<html><body><form method="post" action="/cgi-bin/apphosting.ha"><input type="hidden" name="nonce" value="n">
+<img id="error-message-icon" src="/images/icon_error.png" alt="alert" /><div id="error-message-text"> A required setting is empty <br /></div>
+<select name="service"><option value="*Mosh">*Mosh</option></select><select name="device"><option value="aa:bb:cc:dd:ee:02">host-b</option></select>
+<input type="submit" name="Add" value="Add"></form></body></html>"""
+    fake["client"] = FakeClient({**PAGES, "apphosting": banner}, post_status=302, post_location="/cgi-bin/apphosting.ha")
+    code, out, err = run(capsys, ["submit", "apphosting", "Add", "service=*Mosh", "device=aa:bb:cc:dd:ee:02", "--commit", "--confirm", "APPHOSTING"])
+    assert code == 1
+    assert "A required setting is empty" in err

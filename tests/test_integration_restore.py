@@ -766,7 +766,7 @@ def deferred_steps() -> list[RestoreStep]:
 def test_execute_restore_re_reads_the_nat_gaming_dropdown_and_posts_a_deferred_forward_once_its_service_exists():
     router = FakeRouter({"apphosting": APPHOSTING_WITH_STAR_MOSH_HTML})
     execution = execute_restore(router, deferred_steps())
-    assert router.gets == ["apphosting"]
+    assert router.gets == ["services", "apphosting", "apphosting", "dosprotect"]  # + post-redirect banner checks
     assert [p for p, _ in router.posted] == ["services", "apphosting", "dosprotect"]
     assert router.posted[1][1].items() >= {"service": "*Mosh", "device": "aa:bb:cc:dd:ee:02", "Add": "Add"}.items()
     assert statuses(execution) == ["applied", "applied", "applied"]

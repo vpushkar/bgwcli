@@ -56,6 +56,7 @@ from .restore import (
     RestoreOptions,
     build_restore_plan,
     confirm_warning_page,
+    error_banner_after_redirect,
     execute_restore,
     is_confirmation_redirect,
     restore_converged,
@@ -477,6 +478,10 @@ def _post_and_confirm(client: Any, page: str, payload: dict[str, str]) -> tuple[
         if step.status != "applied":
             raise UsageError(step.error or "Wi-Fi Warning confirmation failed; change not applied.")
         status_code, location = step.status_code or status_code, step.location
+    elif 300 <= status_code < 400:
+        banner = error_banner_after_redirect(client, location)
+        if banner:
+            raise UsageError(f"router rejected the change: {banner}")
     return status_code, location
 
 
