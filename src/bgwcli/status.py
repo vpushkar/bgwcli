@@ -26,6 +26,7 @@ __all__ = [
     "fetch_security_options",
     "fetch_status_sections",
     "parsed_data_count",
+    "status_answered",
 ]
 
 UNUSABLE_RESPONSE = "Router returned an unusable response."
@@ -96,6 +97,14 @@ def fetch_status_sections(
 ) -> list[StatusSection]:
     """The `status` command: sysinfo, broadbandstatistics, fiberstat, firewall as independent sections."""
     return _fetch_sections(client, FALLBACK_STATUS_PAGES, include_secrets, fetch_parsed_page)
+
+
+def status_answered(view: StatusResult | Sequence[StatusSection]) -> bool:
+    """False when nothing was read: a composite view that fell back with no readable section, or a
+    `status` section list with no readable section. Callers map that to "no answer" (exit 2)."""
+    if isinstance(view, StatusResult):
+        return not view.fallback or any(section.ok for section in view.sections)
+    return any(section.ok for section in view)
 
 
 def _fetch_composite(

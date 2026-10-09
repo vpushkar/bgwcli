@@ -133,7 +133,7 @@ def test_poll_diagnostic_result_waits_until_the_progress_window_is_non_empty_and
     client = _SequenceClient([_diag_html(b) for b in bodies])
     slept: list[float] = []
     text, page = poll_diagnostic_result(client, timeout_ms=15000, interval_ms=1000, sleep=slept.append)
-    assert text == "PING 8.8.8.8 64 bytes"  # parser normalizes textarea whitespace
+    assert text == "PING 8.8.8.8\n64 bytes"  # textarea text is kept raw, line breaks included
     assert page is not None and page.page == "diag"
     assert client.calls == 4  # empty, partial, full, full (stable) -> stop
     assert slept == [1.0, 1.0, 1.0, 1.0]  # one interval before every poll, none after the last
@@ -176,3 +176,51 @@ def test_poll_diagnostic_result_defaults_to_half_second_polls():
     from bgwcli.diagnostics import poll_diagnostic_result
 
     assert inspect.signature(poll_diagnostic_result).parameters["interval_ms"].default == 500
+
+
+def test_poll_diagnostic_result_budget_counts_request_time_not_only_sleeps(monkeypatch):
+    """The poll window is wall time: slow reads use it up too, and no poll starts after it ends."""
+    from bgwcli import diagnostics
+    from bgwcli.diagnostics import poll_diagnostic_result
+
+    now = [0.0]
+
+    class SlowClient(_SequenceClient):
+        def get_cgi_page(self, page, *, auth=True):
+            now[0] += 4.0  # every read takes four seconds
+            return super().get_cgi_page(page, auth=auth)
+
+    def fake_sleep(seconds):
+        now[0] += seconds
+
+    monkeypatch.setattr(diagnostics, "_monotonic", lambda: now[0], raising=False)
+    client = SlowClient([_diag_html("")] * 50)
+    text, page = poll_diagnostic_result(client, timeout_ms=15000, interval_ms=500, sleep=fake_sleep)
+    assert text == "" and page is None
+    assert client.calls == 4
+    starts_ok = now[0] <= 15.0 + 4.0  # only a read already running may finish past the window
+    assert starts_ok, now[0]
+
+
+def test_poll_diagnostic_result_starts_from_an_already_fetched_result_page():
+    """A result page the caller already read (the banner check after the POST) seeds the poll: its
+    output is kept even when the next poll finds the window cleared."""
+    from bgwcli.diagnostics import poll_diagnostic_result
+
+    client = _SequenceClient([_diag_html("")] * 5)
+    text, page = poll_diagnostic_result(
+        client, timeout_ms=15000, interval_ms=500, sleep=lambda s: None,
+        initial_body=_diag_html("1 packets transmitted, 1 received"),
+    )
+    assert text == "1 packets transmitted, 1 received" and page is not None
+    assert client.calls == 1
+
+
+def test_poll_diagnostic_result_with_an_empty_initial_page_polls_as_before():
+    from bgwcli.diagnostics import poll_diagnostic_result
+
+    client = _SequenceClient([_diag_html(b) for b in ["", "out", "out"]])
+    text, _ = poll_diagnostic_result(
+        client, timeout_ms=15000, interval_ms=500, sleep=lambda s: None, initial_body=_diag_html("")
+    )
+    assert text == "out" and client.calls == 3

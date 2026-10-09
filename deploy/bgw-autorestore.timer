@@ -1,12 +1,12 @@
-# Runs bgw-autorestore.service 5 minutes after boot and every 15 minutes while up.
-# Persistent=true catches up a tick missed while the Pi was off.
+# Runs bgw-autorestore.service 5 minutes after boot and every 15 minutes while up. These are
+# monotonic timers: nothing is missed while the Pi is off (Persistent= only applies to OnCalendar=
+# timers), and the boot-time run covers whatever happened in between.
 [Unit]
 Description=Run bgwcli autorestore periodically
 
 [Timer]
 OnBootSec=5min
 OnUnitActiveSec=15min
-Persistent=true
 RandomizedDelaySec=60
 
 [Install]

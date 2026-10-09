@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>IP Allocation</title></head>
+<body>
+<div id="content">
+<h1>IP Allocation</h1>
+<form name="ipalloc" method="post" action="/cgi-bin/ipalloc.ha">
+<input type="hidden" name="nonce" value="0123456789abcdef">
+<table class="grid table100">
+<tr><th>IPv4 Address / Name</th><th>MAC Address</th><th>Status</th><th>Allocation</th><th>Action</th></tr>
+<tr><td>192.0.2.10 / laptop</td><td>02:00:00:00:00:01</td><td>on</td><td>DHCP</td><td><input type="submit" name="Allocate_1" value="Allocate"></td></tr>
+<tr><td>192.0.2.11 / printer</td><td>02:00:00:00:00:02</td><td>off</td><td>Fixed</td><td><input type="submit" name="Release_2" value="Release"></td></tr>
+</table>
+</form>
+</div>
+</body>
+</html>

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Wi-Fi</title></head>
+<body>
+<div id="content">
+<h1>Wi-Fi</h1>
+<div class="desc">Changes take effect after Save.</div>
+<form name="wconfig" method="post" action="/cgi-bin/wconfig_unified.ha">
+<input type="hidden" name="nonce" value="0123456789abcdef">
+<table class="grid">
+<tr><th><label for="u_ussidenable">Home SSID Enable</label></th>
+<td><select name="u_ussidenable" id="u_ussidenable"><option value="on" selected="selected">On</option><option value="off">Off</option></select></td></tr>
+<tr><th><label for="home_ssidname">Home SSID Name</label></th>
+<td><input type="text" name="home_ssidname" id="home_ssidname" value="SyntheticHome" maxlength="32"></td></tr>
+<tr><th><label for="homeSSID_security">Home Security</label></th>
+<td><select name="homeSSID_security" id="homeSSID_security"><option value="wpa2" selected="selected">WPA-PSK (WPA2)</option><option value="wpa3">WPA3</option></select></td></tr>
+<tr><th><label for="homeSSID_key">Home Password</label></th>
+<td><input type="text" name="homeSSID_key" id="homeSSID_key" value="synthetic-passphrase" maxlength="63"></td></tr>
+</table>
+<input type="submit" name="Save" value="Save">
+</form>
+<h2>2.4 GHz Radio</h2>
+<table class="grid">
+<tr><th>Current Channel</th><td>6 (20 MHz)</td><td>802.11b/g/n/ax</td></tr>
+</table>
+<h2>5 GHz Radio</h2>
+<table class="grid">
+<tr><th>Current Channel</th><td>36 (80 MHz) 149 (80 MHz)</td><td>802.11a/n/ac/ax</td></tr>
+</table>
+</div>
+</body>
+</html>

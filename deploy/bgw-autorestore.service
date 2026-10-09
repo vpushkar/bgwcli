@@ -3,18 +3,30 @@
 [Unit]
 Description=bgwcli autorestore - restore ~/bgw-baseline.json after a gateway factory reset
 Documentation=https://github.com/vpushkar/bgwcli
-After=network-online.target
-Wants=network-online.target
+# No After=/Wants=network-online.target: that is a system unit, which a user manager can neither
+# start nor order against, so those lines would do nothing. A run before the network is up reports
+# router-unreachable (exit 0) and the timer's OnBootSec delay gives the network time to come up.
 
 [Service]
 Type=oneshot
 # BGW_ACCESS_CODE, BGW_FALLBACK_ACCESS_CODE (sticker code), optional BGW_TIMEOUT_MS / BGW_HOST.
 EnvironmentFile=%h/.config/bgw/autorestore.env
+# stdout is a pipe to the journal: unbuffered, so a kill at TimeoutStartSec or a power loss loses at
+# most the progress line being written, not the whole run's output.
+Environment=PYTHONUNBUFFERED=1
 ExecStart=%h/.local/bin/bgwcli autorestore %h/bgw-baseline.json --commit --confirm RESTORE
 # Exit 1 (not converged) is a real answer, not a unit failure: the next timer tick retries.
+# It also covers usage errors and session-lock wait timeouts (exit 1 too): check the journal after
+# editing this unit or autorestore.env.
 SuccessExitStatus=1
-# Restore passes sleep --wait seconds between each other (default 120s x 3 passes).
-TimeoutStartSec=20min
+# Worst-case run, in seconds. autorestore stops starting steps (the first included), passes and
+# inter-pass sleeps once its own run limit has passed (autorestore.RUN_DEADLINE_SECONDS; re-checked right before every write starts), so the unit is sized to that limit:
+#   1800 run limit (initial fetch, 180 allocation ownership window, every pass and sleep fit inside)
+#   +  90 the one step that may still be in flight (15 nonce read + 15 POST + 60 acknowledgement window)
+#   + 555 upper bound for the one closing fetch of the 11 snapshot pages (7 always, up to 4 optional form pages) at the 15 s page timeout
+#   + 135 margin                                                          = 2580
+# 2580 s = 43 min; a run killed mid-write would leave a recovery intent for the next tick to resume.
+TimeoutStartSec=2580
 Nice=10
 
 [Install]

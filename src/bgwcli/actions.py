@@ -6,7 +6,7 @@ Port of src/actions.ts. Every confirm token, page, payload and dangerous flag is
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .redact import redact_value
 
@@ -26,6 +26,13 @@ class RouterAction:
     # Submit button INSIDE a page's main form: the action posts the live form's base payload plus
     # this button (like `submit <page> <button>`), never the button alone.
     form_button: str | None = None
+    # The action's effect takes the gateway's web server down (restart, reset family) or the radio
+    # this client is connected through (Wi-Fi restart, channel scan): the redirect target that carries
+    # the answer banner cannot be read, so it is not read and the POST's own answer stands. Every
+    # other action whose answer cannot be read is "no answer".
+    drops_web_server: bool = field(default=False, metadata={"serialize": False})
+    # The button only opens an editor on the gateway; nothing is saved until the editor's own Save.
+    opener: bool = field(default=False, metadata={"serialize": False})
 
 
 ROUTER_ACTIONS: tuple[RouterAction, ...] = (
@@ -36,6 +43,7 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         confirm_token="RESTART",
         payload={"Restart": "Restart Device"},
         dangerous=True,
+        drops_web_server=True,
         aliases=("restart-device", "reboot"),
     ),
     RouterAction(
@@ -54,6 +62,46 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         payload={"run": "Run Speed Test"},
         dangerous=False,
         aliases=("speed-test",),
+    ),
+    RouterAction(
+        name="detect-wifi-congestion-2.4",
+        page="lanstatistics",
+        description="Run 2.4 GHz Wi-Fi congestion detection from LAN Statistics.",
+        confirm_token="CONGESTION-2.4",
+        payload={"Congestion": "Congestion Detection 2.4 GHz"},
+        dangerous=False,
+        aliases=("congestion-2.4", "congestion-24"),
+        form_button="Congestion",
+    ),
+    RouterAction(
+        name="detect-wifi-congestion-5",
+        page="lanstatistics",
+        description="Run 5 GHz Wi-Fi congestion detection from LAN Statistics.",
+        confirm_token="CONGESTION-5",
+        payload={"CongRadio2": "Congestion Detection 5 GHz"},
+        dangerous=False,
+        aliases=("congestion-5", "congestion-5ghz"),
+        form_button="CongRadio2",
+    ),
+    RouterAction(
+        name="clear-connection-statistics",
+        page="lanstatistics",
+        description="Clear connection statistics counters from LAN Statistics.",
+        confirm_token="CLEAR-CONNECTION-STATISTICS",
+        payload={"ClearSta": "Clear Connection Statistics"},
+        dangerous=True,
+        aliases=("clear-connection-stats",),
+        form_button="ClearSta",
+    ),
+    RouterAction(
+        name="clear-lan-statistics",
+        page="lanstatistics",
+        description="Clear LAN statistics counters using the LAN Statistics Clear Statistics button.",
+        confirm_token="CLEAR-LAN-STATISTICS",
+        payload={"Clear": "Clear Statistics"},
+        dangerous=True,
+        aliases=("clear-statistics", "clear-lan-stats"),
+        form_button="Clear",
     ),
     RouterAction(
         name="run-full-diagnostics",
@@ -126,6 +174,7 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         payload={"AddDropRule": "Add a 'Drop' Rule"},
         dangerous=False,
         aliases=("add-drop-rule",),
+        opener=True,
     ),
     RouterAction(
         name="packet-filter-add-pass-rule",
@@ -135,6 +184,7 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         payload={"AddPassRule": "Add a 'Pass' Rule"},
         dangerous=False,
         aliases=("add-pass-rule",),
+        opener=True,
     ),
     RouterAction(
         name="reset-ip",
@@ -143,6 +193,7 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         confirm_token="RESET-IP",
         payload={"ResetIP": "Reset IP"},
         dangerous=True,
+        drops_web_server=True,
     ),
     RouterAction(
         name="reset-connection",
@@ -151,6 +202,7 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         confirm_token="RESET-CONNECTION",
         payload={"ResetConn": "Reset Connection"},
         dangerous=True,
+        drops_web_server=True,
     ),
     RouterAction(
         name="restart-from-resets",
@@ -159,6 +211,7 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         confirm_token="RESTART",
         payload={"Restart": "Restart"},
         dangerous=True,
+        drops_web_server=True,
     ),
     RouterAction(
         name="reset-wifi-config",
@@ -167,6 +220,7 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         confirm_token="RESET-WIFI-CONFIG",
         payload={"WReset": "Reset Wi-Fi Config"},
         dangerous=True,
+        drops_web_server=True,
         aliases=("reset-wi-fi-config",),
     ),
     RouterAction(
@@ -176,6 +230,7 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         confirm_token="RESET-FIREWALL-CONFIG",
         payload={"FReset": "Reset Firewall Config"},
         dangerous=True,
+        drops_web_server=True,
     ),
     RouterAction(
         name="factory-reset",
@@ -184,6 +239,7 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         confirm_token="FACTORY-RESET",
         payload={"Reset": "Reset Device..."},
         dangerous=True,
+        drops_web_server=True,
         aliases=("reset-device",),
     ),
     RouterAction(
@@ -194,6 +250,7 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         payload={"WRestart1": "Restart"},
         dangerous=False,
         aliases=("restart-wifi-24", "restart-2.4ghz", "restart-wifi-2-4"),
+        drops_web_server=True,
         post_path="wrestart.ha?1",
     ),
     RouterAction(
@@ -204,6 +261,7 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         payload={"WRestart2": "Restart"},
         dangerous=False,
         aliases=("restart-wifi-5ghz", "restart-5ghz"),
+        drops_web_server=True,
         post_path="wrestart.ha?2",
     ),
     RouterAction(
@@ -213,6 +271,7 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         confirm_token="RESTART-BROADBAND",
         payload={"Broadband": "Restart"},
         dangerous=True,
+        drops_web_server=True,
         aliases=("restart-wan",),
         post_path="crestart.ha?1",
     ),
@@ -224,11 +283,28 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         payload={"chanscan5": "Find Best Channel"},
         dangerous=False,
         aliases=("chanscan5", "find-best-channel", "scan-5ghz-channel"),
+        drops_web_server=True,
         form_button="chanscan5",
     ),
 )
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
+
+
+_OPENER_BUTTON = re.compile(r"^allocate_", re.IGNORECASE)
+# Packet Filter's add-rule buttons open the rule editor too (the same names the opener actions post).
+_OPENER_BUTTON_NAMES: dict[str, frozenset[str]] = {
+    "packetfilter": frozenset({"adddroprule", "addpassrule"}),
+}
+
+
+def is_opener_button(page: str, button: str) -> bool:
+    """True for a generic form button that only opens an editor: IP Allocation's Allocate_<mac> and
+    Packet Filter's add-rule buttons. `button` is the page's resolved button name, never the token
+    the user typed (a label or value can resolve to an opener)."""
+    if page == "ipalloc":
+        return _OPENER_BUTTON.match(button) is not None
+    return normalize_action(button) in _OPENER_BUTTON_NAMES.get(page, frozenset())
 
 
 def normalize_action(value: str) -> str:

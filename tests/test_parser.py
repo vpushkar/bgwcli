@@ -178,6 +178,49 @@ def test_parse_devices_handles_wide_table_shape_and_multiple_devices():
     ]
 
 
+@pytest.mark.parametrize("layout", ["wide", "key-value"])
+def test_parse_devices_preserves_bare_ipv4_address_without_a_hostname(layout):
+    if layout == "wide":
+        html = """
+        <table>
+          <tr><th>Status</th><th>IPv4 Address / Name</th><th>IPv6</th><th>MAC Address</th></tr>
+          <tr><td>on</td><td> 192.168.1.64 </td><td>fe80::1</td><td>02:0a:0b:0c:0d:03</td></tr>
+        </table>
+        """
+    else:
+        html = """
+        <table>
+          <tr><td>MAC Address</td><td>02:0a:0b:0c:0d:03</td></tr>
+          <tr><td>IPv4 Address / Name</td><td> 192.168.1.64 </td></tr>
+        </table>
+        """
+
+    assert [(device.ip, device.name, device.mac) for device in parse_devices(html)] == [
+        ("192.168.1.64", "", "02:0a:0b:0c:0d:03")
+    ]
+
+
+@pytest.mark.parametrize("name", ["printer", "192.168.1.999"])
+def test_parse_devices_key_value_hostname_without_address_remains_a_name(name):
+    html = f"""
+    <table>
+      <tr><td>MAC Address</td><td>02:0a:0b:0c:0d:03</td></tr>
+      <tr><td>IPv4 Address / Name</td><td>{name}</td></tr>
+    </table>
+    """
+    assert [(device.ip, device.name) for device in parse_devices(html)] == [("", name)]
+
+
+def test_parse_devices_legacy_wide_layout_keeps_separate_ip_column():
+    html = """
+    <table>
+      <tr><th>Status</th><th>Name</th><th>IPv4 Address</th><th>MAC Address</th></tr>
+      <tr><td>on</td><td>printer</td><td>192.168.1.64</td><td>02:0a:0b:0c:0d:03</td></tr>
+    </table>
+    """
+    assert [(device.ip, device.name) for device in parse_devices(html)] == [("192.168.1.64", "printer")]
+
+
 def test_parse_devices_key_value_shape_splits_multiple_devices_on_mac_rows():
     devices = parse_devices(
         """
@@ -312,10 +355,23 @@ def test_looks_like_login_ignores_configuration_pages_with_password_controls():
 
 def test_looks_like_login_matches_title_access_code_text_or_login_form():
     assert looks_like_login("<title>login</title>") is True
-    assert looks_like_login("<p>Access Code Required</p>") is True
-    assert looks_like_login('<form action="/cgi-bin/login.ha"></form><input id="password">') is True
-    assert looks_like_login('<form action="/cgi-bin/login.ha"><input name="password"></form>') is False
+    assert looks_like_login("<h1>Login</h1>") is True
+    assert looks_like_login("<title>Access Code Required</title>") is True
+    assert looks_like_login("<h1>Access Code Required</h1>") is True
+    login_form = '<form action="/cgi-bin/login.ha"><input type="hidden" name="nonce" value="n"><input type="password" id="password" name="password"></form>'
+    assert looks_like_login(login_form) is True
     assert looks_like_login("<title>Login Page</title>") is False
+
+
+def test_looks_like_login_ignores_the_phrase_in_body_text_and_partial_login_forms():
+    # Router pages quote these words in help text; only the title, the top heading or the login
+    # form itself (nonce plus password field) identify the login page.
+    assert looks_like_login("<title>Access Code</title><p>Access Code Required to change this setting.</p>") is False
+    assert looks_like_login("<p>Login</p><td>Access Code Required</td>") is False
+    assert looks_like_login('<form action="/cgi-bin/login.ha"></form><input id="password">') is False
+    assert looks_like_login('<form action="/cgi-bin/login.ha"><input name="password"></form>') is False
+    assert looks_like_login('<form action="/cgi-bin/login.ha"><input name="nonce" value="n"></form>') is False
+    assert looks_like_login('<form action="/cgi-bin/routerpasswd.ha"><input name="nonce" value="n"><input id="password" name="password"></form>') is False
 
 
 def test_parse_page_extracts_wifi_current_channels_and_widths():
@@ -480,6 +536,25 @@ def test_parse_page_labels_fiber_thresholds_with_their_measurement():
     assert parsed.heading == "Rx Power Currently -141"
 
 
+def test_fiber_thresholds_split_a_lowercase_currently_heading():
+    parsed = parse_page(
+        "fiberstat",
+        """
+        <h1>Rx Power currently -141</h1>
+        <table><tr><th></th><th>Low</th><th>High</th></tr><tr><td>Alarm</td><td>0</td><td>0</td></tr></table>
+        """,
+    )
+    assert [(row["Measurement"], row["Current"]) for row in parsed.tables] == [("Rx Power", "-141")]
+    assert "Rx Power" not in parsed.values  # the generic heading split stays case-sensitive
+
+
+def test_parse_page_does_not_split_a_lowercase_currently_heading_on_a_generic_page():
+    parsed = parse_page("broadbandstatistics", "<h1>WAN is currently down</h1><p>Status text</p>")
+    assert "WAN is" not in parsed.values
+    assert "down" not in parsed.values.values()
+    assert parsed.tables == []
+
+
 def test_parse_page_captures_all_voice_statistics_table_shapes():
     parsed = parse_page(
         "voicestat",
@@ -577,9 +652,10 @@ def test_parse_page_mac_filter_tables():
     ]
 
 
-def test_parse_logs_reads_first_table_rows_with_six_columns():
+def test_parse_logs_reads_first_table_with_a_log_header():
     logs = parse_logs(
         """
+        <table><tr><td>Menu</td><td>of</td><td>links</td></tr></table>
         <table>
           <tr><th>#</th><th>Time</th><th>Source</th><th>Destination</th><th>Protocol</th><th>Reason</th></tr>
           <tr><td>1</td><td>10:00</td><td>1.1.1.1</td><td>2.2.2.2</td><td>TCP</td><td>blocked</td></tr>
@@ -588,10 +664,20 @@ def test_parse_logs_reads_first_table_rows_with_six_columns():
         <table><tr><td>2</td><td>b</td><td>c</td><td>d</td><td>e</td><td>f</td></tr></table>
         """
     )
+    assert logs is not None
     assert [asdict(entry) for entry in logs] == [
         {"id": "1", "time": "10:00", "source": "1.1.1.1", "destination": "2.2.2.2", "protocol": "TCP", "reason": "blocked"}
     ]
-    assert parse_logs("<p>no tables</p>") == []
+
+
+def test_parse_logs_distinguishes_an_empty_log_from_a_page_that_is_not_the_log():
+    header = "<tr><th>ID</th><th>Time</th><th>Source</th><th>Destination</th><th>Protocol</th><th>Reason</th></tr>"
+    assert parse_logs(f"<table>{header}</table>") == []
+    assert parse_logs("<p>no tables</p>") is None
+    assert parse_logs("<html><title>Please wait</title><table><tr><td>a</td></tr></table></html>") is None
+    # Six columns without a log header are some other table.
+    assert parse_logs("<table><tr><td>a</td><td>b</td><td>c</td><td>d</td><td>e</td><td>f</td></tr></table>") is None
+    assert parse_logs("<table><tr><th>a</th><th>b</th><th>c</th><th>d</th><th>e</th><th>f</th></tr></table>") is None
 
 
 # --- snapshot.test.ts / restore.test.ts / mutations.test.ts inline HTML ---------------------
@@ -727,8 +813,8 @@ def test_dosprotect_page_checkbox_and_disabled_select_flags():
     by_name = {f.name: f for f in parsed.fields}
     assert by_name["reflexive"].type == "checkbox" and by_name["reflexive"].checked is True
     assert by_name["reflexive"].value == "on"
-    # A checkbox with no value attribute parses as value "" and unchecked; it is still a field.
-    assert by_name["unchecked_box"].value == "" and by_name["unchecked_box"].checked is False
+    # The default value is "on" even when unchecked; submission still omits the field.
+    assert by_name["unchecked_box"].value == "on" and by_name["unchecked_box"].checked is False
     assert by_name["unchecked_box"].disabled is None
     selects = {s.name: s for s in parsed.selects}
     assert selects["flood_protect"].disabled is None and selects["flood_protect"].value == "on"
@@ -816,6 +902,16 @@ def test_ipalloc_entry_page_select_by_id_and_name_with_disabled_option():
     )
     assert parsed.forms[0].select_names == ["alloc_aa:bb:cc:dd:ee:ff"]
     assert parsed.forms[0].button_names == ["Save", "Cancel"]
+
+
+def test_select_option_with_empty_value_parses_as_empty_not_as_its_label():
+    html = """<html><body><form method="post" action="/cgi-bin/firewall.ha">
+<select name="proto"><option value="" selected>Any</option><option value="tcp">TCP</option><option>UDP</option></select>
+</form></body></html>"""
+    select = parse_page("firewall", html, include_secrets=True).selects[0]
+    assert select.value == ""
+    assert select.options == ["", "tcp", "UDP"]  # a missing value attribute still falls back to the label
+    assert select.option_details[0] == SelectOption(value="", label="Any", selected=True, disabled=False)
 
 
 WCONFIG_HTML = """
@@ -960,9 +1056,9 @@ def test_controls_outside_any_form_are_still_parsed_but_forms_stay_scoped():
     ]
 
 
-def test_inputs_without_name_or_id_are_ignored_and_type_case_is_preserved():
+def test_inputs_without_name_or_id_are_ignored_and_type_is_lowercased():
     parsed = parse_page("home", '<input value="anon"><input type="Text" name="t" value="v"><input type="SUBMIT" name="s" value="S">')
-    assert [(f.name, f.type) for f in parsed.fields] == [("t", "Text")]
+    assert [(f.name, f.type) for f in parsed.fields] == [("t", "text")]
     assert [(b.name, b.type) for b in parsed.buttons] == [("s", "submit")]
 
 
@@ -982,7 +1078,9 @@ def test_text_extraction_collapses_whitespace_and_decodes_entities():
     assert parsed.title == "Home & Status"
     assert parsed.heading == "Line One"
     assert parsed.values["A <b>"] == "x y"
-    assert parsed.textareas[0].value == "a b"
+    # textarea content is form data: kept raw (see the textarea test below); values show it normalised
+    assert parsed.textareas[0].value == " a\n          b "
+    assert parsed.values["Field ta"] == "a b"
 
 
 def test_script_style_and_comments_are_not_parsed_as_content():
@@ -1098,3 +1196,161 @@ def test_sweep_fake_page_body_yields_two_values_and_one_value_entry(page):
                             "<table><tr><td>Status</td><td>Up</td></tr></table></body></html>")
     assert bare.values == {"Status": "Up"}
     assert bare.value_entries == [ParsedValueEntry(section="Fake", label="Status", value="Up")]
+
+
+# --- control sensitivity and raw attribute/text values ----------------------------------------
+
+
+@pytest.mark.parametrize("input_type", ["password", "PASSWORD", "Password"])
+def test_password_type_input_is_sensitive_whatever_its_name(input_type):
+    html = f'<form><input type="{input_type}" name="entry" value="hunter2"></form>'
+    parsed = parse_page("x", html)
+    assert parsed.fields[0].sensitive is True
+    assert parsed.fields[0].value == "[redacted]"
+    assert "hunter2" not in str(parsed.values)
+    revealed = parse_page("x", html, include_secrets=True)
+    assert revealed.fields[0].value == "hunter2" and revealed.fields[0].sensitive is True
+
+
+def test_input_type_is_lowercased_so_checkable_logic_sees_mixed_case_markup():
+    parsed = parse_page(
+        "x", '<form><input type="CheckBox" name="on_box"><input type="Hidden" name="h" value="1"><input name="t"></form>'
+    )
+    assert [(f.name, f.type) for f in parsed.fields] == [("on_box", "checkbox"), ("h", "hidden"), ("t", "text")]
+    # an unchecked checkbox does not surface in values, even when the markup spells its type in capitals
+    assert "Field on_box" not in parsed.values
+
+
+def test_nbsp_in_attribute_values_is_kept_raw_and_normalised_only_for_display():
+    parsed = parse_page(
+        "x",
+        '<form><input name="label" value="My\xa0Net"><select name="s"><option value="a\xa0b" selected>A&nbsp;B</option></select>'
+        '<input type="submit" name="go" value="Go\xa0Now"></form><a href="/cgi-bin/home.ha" title="Home\xa0Page"></a>',
+    )
+    assert parsed.fields[0].value == "My\xa0Net"
+    assert parsed.selects[0].value == "a\xa0b" and parsed.selects[0].option_details[0].label == "A B"
+    assert parsed.buttons[0].value == "Go\xa0Now" and parsed.buttons[0].label == "Go Now"
+    assert parsed.links[0].label == "Home Page"
+
+
+def test_textarea_value_keeps_raw_text_and_drops_only_the_leading_newline():
+    parsed = parse_page("diag", '<form><textarea name="ProgressWindow">\nPING x\n  64 bytes\tok\n\n</textarea></form>')
+    assert parsed.textareas[0].value == "PING x\n  64 bytes\tok\n\n"
+    assert parsed.values["Field ProgressWindow"] == "PING x 64 bytes ok"
+    crlf = parse_page("x", '<textarea name="t">\r\nline</textarea>')
+    assert crlf.textareas[0].value == "line"
+
+
+def test_a_new_select_closes_an_unclosed_select():
+    parsed = parse_page(
+        "x",
+        '<form><select name="a"><option value="1" selected>One<select name="b"><option value="2">Two</select></form>',
+    )
+    assert [s.name for s in parsed.selects] == ["a", "b"]
+    assert parsed.selects[0].options == ["1"] and parsed.selects[1].options == ["2"]
+    assert parsed.selects[1].value == "2"
+    assert parsed.forms[0].select_names == ["a", "b"]
+
+
+def test_deeply_nested_markup_parses_without_recursion_limits():
+    deep = "<div>" * 20000 + "<table><tr><td>Model</td><td>BGW320</td></tr></table>" + "</div>" * 20000
+    parsed = parse_page("x", deep)
+    assert parsed.values["Model"] == "BGW320"
+    unclosed = "<table><tr><td>a</td><td>b</td></tr></table>" + "<font>x" * 5000
+    assert parse_page("x", unclosed).values["a"] == "b"
+    from bgwcli.parser import parse_document
+
+    root = parse_document("<div>" + "<span>" * 2400 + "deep text")  # well past the recursion limit, within the text bound
+    assert root.text() == "deep text" and root.raw_text() == "deep text"
+
+
+def test_value_entry_sections_are_resolved_in_one_pass_over_many_tables():
+    import time
+
+    html = "".join(f"<h2>h{i}</h2><table><tr><td>a{i}</td><td>b</td></tr></table>" for i in range(5000))
+    started = time.perf_counter()
+    parsed = parse_page("x", html)
+    elapsed = time.perf_counter() - started
+    assert parsed.value_entries[0].section == "h0" and parsed.value_entries[-1].section == "h4999"
+    # Quadratic heading lookup took tens of seconds here; linear work finishes well inside this bound.
+    assert elapsed < 5
+
+
+def test_colspan_header_expands_into_indexed_columns_and_is_not_a_value_pair():
+    parsed = parse_page(
+        "x", "<table><tr><th colspan=2>Name</th><th>MAC</th></tr><tr><td>a</td><td>b</td><td>c</td></tr></table>"
+    )
+    assert parsed.values == {}
+    assert parsed.tables == [{"Name": "a", "Name 2": "b", "MAC": "c"}]
+    # A colspan value cell still reads as a value; a full-width data row is not a record.
+    parsed = parse_page(
+        "x",
+        "<table><tr><td>Model</td><td colspan=2>BGW320</td></tr></table>"
+        "<table><tr><th>A</th><th>B</th><th>C</th></tr><tr><td colspan=3>No entries</td></tr></table>",
+    )
+    assert parsed.values == {"Model": "BGW320"} and parsed.tables == []
+
+
+def test_rowspan_continuation_rows_fill_the_spanned_column_and_are_not_value_pairs():
+    parsed = parse_page(
+        "x",
+        "<table><tr><th>A</th><th>B</th><th>C</th></tr><tr><td rowspan=2>x</td><td>1</td><td>2</td></tr>"
+        "<tr><td>3</td><td>4</td></tr></table>",
+    )
+    assert parsed.values == {}
+    assert parsed.tables == [{"A": "x", "B": "1", "C": "2"}, {"A": "x", "B": "3", "C": "4"}]
+    parsed = parse_page(
+        "x", "<table><tr><th rowspan=2>DNS</th><td>1.1.1.1</td></tr><tr><td>8.8.8.8</td></tr><tr><td>Model</td><td>BGW320</td></tr></table>"
+    )
+    assert parsed.values == {"DNS": "1.1.1.1", "Model": "BGW320"}
+
+
+def test_a_second_header_row_is_not_a_record():
+    parsed = parse_page(
+        "x",
+        "<table><tr><th>Name</th><th>State</th><th>Mode</th></tr><tr><th>(units)</th><th>on/off</th><th>auto</th></tr>"
+        "<tr><td>a</td><td>on</td><td>auto</td></tr></table>",
+    )
+    assert parsed.tables == [{"Name": "a", "State": "on", "Mode": "auto"}]
+    # A row that labels itself with a th but carries data cells stays a record.
+    parsed = parse_page("x", "<table><tr><th>A</th><th>B</th><th>C</th></tr><tr><th>x</th><td>1</td><td>2</td></tr></table>")
+    assert parsed.tables == [{"A": "x", "B": "1", "C": "2"}]
+
+
+NESTED_SECRET_HTML = (
+    "<table><tr><td>Details</td><td><table><tr><td>Password</td><td>ProbeSecret</td></tr>"
+    "<tr><td>Uptime</td><td>5 days</td></tr></table></td></tr></table>"
+    "<table><tr><th>Name</th><th>State</th><th>Notes</th></tr>"
+    "<tr><td>a</td><td>on</td><td><table><tr><td>Access Code Default: ProbeDefault</td><td>x</td></tr>"
+    "<tr><td>Phone Number</td><td>555-0101</td><td>555-0102</td></tr></table></td></tr></table>"
+)
+
+
+def test_a_nested_secret_is_redacted_in_the_enclosing_cell_text_too():
+    parsed = parse_page("sysinfo", NESTED_SECRET_HTML)
+    assert parsed.values["Password"] == "[redacted]"
+    assert parsed.values["Details"] == "Password [redacted] Uptime 5 days"
+    dumped = str(to_json_dict(parsed))
+    for secret in ("ProbeSecret", "ProbeDefault", "555-0101", "555-0102"):
+        assert secret not in dumped
+    notes = next(row for row in parsed.tables if row.get("Name") == "a")["Notes"]
+    assert notes == "Access Code Default: [redacted] [redacted] Phone Number [redacted] [redacted]"
+
+
+def test_a_nested_secret_stays_visible_with_include_secrets():
+    parsed = parse_page("sysinfo", NESTED_SECRET_HTML, include_secrets=True)
+    assert parsed.values["Details"] == "Password ProbeSecret Uptime 5 days"
+
+
+@pytest.mark.parametrize("page", ["wconfig", "etherlan", "wmacauth"])
+@pytest.mark.parametrize("body", ["", "<html><title>Busy</title><p>try again</p></html>"])
+def test_summary_rows_are_not_synthesized_without_the_controls_they_summarize(page, body):
+    assert parse_page(page, body).tables == []
+
+
+def test_summary_rows_keep_their_full_shape_once_any_summarised_control_is_observed():
+    etherlan = '<select name="enet2_port2_media"><option value="auto" selected>Auto</option></select>'
+    assert [row["Port"] for row in parse_page("etherlan", etherlan).tables] == ["1", "2", "3", "4"]
+    wmacauth = '<select name="wmacr2user"><option value="allow" selected>Allow</option></select>'
+    assert [row["Filtering"] for row in parse_page("wmacauth", wmacauth).tables] == ["", "", "allow"]
+    assert len(parse_page("wconfig", '<input name="ssidname12" value="Guest">').tables) == 5

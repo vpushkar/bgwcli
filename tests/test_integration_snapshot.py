@@ -75,7 +75,6 @@ def test_snapshot_pages_and_form_pages_include_wconfig_and_ipalloc():
         "packetfilter",
         "dosprotect",
         "wconfig",
-        "wconfig_unified",
         "etherlan",
         "dhcpserver",
         "ippass",

@@ -4,226 +4,33 @@ module-level seams in bgwcli.sweep so these tests run before those modules exist
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+import os
+import stat
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
+from sweep_helpers import (
+    FAKE_TABS,
+    FakeClient,
+    FakeDeviceListResult,
+)
 
 from bgwcli import sweep
-from bgwcli.errors import RouterAuthError, RouterSessionPoolFullError, UsageError
+from bgwcli.errors import RouterAuthError, UsageError
 from bgwcli.sweep import (
     SweepOptions,
     SweepPage,
     strip_large_payloads,
+    sweep_exit_code,
     sweep_router,
     write_sweep_artifacts,
 )
 from bgwcli.types import (
-    ParsedButton,
-    ParsedField,
-    ParsedForm,
     ParsedPage,
-    ParsedValueEntry,
     to_json_dict,
 )
-
-
-@dataclass(frozen=True)
-class FakeTab:
-    section: str
-    label: str
-    page: str
-    dangerous: bool = False
-
-
-# Mirrors the router-tab order of src/pages.ts for the pages these tests use.
-FAKE_TABS = [
-    FakeTab("Device", "Status", "home"),
-    FakeTab("Device", "Device List", "devices"),
-    FakeTab("Device", "Restart Device", "restart", dangerous=True),
-    FakeTab("Home Network", "Status", "lanstatistics"),
-    FakeTab("Home Network", "Wi-Fi", "wconfig_unified"),
-    FakeTab("Home Network", "Subnets & DHCP", "dhcpserver"),
-    FakeTab("Firewall", "Security Options", "securityoptions"),
-    FakeTab("Diagnostics", "Troubleshoot", "diag"),
-    FakeTab("Diagnostics", "Site Map", "sitemap"),
-    FakeTab("Diagnostics", "Site Map", "sitemap"),  # duplicate on purpose: sweep must dedupe
-]
-FAKE_ALIASES = {"troubleshoot": "diag", "wifi": "wconfig_unified"}
-
-
-@dataclass
-class FakeResponse:
-    status_code: int
-    body: str
-    headers: dict = field(default_factory=dict)
-    status_message: str = "OK"
-    url: str = ""
-
-
-@dataclass
-class FakeClient:
-    fail_pages: set[str] = field(default_factory=set)
-    auth_error_pages: set[str] = field(default_factory=set)
-    session_pool_full_pages: set[str] = field(default_factory=set)
-    login_pages: set[str] = field(default_factory=set)
-    status_codes: dict[str, int] = field(default_factory=dict)
-    calls: list[str] = field(default_factory=list)
-    kwargs: dict[str, dict] = field(default_factory=dict)
-
-    def get_cgi_page(self, page: str, **kwargs) -> FakeResponse:
-        self.calls.append(page)
-        self.kwargs[page] = kwargs
-        if page in self.fail_pages:
-            raise RuntimeError(f"boom {page}")
-        if page in self.auth_error_pages:
-            raise RouterAuthError("bad authentication")
-        if page in self.session_pool_full_pages:
-            error = RouterSessionPoolFullError("pool full")
-            error.waited_ms = 5
-            error.retry_count = 2
-            raise error
-        title = "Login" if page in self.login_pages else page
-        return FakeResponse(
-            status_code=self.status_codes.get(page, 200),
-            body=f"<title>{title}</title><h1>{page}</h1>\n<form action=\"/cgi-bin/{page}.ha\">"
-            '<input name="nonce" value="abc"><input name="target" value="example.com">'
-            '<input type="submit" name="Ping" value="Ping"></form>',
-            url=f"https://router/cgi-bin/{page}.ha",
-        )
-
-
-def fake_parsed(page: str, title: str | None = None) -> ParsedPage:
-    return ParsedPage(
-        page=page,
-        title=title or page,
-        heading=page,
-        values={"Status": "Up", "Title": page},
-        tables=[],
-        fields=[
-            ParsedField("nonce", "hidden", "[redacted]", False, True),
-            ParsedField("target", "text", "example.com", False, False),
-        ],
-        buttons=[ParsedButton("Ping", "submit", "Ping", "Ping", False)],
-        forms=[ParsedForm("post", f"/cgi-bin/{page}.ha", ["nonce", "target"], [], [], ["Ping"])],
-        value_entries=[ParsedValueEntry("", "Status", "Up")],
-        links=[],
-    )
-
-
-def fake_parse_page(page: str, html: str, include_secrets: bool = False) -> ParsedPage:
-    title = "Login" if "<title>Login</title>" in html else page
-    return fake_parsed(page, title)
-
-
-def fake_parsed_data_count(parsed: ParsedPage) -> int:
-    return (
-        len(parsed.values)
-        + len(parsed.tables)
-        + len(parsed.fields)
-        + len(parsed.selects)
-        + len(parsed.textareas)
-        + len(parsed.buttons)
-        + len(parsed.forms)
-    )
-
-
-@dataclass
-class FakeParsedPageResult:
-    page: str
-    ok: bool
-    status_code: int | None = None
-    parsed: ParsedPage | None = None
-    error: str | None = None
-
-
-def fake_fetch_parsed_page(client, page: str, include_secrets: bool = False) -> FakeParsedPageResult:
-    try:
-        response = client.get_cgi_page(page)
-    except RouterAuthError:
-        raise
-    except Exception as error:  # noqa: BLE001 - mirrors fetch.ts soft failure
-        return FakeParsedPageResult(page=page, ok=False, error=str(error))
-    parsed = fake_parse_page(page, response.body, include_secrets)
-    if parsed.title == "Login":
-        return FakeParsedPageResult(
-            page, False, response.status_code, parsed, "Router returned the login page instead of the requested page."
-        )
-    return FakeParsedPageResult(page, 200 <= response.status_code < 400, response.status_code, parsed)
-
-
-@dataclass
-class FakeStatusSection:
-    page: str
-    ok: bool
-    values: dict[str, str]
-    tables: list[dict[str, str]]
-    title: str | None = None
-    error: str | None = None
-
-
-@dataclass
-class FakeStatusResult:
-    page: str
-    fallback: bool
-    sections: list[FakeStatusSection]
-    status_code: int | None = None
-    parsed: ParsedPage | None = None
-    error: str | None = None
-
-
-def fake_status_fetcher(page: str, fallback_pages: list[str]):
-    def fetch(client, include_secrets: bool = False) -> FakeStatusResult:
-        try:
-            response = client.get_cgi_page(page)
-        except RouterAuthError:
-            raise
-        except Exception as error:  # noqa: BLE001
-            sections = [
-                FakeStatusSection(p, True, {"Key": "Value"}, [{"Col": "Row"}]) for p in fallback_pages
-            ]
-            return FakeStatusResult(page, True, sections, error=str(error))
-        parsed = fake_parse_page(page, response.body, include_secrets)
-        return FakeStatusResult(page, False, [FakeStatusSection(page, True, parsed.values, parsed.tables)],
-                                status_code=response.status_code, parsed=parsed)
-
-    return fetch
-
-
-@dataclass
-class FakeDeviceListResult:
-    fallback: bool
-    devices: list
-    error: str | None = None
-
-
-def fake_fetch_device_list(client) -> FakeDeviceListResult:
-    client.get_cgi_page("devices")
-    return FakeDeviceListResult(False, [object(), object()])
-
-
-@pytest.fixture
-def backend(monkeypatch):
-    """Install the fake parser/pages/fetch/status/devices seams and disable sleeping."""
-    sleeps: list[int] = []
-    monkeypatch.setattr(sweep, "_router_tabs", lambda: list(FAKE_TABS))
-    monkeypatch.setattr(sweep, "_resolve_page", lambda name: FAKE_ALIASES.get(name, name))
-    monkeypatch.setattr(sweep, "_parse_page", fake_parse_page)
-    monkeypatch.setattr(sweep, "_parsed_data_count", fake_parsed_data_count)
-    monkeypatch.setattr(sweep, "_fetch_parsed_page", fake_fetch_parsed_page)
-    monkeypatch.setattr(sweep, "_fetch_device_list", fake_fetch_device_list)
-    monkeypatch.setattr(
-        sweep, "_fetch_device_status", fake_status_fetcher("home", ["sysinfo", "broadbandstatistics", "firewall"])
-    )
-    monkeypatch.setattr(
-        sweep,
-        "_fetch_home_network_status",
-        fake_status_fetcher("lanstatistics", ["etherlan", "dhcpserver", "ipalloc", "wconfig_unified"]),
-    )
-    monkeypatch.setattr(
-        sweep, "_fetch_security_options", fake_status_fetcher("securityoptions", ["firewall", "dosprotect"])
-    )
-    monkeypatch.setattr(sweep, "_sleep", lambda ms: sleeps.append(ms))
-    return sleeps
 
 
 def test_sweep_walks_selected_pages_in_router_tab_order(backend):
@@ -256,6 +63,23 @@ def test_sweep_continues_after_per_page_failure(backend):
     assert [(page.page, page.ok) for page in pages] == [("dhcpserver", False), ("diag", True)]
     assert "boom" in (pages[0].error or "")
     assert pages[0].data_count == 0 and pages[0].data_obtainable is False and pages[0].useful is False
+
+
+def test_sweep_records_a_page_level_403_and_continues(backend):
+    """One page answering 401/403 is that page's failure, not a lost session: the sweep goes on
+    (as it did before GET status codes were checked), while login failures still abort below."""
+    client = FakeClient(forbidden_pages={"dhcpserver"})
+    pages = sweep_router(client, SweepOptions(pages=["dhcpserver", "diag"], use_fallbacks=False))
+    assert [(page.page, page.ok) for page in pages] == [("dhcpserver", False), ("diag", True)]
+    assert "HTTP 403" in (pages[0].error or "")
+    assert client.calls == ["dhcpserver", "diag"]
+
+
+def test_sweep_aborts_on_a_login_403_even_though_it_carries_a_status(backend):
+    client = FakeClient(login_forbidden_pages={"dhcpserver"})
+    with pytest.raises(RouterAuthError):
+        sweep_router(client, SweepOptions(pages=["dhcpserver", "diag"], use_fallbacks=False))
+    assert client.calls == ["dhcpserver"]
 
 
 def test_sweep_aborts_immediately_on_authentication_errors(backend):
@@ -338,7 +162,7 @@ def test_sweep_marks_dangerous_tabs_guarded(backend):
 
 def test_sweep_sleeps_between_pages_when_delay_set(backend):
     sweep_router(FakeClient(), SweepOptions(delay_ms=250, pages=["diag", "dhcpserver"], use_fallbacks=False))
-    assert backend == [250, 250]
+    assert backend == [250], "no sleep after the last page"
     backend.clear()
     sweep_router(FakeClient(), SweepOptions(delay_ms=0, pages=["diag"], use_fallbacks=False))
     assert backend == []
@@ -381,6 +205,44 @@ def test_sweep_devices_fallback_counts_devices(backend):
     assert page.table_rows == 2 and page.data_count == 2 and page.devices is None
     detailed = sweep_router(FakeClient(), SweepOptions(pages=["devices"], include_parsed=True))
     assert len(detailed[0].devices) == 2
+
+
+def test_sweep_devices_page_with_no_online_devices_is_ok(backend, monkeypatch):
+    """A healthy router with zero online devices answered: the page is ok and the sweep exits 0."""
+    monkeypatch.setattr(sweep, "_fetch_device_list", lambda client: FakeDeviceListResult(False, []))
+    pages = sweep_router(FakeClient(), SweepOptions(pages=["devices"]))
+    assert (pages[0].ok, pages[0].error, pages[0].data_count) == (True, None, 0)
+    assert sweep_exit_code(pages) == 0
+
+
+def test_sweep_devices_page_is_not_ok_when_the_device_list_could_not_be_read(backend, monkeypatch):
+    monkeypatch.setattr(sweep, "_fetch_device_list", lambda client: FakeDeviceListResult(True, [], error="boom"))
+    pages = sweep_router(FakeClient(), SweepOptions(pages=["devices"]))
+    assert (pages[0].ok, pages[0].fallback, pages[0].error) == (False, True, "boom")
+    assert sweep_exit_code(pages) == 2
+
+
+def test_sweep_devices_page_keeps_the_fallback_error_when_ip_allocation_was_unreadable(backend, monkeypatch):
+    monkeypatch.setattr(
+        sweep,
+        "_fetch_device_list",
+        lambda client: FakeDeviceListResult(True, [], error="timed out", fallback_error="ipalloc answered 403"),
+    )
+    page = sweep_router(FakeClient(), SweepOptions(pages=["devices"]))[0]
+    assert (page.ok, page.error, page.fallback_error) == (False, "timed out", "ipalloc answered 403")
+    assert to_json_dict(page)["fallbackError"] == "ipalloc answered 403"
+    monkeypatch.setattr(sweep, "_fetch_device_list", lambda client: FakeDeviceListResult(False, [object()]))
+    healthy = sweep_router(FakeClient(), SweepOptions(pages=["devices"]))[0]
+    assert healthy.fallback_error is None and "fallbackError" not in to_json_dict(healthy)
+
+
+def test_sweep_devices_page_rebuilt_from_ip_allocation_is_ok(backend, monkeypatch):
+    """devices.ha failed but the IP Allocation fallback produced devices: the page answered."""
+    monkeypatch.setattr(
+        sweep, "_fetch_device_list", lambda client: FakeDeviceListResult(True, [object()], error="timed out")
+    )
+    page = sweep_router(FakeClient(), SweepOptions(pages=["devices"]))[0]
+    assert (page.ok, page.fallback, page.error, page.data_count) == (True, True, "timed out", 1)
 
 
 def test_sweep_generic_fallback_path_reports_unusable_pages(backend):
@@ -442,6 +304,90 @@ def test_write_sweep_artifacts_writes_html_parsed_and_compact_sweep_json(backend
     assert "artifacts" not in entries["dhcpserver"]
 
 
+def _artifact_page(raw_html: str = "<html><title>diag</title></html>") -> SweepPage:
+    return SweepPage(
+        section="Diagnostics",
+        label="Diagnostics",
+        page="diag",
+        dangerous=False,
+        guarded=False,
+        ok=True,
+        raw_html=raw_html,
+        parsed=ParsedPage(page="diag", title="diag", heading="diag"),
+    )
+
+
+def _artifact_paths(out: Path) -> list[Path]:
+    return [out / "router-html" / "diag.html", out / "parsed" / "diag.json", out / "sweep.json"]
+
+
+@pytest.mark.parametrize("umask", [0o022, 0o000])
+def test_write_sweep_artifacts_files_are_private_under_any_umask(tmp_path, umask):
+    out = tmp_path / "out"
+    previous = os.umask(umask)
+    try:
+        write_sweep_artifacts([_artifact_page()], out)
+    finally:
+        os.umask(previous)
+    for path in _artifact_paths(out):
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600, path
+
+
+@pytest.mark.parametrize("umask", [0o022, 0o000])
+def test_write_sweep_artifacts_directories_are_private_under_any_umask(tmp_path, umask):
+    out = tmp_path / "out"
+    previous = os.umask(umask)
+    try:
+        write_sweep_artifacts([_artifact_page()], out)
+    finally:
+        os.umask(previous)
+    for directory in (out, out / "router-html", out / "parsed"):
+        assert stat.S_IMODE(directory.stat().st_mode) == 0o700, directory
+
+
+def test_write_sweep_artifacts_tightens_existing_world_readable_files(tmp_path):
+    out = tmp_path / "out"
+    for path in _artifact_paths(out):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("stale contents that are much longer than the new artifact " * 50)
+        path.chmod(0o644)
+    write_sweep_artifacts([_artifact_page()], out)
+    for path in _artifact_paths(out):
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600, path
+    assert "stale" not in (out / "router-html" / "diag.html").read_text(encoding="utf-8")
+
+
+def test_write_sweep_artifacts_are_utf8_regardless_of_locale(tmp_path):
+    """A non-UTF-8 locale must not change the artifact encoding (or crash on characters it cannot encode)."""
+    out = tmp_path / "out"
+    script = (
+        "import sys\n"
+        "from bgwcli.sweep import SweepPage, write_sweep_artifacts\n"
+        "from bgwcli.types import ParsedPage\n"
+        "page = SweepPage(section='D', label='D', page='diag', dangerous=False, guarded=False, ok=True,\n"
+        "                 raw_html='<p>caf\\u00e9 \\u2713</p>',\n"
+        "                 parsed=ParsedPage(page='diag', title='caf\\u00e9 \\u2713', heading=''))\n"
+        "write_sweep_artifacts([page], sys.argv[1])\n"
+    )
+    src = Path(__file__).resolve().parent.parent / "src"
+    env = {**os.environ, "PYTHONPATH": str(src), "PYTHONUTF8": "0", "LC_ALL": "en_US.ISO8859-1"}
+    env.pop("PYTHONIOENCODING", None)
+    probe = subprocess.run(
+        [sys.executable, "-c", "import locale; print(locale.getpreferredencoding(False))"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    if probe.stdout.strip().lower().replace("-", "").replace("_", "") != "iso88591":
+        pytest.skip(f"ISO-8859-1 locale unavailable (subprocess encoding {probe.stdout.strip()!r})")
+    subprocess.run([sys.executable, "-c", script, str(out)], check=True, env=env, capture_output=True)
+
+    assert (out / "router-html" / "diag.html").read_bytes() == "<p>caf\u00e9 \u2713</p>\n".encode()
+    assert json.loads((out / "parsed" / "diag.json").read_bytes().decode("utf-8"))["title"] == "caf\u00e9 \u2713"
+    (out / "sweep.json").read_bytes().decode("utf-8")
+
+
 def test_sweep_page_json_keys_are_camel_case(backend):
     client = FakeClient(session_pool_full_pages={"diag"})
     page = sweep_router(client, SweepOptions(pages=["diag"], use_fallbacks=False))[0]
@@ -452,3 +398,162 @@ def test_sweep_page_json_keys_are_camel_case(backend):
         "dataObtainable", "useful", "notOnlyJunk", "sessionPoolFull", "waitedMs", "retryCount",
     }
     assert "skipped" not in as_json and "statusCode" not in as_json
+
+
+def test_sweep_exit_code_is_2_when_every_swept_page_failed(backend):
+    pages = sweep_router(
+        FakeClient(fail_pages={"diag", "dhcpserver"}), SweepOptions(pages=["diag", "dhcpserver"], use_fallbacks=False)
+    )
+    assert [page.ok for page in pages] == [False, False]
+    assert sweep_exit_code(pages) == 2
+
+
+def test_sweep_exit_code_is_0_when_any_page_succeeded(backend):
+    pages = sweep_router(
+        FakeClient(fail_pages={"dhcpserver"}), SweepOptions(pages=["diag", "dhcpserver"], use_fallbacks=False)
+    )
+    assert [page.ok for page in pages] == [False, True]
+    assert sweep_exit_code(pages) == 0
+    all_ok = sweep_router(FakeClient(), SweepOptions(pages=["diag"], use_fallbacks=False))
+    assert [page.ok for page in all_ok] == [True] and sweep_exit_code(all_ok) == 0
+
+
+def test_sweep_exit_code_is_0_for_an_empty_sweep():
+    assert sweep_exit_code([]) == 0
+
+
+@pytest.mark.parametrize("relative", ["router-html/diag.html", "parsed/diag.json", "sweep.json"])
+def test_write_sweep_artifacts_refuses_a_symlinked_artifact_and_leaves_its_target_alone(tmp_path, relative):
+    out = tmp_path / "out"
+    (out / "router-html").mkdir(parents=True)
+    (out / "parsed").mkdir()
+    unrelated = tmp_path / "unrelated.txt"
+    unrelated.write_text("KEEP THIS DATA")
+    unrelated.chmod(0o644)
+    (out / relative).symlink_to(unrelated)
+    with pytest.raises(PermissionError, match="symlink"):
+        write_sweep_artifacts([_artifact_page()], out)
+    assert unrelated.read_text() == "KEEP THIS DATA"
+    assert stat.S_IMODE(unrelated.stat().st_mode) == 0o644
+    assert (out / relative).is_symlink()
+
+
+@pytest.mark.parametrize("directory", ["router-html", "parsed"])
+def test_write_sweep_artifacts_refuses_a_symlinked_artifact_directory(tmp_path, directory):
+    out = tmp_path / "out"
+    out.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    elsewhere.chmod(0o755)
+    (out / directory).symlink_to(elsewhere, target_is_directory=True)
+    with pytest.raises(PermissionError, match="symlink"):
+        write_sweep_artifacts([_artifact_page()], out)
+    assert list(elsewhere.iterdir()) == []
+    assert stat.S_IMODE(elsewhere.stat().st_mode) == 0o755
+
+
+def test_fixture_capture_refuses_a_symlinked_fixture_file(tmp_path):
+    import io
+
+    from bgwcli.audit import capture_fixture_pack
+
+    root = tmp_path / "fixtures"
+    (root / "router-html").mkdir(parents=True)
+    unrelated = tmp_path / "unrelated.txt"
+    unrelated.write_text("KEEP THIS DATA")
+    (root / "router-html" / "diag.html").symlink_to(unrelated)
+    with pytest.raises(PermissionError, match="symlink"):
+        capture_fixture_pack([_artifact_page()], root, stdout=io.StringIO())
+    assert unrelated.read_text() == "KEEP THIS DATA"
+
+
+def test_write_sweep_artifacts_refuses_an_artifact_owned_by_another_user(tmp_path, monkeypatch):
+    out = tmp_path / "out"
+    write_sweep_artifacts([_artifact_page()], out)
+    before = (out / "sweep.json").read_text()
+    real_uid = os.geteuid()
+    monkeypatch.setattr(os, "geteuid", lambda: real_uid + 1)
+    with pytest.raises(PermissionError, match="another user"):
+        write_sweep_artifacts([_artifact_page("<p>new</p>")], out)
+    assert (out / "sweep.json").read_text() == before
+
+
+def _tree(root):
+    return sorted(str(path.relative_to(root)) for path in root.rglob("*"))
+
+
+def test_a_symlinked_output_root_is_refused_before_anything_is_written(tmp_path):
+    physical = tmp_path / "physical"
+    physical.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(physical, target_is_directory=True)
+    with pytest.raises(PermissionError, match="symlink"):
+        write_sweep_artifacts([_artifact_page()], alias)
+    assert _tree(physical) == []
+
+
+def test_an_output_root_owned_by_another_user_is_refused_before_anything_is_written(tmp_path, monkeypatch):
+    out = tmp_path / "out"
+    out.mkdir()
+    monkeypatch.setattr(os, "geteuid", lambda: os.stat(out).st_uid + 1)
+    with pytest.raises(PermissionError, match="another user"):
+        write_sweep_artifacts([_artifact_page()], out)
+    assert _tree(out) == []
+
+
+def test_a_refused_child_leaves_no_other_artifact_behind(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (out / "parsed").symlink_to(elsewhere, target_is_directory=True)
+    with pytest.raises(PermissionError, match="symlink"):
+        write_sweep_artifacts([_artifact_page()], out)
+    assert _tree(out) == ["parsed"] and _tree(elsewhere) == []
+
+
+def test_a_refused_missing_root_is_not_created(tmp_path):
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    (parent / "fixtures").write_text("a file, not a directory")
+    with pytest.raises(NotADirectoryError):
+        write_sweep_artifacts([_artifact_page()], parent / "fixtures")
+    assert _tree(parent) == ["fixtures"]
+
+
+def test_fixture_capture_refuses_a_symlinked_root_before_writing_any_page(tmp_path):
+    import io
+
+    from bgwcli.audit import capture_fixture_pack
+
+    physical = tmp_path / "physical"
+    physical.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(physical, target_is_directory=True)
+    with pytest.raises(PermissionError, match="symlink"):
+        capture_fixture_pack([_artifact_page()], alias, stdout=io.StringIO())
+    assert _tree(physical) == []
+
+
+def test_sweep_preflight_refuses_a_symlinked_per_page_file_before_any_walk(backend, tmp_path):
+    from bgwcli.sweep import preflight_sweep_output
+
+    html_dir = tmp_path / "router-html"
+    html_dir.mkdir()
+    (html_dir / "diag.html").symlink_to(tmp_path / "elsewhere")
+    with pytest.raises(PermissionError, match="symlink"):
+        preflight_sweep_output(tmp_path)
+    with pytest.raises(PermissionError, match="symlink"):
+        preflight_sweep_output(tmp_path, ["diag"])
+    preflight_sweep_output(tmp_path, ["home"])  # a page that is not walked is not checked
+
+
+def test_fixture_preflight_refuses_a_symlinked_per_page_file_before_any_walk(backend, tmp_path):
+    from bgwcli.audit import preflight_fixture_root
+
+    expected = tmp_path / "expected"
+    expected.mkdir()
+    (expected / "diag.json").symlink_to(tmp_path / "elsewhere")
+    with pytest.raises(PermissionError, match="symlink"):
+        preflight_fixture_root(tmp_path, ["diag"])
+    preflight_fixture_root(tmp_path, ["home"])

@@ -115,6 +115,51 @@ def header_only(html: str) -> str:
     return re.sub(r"<tr><td>.*?</tr>\n", "", html, flags=re.S)
 
 
+# Header rows of the services, forwards and IP allocation tables with no data rows: a page that shows
+# them is a legitimately empty section (a page without them, and without the gateway's one-cell empty
+# table built by `gateway_empty_page` below, is a failed read, never an empty one).
+EMPTY_SECTION_TABLES = (
+    "<table><tr><th>Service Name</th><th>Global Port Range</th><th>Base Host Port</th><th>Protocol</th><th></th></tr></table>"
+    "<table><tr><th>Service</th><th>Needed by Device</th><th></th></tr></table>"
+    "<table><tr><th>IPv4 Address / Name</th><th>MAC Address</th><th>Status</th><th>Allocation</th><th>Action</th></tr></table>"
+)
+
+
+# The gateway's empty table (fw 6.35.8, captured live 2026-10-08 after removing every entry): no header
+# row at all, one cell spanning the table with the "No ... entries have been defined" sentence, followed
+# by the page's entry form. A dump, diff or restore that only knows the header-row shape cannot read it.
+_EMPTY_MARKERS = {
+    "apphosting": ("Hosted Applications", 4, "Table of current hosted applications",
+                   "No Application Hosting entries have been defined"),
+    "services": ("Custom Services", 2, "Table of existing custom services",
+                 "No Custom Service entries have been defined"),
+}
+
+
+def gateway_empty_page(page: str, marker_page: str | None = None) -> str:
+    """`page` as the gateway renders it with no entries. `marker_page` borrows another section's
+    empty sentence (a renamed/mismatched marker is not this section's empty table)."""
+    heading, span, summary, sentence = _EMPTY_MARKERS[marker_page or page]
+    entry = (
+        '<select name="service"><option value="*custom_ssh">*custom_ssh</option></select>'
+        '<select name="device"><option value="aa:bb:cc:dd:ee:01">host-b</option></select>'
+        if page == "apphosting" else
+        '<input id="name" type="text" name="Service" value="">'
+        '<input name="extMinPort" value=""><input name="extMaxPort" value=""><input name="intStartPort" value="">'
+        '<select name="protocol"><option value="both">TCP/UDP</option><option value="tcp">TCP</option>'
+        '<option value="udp">UDP</option></select>'
+    )
+    return (
+        f'<html><head><title>{heading}</title></head><body><form method="post" action="/cgi-bin/{page}.ha">'
+        '<input type="hidden" name="nonce" value="abc">'
+        f'<h2>{heading}</h2><div class="scroller">'
+        f'<table class="grid table100" align="center" summary="{summary}">'
+        f'<tr><th colspan="{span}" align="center">\n{sentence}\n</th></tr></table><br /><br /></div>'
+        f'<h2>Entry</h2><table align="center" class="table100">{entry}</table>'
+        '<input type="submit" name="Add" value="Add"></form></body></html>'
+    )
+
+
 # --- tests/restore.test.ts --------------------------------------------------------------------------
 
 RESTORE_SERVICES_HTML = """<html><body><form method="post" action="/cgi-bin/services.ha">
@@ -226,6 +271,22 @@ WCONFIG_SAVE_DOTS_HTML = (
     '<input type="text" name="maxclients" value="80"><input type="submit" name="Update" value="Update">'
     '<input type="submit" name="Save" value="Save..."></form></body></html>'
 )
+
+
+CHANGES_SAVED_HTML = '<html><body><div id="error-message-text">Changes saved</div></body></html>'
+
+
+def allocation_saved_html(mac: str, ip: str) -> str:
+    """IP Allocation after Save: acknowledgement and the device's fixed allocation."""
+    return (
+        '<html><head><title>IP Allocation</title></head><body>'
+        '<div id="error-message-text">Changes saved</div>'
+        '<table><tr><th>IPv4 Address / Name</th><th>MAC Address</th>'
+        '<th>Status</th><th>Allocation</th><th>Action</th></tr>'
+        f'<tr><td>{ip}</td><td>{mac}</td><td>on</td><td>Fixed Allocation</td>'
+        f'<td><input type="submit" name="Allocate_{mac}" value="Allocate"></td></tr>'
+        '</table></body></html>'
+    )
 
 
 def entry_page_html(mac: str, ips: Sequence[str]) -> str:
@@ -460,3 +521,29 @@ TS_GOOD_ENTRY_JSON = (
     '"forms":{"dosprotect":{"reflexive":"on"}},'
     '"tables":{"ipalloc":[{"MAC Address":"02:0a:0b:0c:0d:01"}]}}'
 )
+
+
+def saved_configuration_html(page: str, fields: dict[str, str]) -> str:
+    """Synthetic gateway readback after persisting a successful form/add POST."""
+    from html import escape
+
+    def cell(value):
+        return f"<td>{escape(str(value))}</td>"
+
+    if page == "services":
+        headings = ("Service Name", "Global Port Range", "Base Host Port", "Protocol")
+        values = (fields["Service"], f'{fields["extMinPort"]}-{fields["extMaxPort"]}',
+                  fields["intStartPort"], fields["protocol"].upper())
+        body = '<table><tr>' + ''.join(f'<th>{h}</th>' for h in headings) + '</tr><tr>'
+        body += ''.join(cell(v) for v in values) + '</tr></table>'
+    elif page == "apphosting":
+        body = ('<table><tr><th>Service</th><th>Needed by Device</th><th>Action</th></tr><tr>'
+                + cell(fields["service"].lstrip("*")) + cell("synthetic-host") + cell("Remove") + '</tr></table>'
+                + '<select name="device"><option value="' + escape(fields["device"], quote=True)
+                + '">synthetic-host</option></select>')
+    else:
+        body = '<form>' + ''.join(
+            f'<input type="text" name="{escape(k, quote=True)}" value="{escape(v, quote=True)}">'
+            for k, v in fields.items() if k not in {"Save", "nonce"}
+        ) + '</form>'
+    return CHANGES_SAVED_HTML.replace("</body>", body + "</body>")

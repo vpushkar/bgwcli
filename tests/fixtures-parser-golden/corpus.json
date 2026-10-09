@@ -1,0 +1,7678 @@
+{
+ "synthetic/ipalloc": {
+  "redacted": {
+   "page": "ipalloc",
+   "title": "IP Allocation",
+   "heading": "IP Allocation",
+   "values": {},
+   "tables": [
+    {
+     "IPv4 Address / Name": "192.0.2.10 / laptop",
+     "MAC Address": "02:00:00:00:00:01",
+     "Status": "on",
+     "Allocation": "DHCP",
+     "Action": ""
+    },
+    {
+     "IPv4 Address / Name": "192.0.2.11 / printer",
+     "MAC Address": "02:00:00:00:00:02",
+     "Status": "off",
+     "Allocation": "Fixed",
+     "Action": ""
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Allocate_1",
+     "type": "submit",
+     "value": "Allocate",
+     "label": "Allocate",
+     "sensitive": false
+    },
+    {
+     "name": "Release_2",
+     "type": "submit",
+     "value": "Release",
+     "label": "Release",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/ipalloc.ha",
+     "fieldNames": [
+      "nonce"
+     ],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "Allocate_1",
+      "Release_2"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "ipalloc",
+   "title": "IP Allocation",
+   "heading": "IP Allocation",
+   "values": {},
+   "tables": [
+    {
+     "IPv4 Address / Name": "192.0.2.10 / laptop",
+     "MAC Address": "02:00:00:00:00:01",
+     "Status": "on",
+     "Allocation": "DHCP",
+     "Action": ""
+    },
+    {
+     "IPv4 Address / Name": "192.0.2.11 / printer",
+     "MAC Address": "02:00:00:00:00:02",
+     "Status": "off",
+     "Allocation": "Fixed",
+     "Action": ""
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "0123456789abcdef",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Allocate_1",
+     "type": "submit",
+     "value": "Allocate",
+     "label": "Allocate",
+     "sensitive": false
+    },
+    {
+     "name": "Release_2",
+     "type": "submit",
+     "value": "Release",
+     "label": "Release",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/ipalloc.ha",
+     "fieldNames": [
+      "nonce"
+     ],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "Allocate_1",
+      "Release_2"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "synthetic/login": {
+  "redacted": {
+   "page": "login",
+   "title": "Login",
+   "heading": "Login",
+   "values": {},
+   "tables": [],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "password",
+     "type": "password",
+     "value": "",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Continue",
+     "type": "submit",
+     "value": "Continue",
+     "label": "Continue",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/login.ha",
+     "fieldNames": [
+      "nonce",
+      "password"
+     ],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "Continue"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "login",
+   "title": "Login",
+   "heading": "Login",
+   "values": {},
+   "tables": [],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "0123456789abcdef",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "password",
+     "type": "password",
+     "value": "",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Continue",
+     "type": "submit",
+     "value": "Continue",
+     "label": "Continue",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/login.ha",
+     "fieldNames": [
+      "nonce",
+      "password"
+     ],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "Continue"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "synthetic/routerpasswd": {
+  "redacted": {
+   "page": "routerpasswd",
+   "title": "Access Code",
+   "heading": "Access Code",
+   "values": {
+    "Description": "The Device Access Code is required to change settings. Login with the current code first."
+   },
+   "tables": [],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "old_password",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "new_password",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save",
+     "label": "Save",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/routerpasswd.ha",
+     "fieldNames": [
+      "nonce",
+      "old_password",
+      "new_password"
+     ],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "routerpasswd",
+   "title": "Access Code",
+   "heading": "Access Code",
+   "values": {
+    "Description": "The Device Access Code is required to change settings. Login with the current code first."
+   },
+   "tables": [],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "0123456789abcdef",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "old_password",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "new_password",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save",
+     "label": "Save",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/routerpasswd.ha",
+     "fieldNames": [
+      "nonce",
+      "old_password",
+      "new_password"
+     ],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "synthetic/sysinfo": {
+  "redacted": {
+   "page": "sysinfo",
+   "title": "System Information",
+   "heading": "System Information",
+   "values": {
+    "Manufacturer": "Synthetic Vendor",
+    "Model Number": "BGW320-505",
+    "Serial Number": "SYNTH00001",
+    "Software Version": "6.35.8",
+    "Time Since Last Reboot": "1:02:03:04",
+    "Current Date/Time": "2026-10-07T12:00:00"
+   },
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [
+    {
+     "section": "System Information",
+     "label": "Manufacturer",
+     "value": "Synthetic Vendor"
+    },
+    {
+     "section": "System Information",
+     "label": "Model Number",
+     "value": "BGW320-505"
+    },
+    {
+     "section": "System Information",
+     "label": "Serial Number",
+     "value": "SYNTH00001"
+    },
+    {
+     "section": "System Information",
+     "label": "Software Version",
+     "value": "6.35.8"
+    },
+    {
+     "section": "System Information",
+     "label": "Time Since Last Reboot",
+     "value": "1:02:03:04"
+    },
+    {
+     "section": "System Information",
+     "label": "Current Date/Time",
+     "value": "2026-10-07T12:00:00"
+    }
+   ],
+   "links": [
+    {
+     "label": "Site Map",
+     "href": "/cgi-bin/sitemap.ha",
+     "kind": "router-page",
+     "page": "sitemap"
+    }
+   ]
+  },
+  "secrets": {
+   "page": "sysinfo",
+   "title": "System Information",
+   "heading": "System Information",
+   "values": {
+    "Manufacturer": "Synthetic Vendor",
+    "Model Number": "BGW320-505",
+    "Serial Number": "SYNTH00001",
+    "Software Version": "6.35.8",
+    "Time Since Last Reboot": "1:02:03:04",
+    "Current Date/Time": "2026-10-07T12:00:00"
+   },
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [
+    {
+     "section": "System Information",
+     "label": "Manufacturer",
+     "value": "Synthetic Vendor"
+    },
+    {
+     "section": "System Information",
+     "label": "Model Number",
+     "value": "BGW320-505"
+    },
+    {
+     "section": "System Information",
+     "label": "Serial Number",
+     "value": "SYNTH00001"
+    },
+    {
+     "section": "System Information",
+     "label": "Software Version",
+     "value": "6.35.8"
+    },
+    {
+     "section": "System Information",
+     "label": "Time Since Last Reboot",
+     "value": "1:02:03:04"
+    },
+    {
+     "section": "System Information",
+     "label": "Current Date/Time",
+     "value": "2026-10-07T12:00:00"
+    }
+   ],
+   "links": [
+    {
+     "label": "Site Map",
+     "href": "/cgi-bin/sitemap.ha",
+     "kind": "router-page",
+     "page": "sitemap"
+    }
+   ]
+  }
+ },
+ "synthetic/wconfig_unified": {
+  "redacted": {
+   "page": "wconfig_unified",
+   "title": "Wi-Fi",
+   "heading": "Wi-Fi",
+   "values": {
+    "Description": "Changes take effect after Save.",
+    "Field home_ssidname": "SyntheticHome",
+    "Field homeSSID_key": "[redacted]",
+    "Field u_ussidenable": "on",
+    "Field homeSSID_security": "wpa2"
+   },
+   "tables": [
+    {
+     "Radio": "2.4 GHz",
+     "Current Channel": "6",
+     "Channel Width": "20 MHz",
+     "Mode": "802.11b/g/n/ax"
+    },
+    {
+     "Radio": "5 GHz low-band",
+     "Current Channel": "36",
+     "Channel Width": "80 MHz",
+     "Mode": "802.11a/n/ac/ax"
+    },
+    {
+     "Radio": "5 GHz high-band",
+     "Current Channel": "149",
+     "Channel Width": "80 MHz",
+     "Mode": "802.11a/n/ac/ax"
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "home_ssidname",
+     "type": "text",
+     "value": "SyntheticHome",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "homeSSID_key",
+     "type": "text",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [
+    {
+     "name": "u_ussidenable",
+     "value": "on",
+     "options": [
+      "on",
+      "off"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "on",
+       "label": "On",
+       "selected": true,
+       "disabled": false
+      },
+      {
+       "value": "off",
+       "label": "Off",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    },
+    {
+     "name": "homeSSID_security",
+     "value": "wpa2",
+     "options": [
+      "wpa2",
+      "wpa3"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "wpa2",
+       "label": "WPA-PSK (WPA2)",
+       "selected": true,
+       "disabled": false
+      },
+      {
+       "value": "wpa3",
+       "label": "WPA3",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save",
+     "label": "Save",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/wconfig_unified.ha",
+     "fieldNames": [
+      "nonce",
+      "home_ssidname",
+      "homeSSID_key"
+     ],
+     "selectNames": [
+      "u_ussidenable",
+      "homeSSID_security"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "wconfig_unified",
+   "title": "Wi-Fi",
+   "heading": "Wi-Fi",
+   "values": {
+    "Description": "Changes take effect after Save.",
+    "Field home_ssidname": "SyntheticHome",
+    "Field homeSSID_key": "synthetic-passphrase",
+    "Field u_ussidenable": "on",
+    "Field homeSSID_security": "wpa2"
+   },
+   "tables": [
+    {
+     "Radio": "2.4 GHz",
+     "Current Channel": "6",
+     "Channel Width": "20 MHz",
+     "Mode": "802.11b/g/n/ax"
+    },
+    {
+     "Radio": "5 GHz low-band",
+     "Current Channel": "36",
+     "Channel Width": "80 MHz",
+     "Mode": "802.11a/n/ac/ax"
+    },
+    {
+     "Radio": "5 GHz high-band",
+     "Current Channel": "149",
+     "Channel Width": "80 MHz",
+     "Mode": "802.11a/n/ac/ax"
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "0123456789abcdef",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "home_ssidname",
+     "type": "text",
+     "value": "SyntheticHome",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "homeSSID_key",
+     "type": "text",
+     "value": "synthetic-passphrase",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [
+    {
+     "name": "u_ussidenable",
+     "value": "on",
+     "options": [
+      "on",
+      "off"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "on",
+       "label": "On",
+       "selected": true,
+       "disabled": false
+      },
+      {
+       "value": "off",
+       "label": "Off",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    },
+    {
+     "name": "homeSSID_security",
+     "value": "wpa2",
+     "options": [
+      "wpa2",
+      "wpa3"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "wpa2",
+       "label": "WPA-PSK (WPA2)",
+       "selected": true,
+       "disabled": false
+      },
+      {
+       "value": "wpa3",
+       "label": "WPA3",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save",
+     "label": "Save",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/wconfig_unified.ha",
+     "fieldNames": [
+      "nonce",
+      "home_ssidname",
+      "homeSSID_key"
+     ],
+     "selectNames": [
+      "u_ussidenable",
+      "homeSSID_security"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/APPHOSTING_EXTRA_HTML": {
+  "redacted": {
+   "page": "apphosting",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field service": "custom_ssh",
+    "Field device": "aa:bb:cc:dd:ee:01"
+   },
+   "tables": [
+    {
+     "Service": "custom_ssh",
+     "Needed by Device": "host-b"
+    },
+    {
+     "Service": "Mosh",
+     "Needed by Device": "host-b"
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [
+    {
+     "name": "service",
+     "value": "custom_ssh",
+     "options": [
+      "custom_ssh",
+      "Mosh"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "custom_ssh",
+       "label": "custom_ssh",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "Mosh",
+       "label": "Mosh",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    },
+    {
+     "name": "device",
+     "value": "aa:bb:cc:dd:ee:01",
+     "options": [
+      "aa:bb:cc:dd:ee:01",
+      "aa:bb:cc:dd:ee:02"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "aa:bb:cc:dd:ee:01",
+       "label": "host-b",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "aa:bb:cc:dd:ee:02",
+       "label": "host-a",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Remove_1",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Remove_2",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Add",
+     "type": "submit",
+     "value": "Add",
+     "label": "Add",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/apphosting.ha",
+     "fieldNames": [
+      "nonce"
+     ],
+     "selectNames": [
+      "service",
+      "device"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Remove_1",
+      "Remove_2",
+      "Add"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "apphosting",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field service": "custom_ssh",
+    "Field device": "aa:bb:cc:dd:ee:01"
+   },
+   "tables": [
+    {
+     "Service": "custom_ssh",
+     "Needed by Device": "host-b"
+    },
+    {
+     "Service": "Mosh",
+     "Needed by Device": "host-b"
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "n",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [
+    {
+     "name": "service",
+     "value": "custom_ssh",
+     "options": [
+      "custom_ssh",
+      "Mosh"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "custom_ssh",
+       "label": "custom_ssh",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "Mosh",
+       "label": "Mosh",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    },
+    {
+     "name": "device",
+     "value": "aa:bb:cc:dd:ee:01",
+     "options": [
+      "aa:bb:cc:dd:ee:01",
+      "aa:bb:cc:dd:ee:02"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "aa:bb:cc:dd:ee:01",
+       "label": "host-b",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "aa:bb:cc:dd:ee:02",
+       "label": "host-a",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Remove_1",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Remove_2",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Add",
+     "type": "submit",
+     "value": "Add",
+     "label": "Add",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/apphosting.ha",
+     "fieldNames": [
+      "nonce"
+     ],
+     "selectNames": [
+      "service",
+      "device"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Remove_1",
+      "Remove_2",
+      "Add"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/APPHOSTING_HTML": {
+  "redacted": {
+   "page": "apphosting",
+   "title": "NAT/Gaming",
+   "heading": "",
+   "values": {
+    "Field service": "custom_ssh",
+    "Field device": "aa:bb:cc:dd:ee:01"
+   },
+   "tables": [
+    {
+     "Service": "custom_ssh",
+     "Needed by Device": "host-b"
+    },
+    {
+     "Service": "Mosh",
+     "Needed by Device": "host-a"
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [
+    {
+     "name": "service",
+     "value": "custom_ssh",
+     "options": [
+      "custom_ssh",
+      "Mosh"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "custom_ssh",
+       "label": "custom_ssh",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "Mosh",
+       "label": "Mosh",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    },
+    {
+     "name": "device",
+     "value": "aa:bb:cc:dd:ee:01",
+     "options": [
+      "aa:bb:cc:dd:ee:01",
+      "aa:bb:cc:dd:ee:02",
+      "aa:bb:cc:dd:ee:03",
+      "aa:bb:cc:dd:ee:04"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "aa:bb:cc:dd:ee:01",
+       "label": "host-b",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "aa:bb:cc:dd:ee:02",
+       "label": "host-a",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "aa:bb:cc:dd:ee:03",
+       "label": "watch",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "aa:bb:cc:dd:ee:04",
+       "label": "watch",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Remove_1",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Remove_2",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Add",
+     "type": "submit",
+     "value": "Add",
+     "label": "Add",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/apphosting.ha",
+     "fieldNames": [
+      "nonce"
+     ],
+     "selectNames": [
+      "service",
+      "device"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Remove_1",
+      "Remove_2",
+      "Add"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "apphosting",
+   "title": "NAT/Gaming",
+   "heading": "",
+   "values": {
+    "Field service": "custom_ssh",
+    "Field device": "aa:bb:cc:dd:ee:01"
+   },
+   "tables": [
+    {
+     "Service": "custom_ssh",
+     "Needed by Device": "host-b"
+    },
+    {
+     "Service": "Mosh",
+     "Needed by Device": "host-a"
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "abc",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [
+    {
+     "name": "service",
+     "value": "custom_ssh",
+     "options": [
+      "custom_ssh",
+      "Mosh"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "custom_ssh",
+       "label": "custom_ssh",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "Mosh",
+       "label": "Mosh",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    },
+    {
+     "name": "device",
+     "value": "aa:bb:cc:dd:ee:01",
+     "options": [
+      "aa:bb:cc:dd:ee:01",
+      "aa:bb:cc:dd:ee:02",
+      "aa:bb:cc:dd:ee:03",
+      "aa:bb:cc:dd:ee:04"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "aa:bb:cc:dd:ee:01",
+       "label": "host-b",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "aa:bb:cc:dd:ee:02",
+       "label": "host-a",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "aa:bb:cc:dd:ee:03",
+       "label": "watch",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "aa:bb:cc:dd:ee:04",
+       "label": "watch",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Remove_1",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Remove_2",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Add",
+     "type": "submit",
+     "value": "Add",
+     "label": "Add",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/apphosting.ha",
+     "fieldNames": [
+      "nonce"
+     ],
+     "selectNames": [
+      "service",
+      "device"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Remove_1",
+      "Remove_2",
+      "Add"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/APPHOSTING_WITHOUT_MOSH_HTML": {
+  "redacted": {
+   "page": "apphosting",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field service": "custom_ssh",
+    "Field device": "aa:bb:cc:dd:ee:01"
+   },
+   "tables": [
+    {
+     "Service": "custom_ssh",
+     "Needed by Device": "host-b"
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [
+    {
+     "name": "service",
+     "value": "custom_ssh",
+     "options": [
+      "custom_ssh"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "custom_ssh",
+       "label": "custom_ssh",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    },
+    {
+     "name": "device",
+     "value": "aa:bb:cc:dd:ee:01",
+     "options": [
+      "aa:bb:cc:dd:ee:01",
+      "aa:bb:cc:dd:ee:02"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "aa:bb:cc:dd:ee:01",
+       "label": "host-b",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "aa:bb:cc:dd:ee:02",
+       "label": "host-a",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Remove_1",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Add",
+     "type": "submit",
+     "value": "Add",
+     "label": "Add",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/apphosting.ha",
+     "fieldNames": [
+      "nonce"
+     ],
+     "selectNames": [
+      "service",
+      "device"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Remove_1",
+      "Add"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "apphosting",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field service": "custom_ssh",
+    "Field device": "aa:bb:cc:dd:ee:01"
+   },
+   "tables": [
+    {
+     "Service": "custom_ssh",
+     "Needed by Device": "host-b"
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "n",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [
+    {
+     "name": "service",
+     "value": "custom_ssh",
+     "options": [
+      "custom_ssh"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "custom_ssh",
+       "label": "custom_ssh",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    },
+    {
+     "name": "device",
+     "value": "aa:bb:cc:dd:ee:01",
+     "options": [
+      "aa:bb:cc:dd:ee:01",
+      "aa:bb:cc:dd:ee:02"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "aa:bb:cc:dd:ee:01",
+       "label": "host-b",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "aa:bb:cc:dd:ee:02",
+       "label": "host-a",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Remove_1",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Add",
+     "type": "submit",
+     "value": "Add",
+     "label": "Add",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/apphosting.ha",
+     "fieldNames": [
+      "nonce"
+     ],
+     "selectNames": [
+      "service",
+      "device"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Remove_1",
+      "Add"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/APPHOSTING_WITH_STAR_MOSH_HTML": {
+  "redacted": {
+   "page": "apphosting",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field service": "custom_ssh",
+    "Field device": "aa:bb:cc:dd:ee:01"
+   },
+   "tables": [
+    {
+     "Service": "custom_ssh",
+     "Needed by Device": "host-b"
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [
+    {
+     "name": "service",
+     "value": "custom_ssh",
+     "options": [
+      "custom_ssh",
+      "*Mosh"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "custom_ssh",
+       "label": "custom_ssh",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "*Mosh",
+       "label": "*Mosh",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    },
+    {
+     "name": "device",
+     "value": "aa:bb:cc:dd:ee:01",
+     "options": [
+      "aa:bb:cc:dd:ee:01",
+      "aa:bb:cc:dd:ee:02"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "aa:bb:cc:dd:ee:01",
+       "label": "host-b",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "aa:bb:cc:dd:ee:02",
+       "label": "host-a",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Remove_1",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Add",
+     "type": "submit",
+     "value": "Add",
+     "label": "Add",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/apphosting.ha",
+     "fieldNames": [
+      "nonce"
+     ],
+     "selectNames": [
+      "service",
+      "device"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Remove_1",
+      "Add"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "apphosting",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field service": "custom_ssh",
+    "Field device": "aa:bb:cc:dd:ee:01"
+   },
+   "tables": [
+    {
+     "Service": "custom_ssh",
+     "Needed by Device": "host-b"
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "n",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [
+    {
+     "name": "service",
+     "value": "custom_ssh",
+     "options": [
+      "custom_ssh",
+      "*Mosh"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "custom_ssh",
+       "label": "custom_ssh",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "*Mosh",
+       "label": "*Mosh",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    },
+    {
+     "name": "device",
+     "value": "aa:bb:cc:dd:ee:01",
+     "options": [
+      "aa:bb:cc:dd:ee:01",
+      "aa:bb:cc:dd:ee:02"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "aa:bb:cc:dd:ee:01",
+       "label": "host-b",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "aa:bb:cc:dd:ee:02",
+       "label": "host-a",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Remove_1",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Add",
+     "type": "submit",
+     "value": "Add",
+     "label": "Add",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/apphosting.ha",
+     "fieldNames": [
+      "nonce"
+     ],
+     "selectNames": [
+      "service",
+      "device"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Remove_1",
+      "Add"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/CHANGES_SAVED_HTML": {
+  "redacted": {
+   "page": "x",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "x",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/DISABLED_DOSPROTECT_HTML": {
+  "redacted": {
+   "page": "dosprotect",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field flood_protect": "off"
+   },
+   "tables": [],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [
+    {
+     "name": "flood_protect",
+     "value": "off",
+     "options": [
+      "on",
+      "off"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "on",
+       "label": "On",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "off",
+       "label": "Off",
+       "selected": true,
+       "disabled": false
+      }
+     ],
+     "disabled": true
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save",
+     "label": "Save",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/dosprotect.ha",
+     "fieldNames": [
+      "nonce"
+     ],
+     "selectNames": [
+      "flood_protect"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "dosprotect",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field flood_protect": "off"
+   },
+   "tables": [],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "n",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [
+    {
+     "name": "flood_protect",
+     "value": "off",
+     "options": [
+      "on",
+      "off"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "on",
+       "label": "On",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "off",
+       "label": "Off",
+       "selected": true,
+       "disabled": false
+      }
+     ],
+     "disabled": true
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save",
+     "label": "Save",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/dosprotect.ha",
+     "fieldNames": [
+      "nonce"
+     ],
+     "selectNames": [
+      "flood_protect"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/DOSPROTECT_CHECKBOX_HTML": {
+  "redacted": {
+   "page": "dosprotect",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field reflexive": "on"
+   },
+   "tables": [],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "reflexive",
+     "type": "checkbox",
+     "value": "on",
+     "checked": true,
+     "sensitive": false
+    },
+    {
+     "name": "algsip",
+     "type": "checkbox",
+     "value": "on",
+     "checked": false,
+     "sensitive": false
+    }
+   ],
+   "selects": [],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save",
+     "label": "Save",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/dosprotect.ha",
+     "fieldNames": [
+      "nonce",
+      "reflexive",
+      "algsip"
+     ],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "dosprotect",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field reflexive": "on"
+   },
+   "tables": [],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "n",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "reflexive",
+     "type": "checkbox",
+     "value": "on",
+     "checked": true,
+     "sensitive": false
+    },
+    {
+     "name": "algsip",
+     "type": "checkbox",
+     "value": "on",
+     "checked": false,
+     "sensitive": false
+    }
+   ],
+   "selects": [],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save",
+     "label": "Save",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/dosprotect.ha",
+     "fieldNames": [
+      "nonce",
+      "reflexive",
+      "algsip"
+     ],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/DOSPROTECT_HTML": {
+  "redacted": {
+   "page": "dosprotect",
+   "title": "Firewall Advanced",
+   "heading": "",
+   "values": {
+    "Field reflexive": "on",
+    "Field flood_protect": "on",
+    "Field disabled_thing": "x"
+   },
+   "tables": [],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "reflexive",
+     "type": "checkbox",
+     "value": "on",
+     "checked": true,
+     "sensitive": false
+    },
+    {
+     "name": "unchecked_box",
+     "type": "checkbox",
+     "value": "on",
+     "checked": false,
+     "sensitive": false
+    }
+   ],
+   "selects": [
+    {
+     "name": "flood_protect",
+     "value": "on",
+     "options": [
+      "on",
+      "off"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "on",
+       "label": "On",
+       "selected": true,
+       "disabled": false
+      },
+      {
+       "value": "off",
+       "label": "Off",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    },
+    {
+     "name": "disabled_thing",
+     "value": "x",
+     "options": [
+      "x"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "x",
+       "label": "x",
+       "selected": true,
+       "disabled": false
+      }
+     ],
+     "disabled": true
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save",
+     "label": "Save",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/dosprotect.ha",
+     "fieldNames": [
+      "nonce",
+      "reflexive",
+      "unchecked_box"
+     ],
+     "selectNames": [
+      "flood_protect",
+      "disabled_thing"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "dosprotect",
+   "title": "Firewall Advanced",
+   "heading": "",
+   "values": {
+    "Field reflexive": "on",
+    "Field flood_protect": "on",
+    "Field disabled_thing": "x"
+   },
+   "tables": [],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "abc",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "reflexive",
+     "type": "checkbox",
+     "value": "on",
+     "checked": true,
+     "sensitive": false
+    },
+    {
+     "name": "unchecked_box",
+     "type": "checkbox",
+     "value": "on",
+     "checked": false,
+     "sensitive": false
+    }
+   ],
+   "selects": [
+    {
+     "name": "flood_protect",
+     "value": "on",
+     "options": [
+      "on",
+      "off"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "on",
+       "label": "On",
+       "selected": true,
+       "disabled": false
+      },
+      {
+       "value": "off",
+       "label": "Off",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    },
+    {
+     "name": "disabled_thing",
+     "value": "x",
+     "options": [
+      "x"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "x",
+       "label": "x",
+       "selected": true,
+       "disabled": false
+      }
+     ],
+     "disabled": true
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save",
+     "label": "Save",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/dosprotect.ha",
+     "fieldNames": [
+      "nonce",
+      "reflexive",
+      "unchecked_box"
+     ],
+     "selectNames": [
+      "flood_protect",
+      "disabled_thing"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/DOSPROTECT_RENAMED_BUTTON_HTML": {
+  "redacted": {
+   "page": "dosprotect",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field flood_protect": "off"
+   },
+   "tables": [],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [
+    {
+     "name": "flood_protect",
+     "value": "off",
+     "options": [
+      "on",
+      "off"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "on",
+       "label": "On",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "off",
+       "label": "Off",
+       "selected": true,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Apply",
+     "type": "submit",
+     "value": "Apply",
+     "label": "Apply",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/dosprotect.ha",
+     "fieldNames": [
+      "nonce"
+     ],
+     "selectNames": [
+      "flood_protect"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Apply"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "dosprotect",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field flood_protect": "off"
+   },
+   "tables": [],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "n",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [
+    {
+     "name": "flood_protect",
+     "value": "off",
+     "options": [
+      "on",
+      "off"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "on",
+       "label": "On",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "off",
+       "label": "Off",
+       "selected": true,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Apply",
+     "type": "submit",
+     "value": "Apply",
+     "label": "Apply",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/dosprotect.ha",
+     "fieldNames": [
+      "nonce"
+     ],
+     "selectNames": [
+      "flood_protect"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Apply"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/DUP_NAME_HTML": {
+  "redacted": {
+   "page": "services",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field protocol": "TCP"
+   },
+   "tables": [
+    {
+     "Service Name": "custom_ssh",
+     "Global Port Range": "2483-2483",
+     "Base Host Port": "22",
+     "Protocol": "TCP"
+    },
+    {
+     "Service Name": "Dup",
+     "Global Port Range": "5-5",
+     "Base Host Port": "5",
+     "Protocol": "TCP"
+    },
+    {
+     "Service Name": "Dup",
+     "Global Port Range": "6-6",
+     "Base Host Port": "6",
+     "Protocol": "TCP"
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "Service",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "extMinPort",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "extMaxPort",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "intStartPort",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    }
+   ],
+   "selects": [
+    {
+     "name": "protocol",
+     "value": "TCP",
+     "options": [
+      "TCP",
+      "UDP"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "TCP",
+       "label": "TCP",
+       "selected": true,
+       "disabled": false
+      },
+      {
+       "value": "UDP",
+       "label": "UDP",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Remove_1",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Remove_2",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Remove_3",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Add",
+     "type": "submit",
+     "value": "Add",
+     "label": "Add",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/services.ha",
+     "fieldNames": [
+      "nonce",
+      "Service",
+      "extMinPort",
+      "extMaxPort",
+      "intStartPort"
+     ],
+     "selectNames": [
+      "protocol"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Remove_1",
+      "Remove_2",
+      "Remove_3",
+      "Add"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "services",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field protocol": "TCP"
+   },
+   "tables": [
+    {
+     "Service Name": "custom_ssh",
+     "Global Port Range": "2483-2483",
+     "Base Host Port": "22",
+     "Protocol": "TCP"
+    },
+    {
+     "Service Name": "Dup",
+     "Global Port Range": "5-5",
+     "Base Host Port": "5",
+     "Protocol": "TCP"
+    },
+    {
+     "Service Name": "Dup",
+     "Global Port Range": "6-6",
+     "Base Host Port": "6",
+     "Protocol": "TCP"
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "n",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "Service",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "extMinPort",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "extMaxPort",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "intStartPort",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    }
+   ],
+   "selects": [
+    {
+     "name": "protocol",
+     "value": "TCP",
+     "options": [
+      "TCP",
+      "UDP"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "TCP",
+       "label": "TCP",
+       "selected": true,
+       "disabled": false
+      },
+      {
+       "value": "UDP",
+       "label": "UDP",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Remove_1",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Remove_2",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Remove_3",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Add",
+     "type": "submit",
+     "value": "Add",
+     "label": "Add",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/services.ha",
+     "fieldNames": [
+      "nonce",
+      "Service",
+      "extMinPort",
+      "extMaxPort",
+      "intStartPort"
+     ],
+     "selectNames": [
+      "protocol"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Remove_1",
+      "Remove_2",
+      "Remove_3",
+      "Add"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/ETHERLAN_HTML": {
+  "redacted": {
+   "page": "etherlan",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field lan_mtu": "1500"
+   },
+   "tables": [
+    {
+     "Port": "1",
+     "Configured media": "",
+     "Configured MDI-X": "",
+     "Supported media modes": "",
+     "Supported MDI-X modes": ""
+    },
+    {
+     "Port": "2",
+     "Configured media": "",
+     "Configured MDI-X": "",
+     "Supported media modes": "",
+     "Supported MDI-X modes": ""
+    },
+    {
+     "Port": "3",
+     "Configured media": "",
+     "Configured MDI-X": "",
+     "Supported media modes": "",
+     "Supported MDI-X modes": ""
+    },
+    {
+     "Port": "4",
+     "Configured media": "",
+     "Configured MDI-X": "",
+     "Supported media modes": "",
+     "Supported MDI-X modes": ""
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "lan_mtu",
+     "type": "text",
+     "value": "1500",
+     "checked": false,
+     "sensitive": false
+    }
+   ],
+   "selects": [],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save",
+     "label": "Save",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/etherlan.ha",
+     "fieldNames": [
+      "nonce",
+      "lan_mtu"
+     ],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "etherlan",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field lan_mtu": "1500"
+   },
+   "tables": [
+    {
+     "Port": "1",
+     "Configured media": "",
+     "Configured MDI-X": "",
+     "Supported media modes": "",
+     "Supported MDI-X modes": ""
+    },
+    {
+     "Port": "2",
+     "Configured media": "",
+     "Configured MDI-X": "",
+     "Supported media modes": "",
+     "Supported MDI-X modes": ""
+    },
+    {
+     "Port": "3",
+     "Configured media": "",
+     "Configured MDI-X": "",
+     "Supported media modes": "",
+     "Supported MDI-X modes": ""
+    },
+    {
+     "Port": "4",
+     "Configured media": "",
+     "Configured MDI-X": "",
+     "Supported media modes": "",
+     "Supported MDI-X modes": ""
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "n",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "lan_mtu",
+     "type": "text",
+     "value": "1500",
+     "checked": false,
+     "sensitive": false
+    }
+   ],
+   "selects": [],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save",
+     "label": "Save",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/etherlan.ha",
+     "fieldNames": [
+      "nonce",
+      "lan_mtu"
+     ],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/I6_MIRROR_HTML": {
+  "redacted": {
+   "page": "dosprotect",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field plain": "1",
+    "Field disabled_text": "2",
+    "Field box_on": "on",
+    "Field rad_on": "yes",
+    "Field sel_on": "a",
+    "Field sel_off": "x",
+    "Field area_on": "text",
+    "Field area_off": "other"
+   },
+   "tables": [],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "hashpassword",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "plain",
+     "type": "text",
+     "value": "1",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "disabled_text",
+     "type": "text",
+     "value": "2",
+     "checked": false,
+     "sensitive": false,
+     "disabled": true
+    },
+    {
+     "name": "box_on",
+     "type": "checkbox",
+     "value": "on",
+     "checked": true,
+     "sensitive": false
+    },
+    {
+     "name": "box_off",
+     "type": "checkbox",
+     "value": "on",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "rad_on",
+     "type": "radio",
+     "value": "yes",
+     "checked": true,
+     "sensitive": false
+    },
+    {
+     "name": "rad_off",
+     "type": "radio",
+     "value": "no",
+     "checked": false,
+     "sensitive": false
+    }
+   ],
+   "selects": [
+    {
+     "name": "sel_on",
+     "value": "a",
+     "options": [
+      "a",
+      "b"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "a",
+       "label": "a",
+       "selected": true,
+       "disabled": false
+      },
+      {
+       "value": "b",
+       "label": "b",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    },
+    {
+     "name": "sel_off",
+     "value": "x",
+     "options": [
+      "x"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "x",
+       "label": "x",
+       "selected": true,
+       "disabled": false
+      }
+     ],
+     "disabled": true
+    }
+   ],
+   "textareas": [
+    {
+     "name": "area_on",
+     "value": "text",
+     "sensitive": false
+    },
+    {
+     "name": "area_off",
+     "value": "other",
+     "sensitive": false,
+     "disabled": true
+    }
+   ],
+   "buttons": [
+    {
+     "name": "btn_button",
+     "type": "button",
+     "value": "Button",
+     "label": "Button",
+     "sensitive": false
+    },
+    {
+     "name": "btn_submit",
+     "type": "submit",
+     "value": "Submit",
+     "label": "Submit",
+     "sensitive": false
+    },
+    {
+     "name": "btn_reset",
+     "type": "reset",
+     "value": "Reset",
+     "label": "Reset",
+     "sensitive": false
+    },
+    {
+     "name": "btn_image",
+     "type": "image",
+     "value": "Image",
+     "label": "Image",
+     "sensitive": false
+    },
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save",
+     "label": "Save",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/dosprotect.ha",
+     "fieldNames": [
+      "nonce",
+      "hashpassword",
+      "plain",
+      "disabled_text",
+      "box_on",
+      "box_off",
+      "rad_on",
+      "rad_off"
+     ],
+     "selectNames": [
+      "sel_on",
+      "sel_off"
+     ],
+     "textareaNames": [
+      "area_on",
+      "area_off"
+     ],
+     "buttonNames": [
+      "btn_button",
+      "btn_submit",
+      "btn_reset",
+      "btn_image",
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "dosprotect",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field plain": "1",
+    "Field disabled_text": "2",
+    "Field box_on": "on",
+    "Field rad_on": "yes",
+    "Field sel_on": "a",
+    "Field sel_off": "x",
+    "Field area_on": "text",
+    "Field area_off": "other"
+   },
+   "tables": [],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "abc",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "hashpassword",
+     "type": "hidden",
+     "value": "deadbeef",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "plain",
+     "type": "text",
+     "value": "1",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "disabled_text",
+     "type": "text",
+     "value": "2",
+     "checked": false,
+     "sensitive": false,
+     "disabled": true
+    },
+    {
+     "name": "box_on",
+     "type": "checkbox",
+     "value": "on",
+     "checked": true,
+     "sensitive": false
+    },
+    {
+     "name": "box_off",
+     "type": "checkbox",
+     "value": "on",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "rad_on",
+     "type": "radio",
+     "value": "yes",
+     "checked": true,
+     "sensitive": false
+    },
+    {
+     "name": "rad_off",
+     "type": "radio",
+     "value": "no",
+     "checked": false,
+     "sensitive": false
+    }
+   ],
+   "selects": [
+    {
+     "name": "sel_on",
+     "value": "a",
+     "options": [
+      "a",
+      "b"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "a",
+       "label": "a",
+       "selected": true,
+       "disabled": false
+      },
+      {
+       "value": "b",
+       "label": "b",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    },
+    {
+     "name": "sel_off",
+     "value": "x",
+     "options": [
+      "x"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "x",
+       "label": "x",
+       "selected": true,
+       "disabled": false
+      }
+     ],
+     "disabled": true
+    }
+   ],
+   "textareas": [
+    {
+     "name": "area_on",
+     "value": "text",
+     "sensitive": false
+    },
+    {
+     "name": "area_off",
+     "value": "other",
+     "sensitive": false,
+     "disabled": true
+    }
+   ],
+   "buttons": [
+    {
+     "name": "btn_button",
+     "type": "button",
+     "value": "Button",
+     "label": "Button",
+     "sensitive": false
+    },
+    {
+     "name": "btn_submit",
+     "type": "submit",
+     "value": "Submit",
+     "label": "Submit",
+     "sensitive": false
+    },
+    {
+     "name": "btn_reset",
+     "type": "reset",
+     "value": "Reset",
+     "label": "Reset",
+     "sensitive": false
+    },
+    {
+     "name": "btn_image",
+     "type": "image",
+     "value": "Image",
+     "label": "Image",
+     "sensitive": false
+    },
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save",
+     "label": "Save",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/dosprotect.ha",
+     "fieldNames": [
+      "nonce",
+      "hashpassword",
+      "plain",
+      "disabled_text",
+      "box_on",
+      "box_off",
+      "rad_on",
+      "rad_off"
+     ],
+     "selectNames": [
+      "sel_on",
+      "sel_off"
+     ],
+     "textareaNames": [
+      "area_on",
+      "area_off"
+     ],
+     "buttonNames": [
+      "btn_button",
+      "btn_submit",
+      "btn_reset",
+      "btn_image",
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/IPALLOC_HTML": {
+  "redacted": {
+   "page": "ipalloc",
+   "title": "IP Allocation",
+   "heading": "",
+   "values": {},
+   "tables": [
+    {
+     "IPv4 Address / Name": "192.168.1.64",
+     "MAC Address": "02:0A:0B:0C:0D:02",
+     "Status": "on",
+     "Allocation": "Fixed Allocation",
+     "Action": ""
+    },
+    {
+     "IPv4 Address / Name": "watch",
+     "MAC Address": "02:0a:0b:0c:0d:04",
+     "Status": "off",
+     "Allocation": "DHCP Allocation",
+     "Action": ""
+    },
+    {
+     "IPv4 Address / Name": "192.168.1.70",
+     "MAC Address": "02:0a:0b:0c:0d:03",
+     "Status": "on",
+     "Allocation": "Fixed Allocation",
+     "Action": ""
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Allocate_02:0a:0b:0c:0d:02",
+     "type": "submit",
+     "value": "Allocate",
+     "label": "Allocate",
+     "sensitive": false
+    },
+    {
+     "name": "Allocate_02:0a:0b:0c:0d:04",
+     "type": "submit",
+     "value": "Allocate",
+     "label": "Allocate",
+     "sensitive": false
+    },
+    {
+     "name": "Allocate_02:0a:0b:0c:0d:03",
+     "type": "submit",
+     "value": "Allocate",
+     "label": "Allocate",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/ipalloc.ha",
+     "fieldNames": [
+      "nonce"
+     ],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "Allocate_02:0a:0b:0c:0d:02",
+      "Allocate_02:0a:0b:0c:0d:04",
+      "Allocate_02:0a:0b:0c:0d:03"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "ipalloc",
+   "title": "IP Allocation",
+   "heading": "",
+   "values": {},
+   "tables": [
+    {
+     "IPv4 Address / Name": "192.168.1.64",
+     "MAC Address": "02:0A:0B:0C:0D:02",
+     "Status": "on",
+     "Allocation": "Fixed Allocation",
+     "Action": ""
+    },
+    {
+     "IPv4 Address / Name": "watch",
+     "MAC Address": "02:0a:0b:0c:0d:04",
+     "Status": "off",
+     "Allocation": "DHCP Allocation",
+     "Action": ""
+    },
+    {
+     "IPv4 Address / Name": "192.168.1.70",
+     "MAC Address": "02:0a:0b:0c:0d:03",
+     "Status": "on",
+     "Allocation": "Fixed Allocation",
+     "Action": ""
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "abc",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Allocate_02:0a:0b:0c:0d:02",
+     "type": "submit",
+     "value": "Allocate",
+     "label": "Allocate",
+     "sensitive": false
+    },
+    {
+     "name": "Allocate_02:0a:0b:0c:0d:04",
+     "type": "submit",
+     "value": "Allocate",
+     "label": "Allocate",
+     "sensitive": false
+    },
+    {
+     "name": "Allocate_02:0a:0b:0c:0d:03",
+     "type": "submit",
+     "value": "Allocate",
+     "label": "Allocate",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/ipalloc.ha",
+     "fieldNames": [
+      "nonce"
+     ],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "Allocate_02:0a:0b:0c:0d:02",
+      "Allocate_02:0a:0b:0c:0d:04",
+      "Allocate_02:0a:0b:0c:0d:03"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/IPALLOC_STICKY_HTML": {
+  "redacted": {
+   "page": "ipalloc",
+   "title": "IP Allocation",
+   "heading": "",
+   "values": {
+    "Field alloc_aa:bb:cc:dd:ee:ff": "normal"
+   },
+   "tables": [
+    {
+     "IPv4 Address / Name": "192.168.1.64",
+     "MAC Address": "02:0A:0B:0C:0D:02",
+     "Status": "on",
+     "Allocation": "Fixed Allocation",
+     "Action": ""
+    },
+    {
+     "IPv4 Address / Name": "watch",
+     "MAC Address": "02:0a:0b:0c:0d:04",
+     "Status": "off",
+     "Allocation": "DHCP Allocation",
+     "Action": ""
+    },
+    {
+     "IPv4 Address / Name": "192.168.1.70",
+     "MAC Address": "02:0a:0b:0c:0d:03",
+     "Status": "on",
+     "Allocation": "Fixed Allocation",
+     "Action": ""
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [
+    {
+     "name": "alloc_aa:bb:cc:dd:ee:ff",
+     "value": "normal",
+     "options": [
+      "normal",
+      "192.168.1.68"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "normal",
+       "label": "Address from DHCP pool",
+       "selected": true,
+       "disabled": false
+      },
+      {
+       "value": "192.168.1.68",
+       "label": "Private fixed:192.168.1.68",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Allocate_02:0a:0b:0c:0d:02",
+     "type": "submit",
+     "value": "Allocate",
+     "label": "Allocate",
+     "sensitive": false
+    },
+    {
+     "name": "Allocate_02:0a:0b:0c:0d:04",
+     "type": "submit",
+     "value": "Allocate",
+     "label": "Allocate",
+     "sensitive": false
+    },
+    {
+     "name": "Allocate_02:0a:0b:0c:0d:03",
+     "type": "submit",
+     "value": "Allocate",
+     "label": "Allocate",
+     "sensitive": false
+    },
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save",
+     "label": "Save",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/ipalloc.ha",
+     "fieldNames": [
+      "nonce"
+     ],
+     "selectNames": [
+      "alloc_aa:bb:cc:dd:ee:ff"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Allocate_02:0a:0b:0c:0d:02",
+      "Allocate_02:0a:0b:0c:0d:04",
+      "Allocate_02:0a:0b:0c:0d:03",
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "ipalloc",
+   "title": "IP Allocation",
+   "heading": "",
+   "values": {
+    "Field alloc_aa:bb:cc:dd:ee:ff": "normal"
+   },
+   "tables": [
+    {
+     "IPv4 Address / Name": "192.168.1.64",
+     "MAC Address": "02:0A:0B:0C:0D:02",
+     "Status": "on",
+     "Allocation": "Fixed Allocation",
+     "Action": ""
+    },
+    {
+     "IPv4 Address / Name": "watch",
+     "MAC Address": "02:0a:0b:0c:0d:04",
+     "Status": "off",
+     "Allocation": "DHCP Allocation",
+     "Action": ""
+    },
+    {
+     "IPv4 Address / Name": "192.168.1.70",
+     "MAC Address": "02:0a:0b:0c:0d:03",
+     "Status": "on",
+     "Allocation": "Fixed Allocation",
+     "Action": ""
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "abc",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [
+    {
+     "name": "alloc_aa:bb:cc:dd:ee:ff",
+     "value": "normal",
+     "options": [
+      "normal",
+      "192.168.1.68"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "normal",
+       "label": "Address from DHCP pool",
+       "selected": true,
+       "disabled": false
+      },
+      {
+       "value": "192.168.1.68",
+       "label": "Private fixed:192.168.1.68",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Allocate_02:0a:0b:0c:0d:02",
+     "type": "submit",
+     "value": "Allocate",
+     "label": "Allocate",
+     "sensitive": false
+    },
+    {
+     "name": "Allocate_02:0a:0b:0c:0d:04",
+     "type": "submit",
+     "value": "Allocate",
+     "label": "Allocate",
+     "sensitive": false
+    },
+    {
+     "name": "Allocate_02:0a:0b:0c:0d:03",
+     "type": "submit",
+     "value": "Allocate",
+     "label": "Allocate",
+     "sensitive": false
+    },
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save",
+     "label": "Save",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/ipalloc.ha",
+     "fieldNames": [
+      "nonce"
+     ],
+     "selectNames": [
+      "alloc_aa:bb:cc:dd:ee:ff"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Allocate_02:0a:0b:0c:0d:02",
+      "Allocate_02:0a:0b:0c:0d:04",
+      "Allocate_02:0a:0b:0c:0d:03",
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/PACKETFILTER_HTML": {
+  "redacted": {
+   "page": "packetfilter",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "AddDropRule",
+     "type": "submit",
+     "value": "Add a 'Drop' Rule",
+     "label": "Add a 'Drop' Rule",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/packetfilter.ha",
+     "fieldNames": [],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "AddDropRule"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "packetfilter",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "AddDropRule",
+     "type": "submit",
+     "value": "Add a 'Drop' Rule",
+     "label": "Add a 'Drop' Rule",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/packetfilter.ha",
+     "fieldNames": [],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "AddDropRule"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/RADIO_GROUP_HTML": {
+  "redacted": {
+   "page": "dosprotect",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field mode": "b"
+   },
+   "tables": [],
+   "fields": [
+    {
+     "name": "mode",
+     "type": "radio",
+     "value": "a",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "mode",
+     "type": "radio",
+     "value": "b",
+     "checked": true,
+     "sensitive": false
+    },
+    {
+     "name": "mode",
+     "type": "radio",
+     "value": "c",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "other",
+     "type": "radio",
+     "value": "x",
+     "checked": false,
+     "sensitive": false
+    }
+   ],
+   "selects": [],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save",
+     "label": "Save",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/dosprotect.ha",
+     "fieldNames": [
+      "mode",
+      "other"
+     ],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "dosprotect",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field mode": "b"
+   },
+   "tables": [],
+   "fields": [
+    {
+     "name": "mode",
+     "type": "radio",
+     "value": "a",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "mode",
+     "type": "radio",
+     "value": "b",
+     "checked": true,
+     "sensitive": false
+    },
+    {
+     "name": "mode",
+     "type": "radio",
+     "value": "c",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "other",
+     "type": "radio",
+     "value": "x",
+     "checked": false,
+     "sensitive": false
+    }
+   ],
+   "selects": [],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save",
+     "label": "Save",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/dosprotect.ha",
+     "fieldNames": [
+      "mode",
+      "other"
+     ],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/RESTORE_APPHOSTING_HTML": {
+  "redacted": {
+   "page": "apphosting",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field service": "custom_ssh",
+    "Field device": "aa:bb:cc:dd:ee:01"
+   },
+   "tables": [
+    {
+     "Service": "custom_ssh",
+     "Needed by Device": "host-b"
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [
+    {
+     "name": "service",
+     "value": "custom_ssh",
+     "options": [
+      "custom_ssh",
+      "Mosh"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "custom_ssh",
+       "label": "custom_ssh",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "Mosh",
+       "label": "Mosh",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    },
+    {
+     "name": "device",
+     "value": "aa:bb:cc:dd:ee:01",
+     "options": [
+      "aa:bb:cc:dd:ee:01",
+      "aa:bb:cc:dd:ee:02"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "aa:bb:cc:dd:ee:01",
+       "label": "host-b",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "aa:bb:cc:dd:ee:02",
+       "label": "host-a",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Remove_1",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Add",
+     "type": "submit",
+     "value": "Add",
+     "label": "Add",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/apphosting.ha",
+     "fieldNames": [
+      "nonce"
+     ],
+     "selectNames": [
+      "service",
+      "device"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Remove_1",
+      "Add"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "apphosting",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field service": "custom_ssh",
+    "Field device": "aa:bb:cc:dd:ee:01"
+   },
+   "tables": [
+    {
+     "Service": "custom_ssh",
+     "Needed by Device": "host-b"
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "n",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [
+    {
+     "name": "service",
+     "value": "custom_ssh",
+     "options": [
+      "custom_ssh",
+      "Mosh"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "custom_ssh",
+       "label": "custom_ssh",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "Mosh",
+       "label": "Mosh",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    },
+    {
+     "name": "device",
+     "value": "aa:bb:cc:dd:ee:01",
+     "options": [
+      "aa:bb:cc:dd:ee:01",
+      "aa:bb:cc:dd:ee:02"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "aa:bb:cc:dd:ee:01",
+       "label": "host-b",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "aa:bb:cc:dd:ee:02",
+       "label": "host-a",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Remove_1",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Add",
+     "type": "submit",
+     "value": "Add",
+     "label": "Add",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/apphosting.ha",
+     "fieldNames": [
+      "nonce"
+     ],
+     "selectNames": [
+      "service",
+      "device"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Remove_1",
+      "Add"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/RESTORE_DOSPROTECT_HTML": {
+  "redacted": {
+   "page": "dosprotect",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field flood_protect": "off"
+   },
+   "tables": [],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [
+    {
+     "name": "flood_protect",
+     "value": "off",
+     "options": [
+      "on",
+      "off"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "on",
+       "label": "On",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "off",
+       "label": "Off",
+       "selected": true,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save",
+     "label": "Save",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/dosprotect.ha",
+     "fieldNames": [
+      "nonce"
+     ],
+     "selectNames": [
+      "flood_protect"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "dosprotect",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field flood_protect": "off"
+   },
+   "tables": [],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "n",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [
+    {
+     "name": "flood_protect",
+     "value": "off",
+     "options": [
+      "on",
+      "off"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "on",
+       "label": "On",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "off",
+       "label": "Off",
+       "selected": true,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save",
+     "label": "Save",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/dosprotect.ha",
+     "fieldNames": [
+      "nonce"
+     ],
+     "selectNames": [
+      "flood_protect"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/RESTORE_SERVICES_HTML": {
+  "redacted": {
+   "page": "services",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field protocol": "TCP"
+   },
+   "tables": [
+    {
+     "Service Name": "custom_ssh",
+     "Global Port Range": "2483-2483",
+     "Base Host Port": "22",
+     "Protocol": "TCP"
+    },
+    {
+     "Service Name": "Stale",
+     "Global Port Range": "1-1",
+     "Base Host Port": "1",
+     "Protocol": "TCP"
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "Service",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "extMinPort",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "extMaxPort",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "intStartPort",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    }
+   ],
+   "selects": [
+    {
+     "name": "protocol",
+     "value": "TCP",
+     "options": [
+      "TCP",
+      "UDP"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "TCP",
+       "label": "TCP",
+       "selected": true,
+       "disabled": false
+      },
+      {
+       "value": "UDP",
+       "label": "UDP",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Remove_1",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Remove_2",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Add",
+     "type": "submit",
+     "value": "Add",
+     "label": "Add",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/services.ha",
+     "fieldNames": [
+      "nonce",
+      "Service",
+      "extMinPort",
+      "extMaxPort",
+      "intStartPort"
+     ],
+     "selectNames": [
+      "protocol"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Remove_1",
+      "Remove_2",
+      "Add"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "services",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field protocol": "TCP"
+   },
+   "tables": [
+    {
+     "Service Name": "custom_ssh",
+     "Global Port Range": "2483-2483",
+     "Base Host Port": "22",
+     "Protocol": "TCP"
+    },
+    {
+     "Service Name": "Stale",
+     "Global Port Range": "1-1",
+     "Base Host Port": "1",
+     "Protocol": "TCP"
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "n",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "Service",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "extMinPort",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "extMaxPort",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "intStartPort",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    }
+   ],
+   "selects": [
+    {
+     "name": "protocol",
+     "value": "TCP",
+     "options": [
+      "TCP",
+      "UDP"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "TCP",
+       "label": "TCP",
+       "selected": true,
+       "disabled": false
+      },
+      {
+       "value": "UDP",
+       "label": "UDP",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Remove_1",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Remove_2",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Add",
+     "type": "submit",
+     "value": "Add",
+     "label": "Add",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/services.ha",
+     "fieldNames": [
+      "nonce",
+      "Service",
+      "extMinPort",
+      "extMaxPort",
+      "intStartPort"
+     ],
+     "selectNames": [
+      "protocol"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Remove_1",
+      "Remove_2",
+      "Add"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/SENTINEL_COLLISION_HTML": {
+  "redacted": {
+   "page": "dosprotect",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field weird": "<unchecked>"
+   },
+   "tables": [],
+   "fields": [
+    {
+     "name": "weird",
+     "type": "checkbox",
+     "value": "<unchecked>",
+     "checked": true,
+     "sensitive": false
+    }
+   ],
+   "selects": [],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save",
+     "label": "Save",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/dosprotect.ha",
+     "fieldNames": [
+      "weird"
+     ],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "dosprotect",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field weird": "<unchecked>"
+   },
+   "tables": [],
+   "fields": [
+    {
+     "name": "weird",
+     "type": "checkbox",
+     "value": "<unchecked>",
+     "checked": true,
+     "sensitive": false
+    }
+   ],
+   "selects": [],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save",
+     "label": "Save",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/dosprotect.ha",
+     "fieldNames": [
+      "weird"
+     ],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/SERVICES_HTML": {
+  "redacted": {
+   "page": "services",
+   "title": "Custom Services",
+   "heading": "",
+   "values": {
+    "Field protocol": "TCP"
+   },
+   "tables": [
+    {
+     "Service Name": "custom_ssh",
+     "Global Port Range": "2483-2483",
+     "Base Host Port": "22",
+     "Protocol": "TCP"
+    },
+    {
+     "Service Name": "Mosh",
+     "Global Port Range": "60001-60010",
+     "Base Host Port": "60001",
+     "Protocol": "UDP"
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "Service",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "extMinPort",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "extMaxPort",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "intStartPort",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    }
+   ],
+   "selects": [
+    {
+     "name": "protocol",
+     "value": "TCP",
+     "options": [
+      "TCP",
+      "UDP"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "TCP",
+       "label": "TCP",
+       "selected": true,
+       "disabled": false
+      },
+      {
+       "value": "UDP",
+       "label": "UDP",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Remove_1",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Remove_2",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Add",
+     "type": "submit",
+     "value": "Add",
+     "label": "Add",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/services.ha",
+     "fieldNames": [
+      "nonce",
+      "Service",
+      "extMinPort",
+      "extMaxPort",
+      "intStartPort"
+     ],
+     "selectNames": [
+      "protocol"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Remove_1",
+      "Remove_2",
+      "Add"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "services",
+   "title": "Custom Services",
+   "heading": "",
+   "values": {
+    "Field protocol": "TCP"
+   },
+   "tables": [
+    {
+     "Service Name": "custom_ssh",
+     "Global Port Range": "2483-2483",
+     "Base Host Port": "22",
+     "Protocol": "TCP"
+    },
+    {
+     "Service Name": "Mosh",
+     "Global Port Range": "60001-60010",
+     "Base Host Port": "60001",
+     "Protocol": "UDP"
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "abc",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "Service",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "extMinPort",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "extMaxPort",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "intStartPort",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    }
+   ],
+   "selects": [
+    {
+     "name": "protocol",
+     "value": "TCP",
+     "options": [
+      "TCP",
+      "UDP"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "TCP",
+       "label": "TCP",
+       "selected": true,
+       "disabled": false
+      },
+      {
+       "value": "UDP",
+       "label": "UDP",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Remove_1",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Remove_2",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Add",
+     "type": "submit",
+     "value": "Add",
+     "label": "Add",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/services.ha",
+     "fieldNames": [
+      "nonce",
+      "Service",
+      "extMinPort",
+      "extMaxPort",
+      "intStartPort"
+     ],
+     "selectNames": [
+      "protocol"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Remove_1",
+      "Remove_2",
+      "Add"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/SYSINFO_HTML": {
+  "redacted": {
+   "page": "x",
+   "title": "System Information",
+   "heading": "",
+   "values": {
+    "Software Version": "4.27.7"
+   },
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [
+    {
+     "section": "",
+     "label": "Software Version",
+     "value": "4.27.7"
+    }
+   ],
+   "links": []
+  },
+  "secrets": {
+   "page": "x",
+   "title": "System Information",
+   "heading": "",
+   "values": {
+    "Software Version": "4.27.7"
+   },
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [
+    {
+     "section": "",
+     "label": "Software Version",
+     "value": "4.27.7"
+    }
+   ],
+   "links": []
+  }
+ },
+ "integration/TCP_NAMED_SERVICE_HTML": {
+  "redacted": {
+   "page": "services",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field protocol": "TCP"
+   },
+   "tables": [
+    {
+     "Service Name": "custom_ssh",
+     "Global Port Range": "2483-2483",
+     "Base Host Port": "22",
+     "Protocol": "TCP"
+    },
+    {
+     "Service Name": "TCP",
+     "Global Port Range": "7-7",
+     "Base Host Port": "7",
+     "Protocol": "UDP"
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "Service",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "extMinPort",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "extMaxPort",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "intStartPort",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    }
+   ],
+   "selects": [
+    {
+     "name": "protocol",
+     "value": "TCP",
+     "options": [
+      "TCP",
+      "UDP"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "TCP",
+       "label": "TCP",
+       "selected": true,
+       "disabled": false
+      },
+      {
+       "value": "UDP",
+       "label": "UDP",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Remove_1",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Remove_2",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Add",
+     "type": "submit",
+     "value": "Add",
+     "label": "Add",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/services.ha",
+     "fieldNames": [
+      "nonce",
+      "Service",
+      "extMinPort",
+      "extMaxPort",
+      "intStartPort"
+     ],
+     "selectNames": [
+      "protocol"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Remove_1",
+      "Remove_2",
+      "Add"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "services",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field protocol": "TCP"
+   },
+   "tables": [
+    {
+     "Service Name": "custom_ssh",
+     "Global Port Range": "2483-2483",
+     "Base Host Port": "22",
+     "Protocol": "TCP"
+    },
+    {
+     "Service Name": "TCP",
+     "Global Port Range": "7-7",
+     "Base Host Port": "7",
+     "Protocol": "UDP"
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "n",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "Service",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "extMinPort",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "extMaxPort",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "intStartPort",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": false
+    }
+   ],
+   "selects": [
+    {
+     "name": "protocol",
+     "value": "TCP",
+     "options": [
+      "TCP",
+      "UDP"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "TCP",
+       "label": "TCP",
+       "selected": true,
+       "disabled": false
+      },
+      {
+       "value": "UDP",
+       "label": "UDP",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Remove_1",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Remove_2",
+     "type": "submit",
+     "value": "Remove",
+     "label": "Remove",
+     "sensitive": false
+    },
+    {
+     "name": "Add",
+     "type": "submit",
+     "value": "Add",
+     "label": "Add",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/services.ha",
+     "fieldNames": [
+      "nonce",
+      "Service",
+      "extMinPort",
+      "extMaxPort",
+      "intStartPort"
+     ],
+     "selectNames": [
+      "protocol"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Remove_1",
+      "Remove_2",
+      "Add"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/TEXT_FIELD_LITERAL_UNCHECKED_HTML": {
+  "redacted": {
+   "page": "dosprotect",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field display_label": "Living room",
+    "Field reflexive": "on"
+   },
+   "tables": [],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "display_label",
+     "type": "text",
+     "value": "Living room",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "reflexive",
+     "type": "checkbox",
+     "value": "on",
+     "checked": true,
+     "sensitive": false
+    }
+   ],
+   "selects": [],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save",
+     "label": "Save",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/dosprotect.ha",
+     "fieldNames": [
+      "nonce",
+      "display_label",
+      "reflexive"
+     ],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "dosprotect",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field display_label": "Living room",
+    "Field reflexive": "on"
+   },
+   "tables": [],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "n",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "display_label",
+     "type": "text",
+     "value": "Living room",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "reflexive",
+     "type": "checkbox",
+     "value": "on",
+     "checked": true,
+     "sensitive": false
+    }
+   ],
+   "selects": [],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save",
+     "label": "Save",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/dosprotect.ha",
+     "fieldNames": [
+      "nonce",
+      "display_label",
+      "reflexive"
+     ],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/TWO_FIELD_DOSPROTECT_HTML": {
+  "redacted": {
+   "page": "dosprotect",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field log_attacks": "no",
+    "Field flood_protect": "off"
+   },
+   "tables": [],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "log_attacks",
+     "type": "text",
+     "value": "no",
+     "checked": false,
+     "sensitive": false
+    }
+   ],
+   "selects": [
+    {
+     "name": "flood_protect",
+     "value": "off",
+     "options": [
+      "on",
+      "off"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "on",
+       "label": "On",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "off",
+       "label": "Off",
+       "selected": true,
+       "disabled": false
+      }
+     ],
+     "disabled": true
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save",
+     "label": "Save",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/dosprotect.ha",
+     "fieldNames": [
+      "nonce",
+      "log_attacks"
+     ],
+     "selectNames": [
+      "flood_protect"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "dosprotect",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field log_attacks": "no",
+    "Field flood_protect": "off"
+   },
+   "tables": [],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "n",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "log_attacks",
+     "type": "text",
+     "value": "no",
+     "checked": false,
+     "sensitive": false
+    }
+   ],
+   "selects": [
+    {
+     "name": "flood_protect",
+     "value": "off",
+     "options": [
+      "on",
+      "off"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "on",
+       "label": "On",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "off",
+       "label": "Off",
+       "selected": true,
+       "disabled": false
+      }
+     ],
+     "disabled": true
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save",
+     "label": "Save",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/dosprotect.ha",
+     "fieldNames": [
+      "nonce",
+      "log_attacks"
+     ],
+     "selectNames": [
+      "flood_protect"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/WCONFIG_HTML": {
+  "redacted": {
+   "page": "wconfig",
+   "title": "Advanced Wi-Fi",
+   "heading": "",
+   "values": {
+    "Field ssidname11": "EXAMPLE-NET",
+    "Field key11": "[redacted]",
+    "Field maxclients": "80",
+    "Field ssidname12": "Guest",
+    "Field wl80211on": "on",
+    "Field gssidisolate": "on"
+   },
+   "tables": [
+    {
+     "Section": "Radio",
+     "Radio": "2.4 GHz",
+     "Enabled": "on",
+     "Standard": "",
+     "Bandwidth": "",
+     "Channel": "",
+     "Power level (%)": ""
+    },
+    {
+     "Section": "Radio",
+     "Radio": "5 GHz (combined configuration)",
+     "Enabled": "",
+     "Standard": "",
+     "Bandwidth": "",
+     "Channel": "",
+     "Power level (%)": ""
+    },
+    {
+     "Section": "SSID",
+     "Radio": "2.4 GHz",
+     "Network": "Home",
+     "Enabled": "",
+     "SSID": "EXAMPLE-NET",
+     "Hidden": "",
+     "Security": "",
+     "WPA version": "",
+     "WPS": "",
+     "Maximum clients": "80"
+    },
+    {
+     "Section": "SSID",
+     "Radio": "2.4 GHz",
+     "Network": "Guest",
+     "Enabled": "",
+     "SSID": "Guest",
+     "Hidden": "",
+     "Security": "",
+     "WPA version": "",
+     "WPS": "",
+     "Maximum clients": ""
+    },
+    {
+     "Section": "SSID",
+     "Radio": "5 GHz (combined configuration)",
+     "Network": "Home",
+     "Enabled": "",
+     "SSID": "",
+     "Hidden": "",
+     "Security": "",
+     "WPA version": "",
+     "WPS": "",
+     "Maximum clients": ""
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "ssidname11",
+     "type": "text",
+     "value": "EXAMPLE-NET",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "key11",
+     "type": "text",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "maxclients",
+     "type": "text",
+     "value": "80",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "ssidname12",
+     "type": "text",
+     "value": "Guest",
+     "checked": false,
+     "sensitive": false,
+     "disabled": true
+    },
+    {
+     "name": "WPSPIN5",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [
+    {
+     "name": "wl80211on",
+     "value": "on",
+     "options": [
+      "on",
+      "off"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "on",
+       "label": "On",
+       "selected": true,
+       "disabled": false
+      },
+      {
+       "value": "off",
+       "label": "Off",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    },
+    {
+     "name": "gssidisolate",
+     "value": "on",
+     "options": [
+      "on"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "on",
+       "label": "On",
+       "selected": true,
+       "disabled": false
+      }
+     ],
+     "disabled": true
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Update",
+     "type": "submit",
+     "value": "Update",
+     "label": "Update",
+     "sensitive": false
+    },
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save...",
+     "label": "Save...",
+     "sensitive": false
+    },
+    {
+     "name": "Cancel",
+     "type": "submit",
+     "value": "Cancel",
+     "label": "Cancel",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/wconfig.ha",
+     "fieldNames": [
+      "nonce",
+      "ssidname11",
+      "key11",
+      "maxclients",
+      "ssidname12",
+      "WPSPIN5"
+     ],
+     "selectNames": [
+      "wl80211on",
+      "gssidisolate"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Update",
+      "Save",
+      "Cancel"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "wconfig",
+   "title": "Advanced Wi-Fi",
+   "heading": "",
+   "values": {
+    "Field ssidname11": "EXAMPLE-NET",
+    "Field key11": "topsecret",
+    "Field maxclients": "80",
+    "Field ssidname12": "Guest",
+    "Field wl80211on": "on",
+    "Field gssidisolate": "on"
+   },
+   "tables": [
+    {
+     "Section": "Radio",
+     "Radio": "2.4 GHz",
+     "Enabled": "on",
+     "Standard": "",
+     "Bandwidth": "",
+     "Channel": "",
+     "Power level (%)": ""
+    },
+    {
+     "Section": "Radio",
+     "Radio": "5 GHz (combined configuration)",
+     "Enabled": "",
+     "Standard": "",
+     "Bandwidth": "",
+     "Channel": "",
+     "Power level (%)": ""
+    },
+    {
+     "Section": "SSID",
+     "Radio": "2.4 GHz",
+     "Network": "Home",
+     "Enabled": "",
+     "SSID": "EXAMPLE-NET",
+     "Hidden": "",
+     "Security": "",
+     "WPA version": "",
+     "WPS": "",
+     "Maximum clients": "80"
+    },
+    {
+     "Section": "SSID",
+     "Radio": "2.4 GHz",
+     "Network": "Guest",
+     "Enabled": "",
+     "SSID": "Guest",
+     "Hidden": "",
+     "Security": "",
+     "WPA version": "",
+     "WPS": "",
+     "Maximum clients": ""
+    },
+    {
+     "Section": "SSID",
+     "Radio": "5 GHz (combined configuration)",
+     "Network": "Home",
+     "Enabled": "",
+     "SSID": "",
+     "Hidden": "",
+     "Security": "",
+     "WPA version": "",
+     "WPS": "",
+     "Maximum clients": ""
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "abc",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "ssidname11",
+     "type": "text",
+     "value": "EXAMPLE-NET",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "key11",
+     "type": "text",
+     "value": "topsecret",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "maxclients",
+     "type": "text",
+     "value": "80",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "ssidname12",
+     "type": "text",
+     "value": "Guest",
+     "checked": false,
+     "sensitive": false,
+     "disabled": true
+    },
+    {
+     "name": "WPSPIN5",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [
+    {
+     "name": "wl80211on",
+     "value": "on",
+     "options": [
+      "on",
+      "off"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "on",
+       "label": "On",
+       "selected": true,
+       "disabled": false
+      },
+      {
+       "value": "off",
+       "label": "Off",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    },
+    {
+     "name": "gssidisolate",
+     "value": "on",
+     "options": [
+      "on"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "on",
+       "label": "On",
+       "selected": true,
+       "disabled": false
+      }
+     ],
+     "disabled": true
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Update",
+     "type": "submit",
+     "value": "Update",
+     "label": "Update",
+     "sensitive": false
+    },
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save...",
+     "label": "Save...",
+     "sensitive": false
+    },
+    {
+     "name": "Cancel",
+     "type": "submit",
+     "value": "Cancel",
+     "label": "Cancel",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/wconfig.ha",
+     "fieldNames": [
+      "nonce",
+      "ssidname11",
+      "key11",
+      "maxclients",
+      "ssidname12",
+      "WPSPIN5"
+     ],
+     "selectNames": [
+      "wl80211on",
+      "gssidisolate"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Update",
+      "Save",
+      "Cancel"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/WCONFIG_PARITY_HTML": {
+  "redacted": {
+   "page": "wconfig",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field maxclients": "80",
+    "Field ssidname12": "Guest",
+    "Field wl80211on": "on"
+   },
+   "tables": [
+    {
+     "Section": "Radio",
+     "Radio": "2.4 GHz",
+     "Enabled": "on",
+     "Standard": "",
+     "Bandwidth": "",
+     "Channel": "",
+     "Power level (%)": ""
+    },
+    {
+     "Section": "Radio",
+     "Radio": "5 GHz (combined configuration)",
+     "Enabled": "",
+     "Standard": "",
+     "Bandwidth": "",
+     "Channel": "",
+     "Power level (%)": ""
+    },
+    {
+     "Section": "SSID",
+     "Radio": "2.4 GHz",
+     "Network": "Home",
+     "Enabled": "",
+     "SSID": "",
+     "Hidden": "",
+     "Security": "",
+     "WPA version": "",
+     "WPS": "",
+     "Maximum clients": "80"
+    },
+    {
+     "Section": "SSID",
+     "Radio": "2.4 GHz",
+     "Network": "Guest",
+     "Enabled": "",
+     "SSID": "Guest",
+     "Hidden": "",
+     "Security": "",
+     "WPA version": "",
+     "WPS": "",
+     "Maximum clients": ""
+    },
+    {
+     "Section": "SSID",
+     "Radio": "5 GHz (combined configuration)",
+     "Network": "Home",
+     "Enabled": "",
+     "SSID": "",
+     "Hidden": "",
+     "Security": "",
+     "WPA version": "",
+     "WPS": "",
+     "Maximum clients": ""
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "maxclients",
+     "type": "text",
+     "value": "80",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "ssidname12",
+     "type": "text",
+     "value": "Guest",
+     "checked": false,
+     "sensitive": false,
+     "disabled": true
+    },
+    {
+     "name": "WPSPIN5",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [
+    {
+     "name": "wl80211on",
+     "value": "on",
+     "options": [
+      "on",
+      "off"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "on",
+       "label": "On",
+       "selected": true,
+       "disabled": false
+      },
+      {
+       "value": "off",
+       "label": "Off",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Update",
+     "type": "submit",
+     "value": "Update",
+     "label": "Update",
+     "sensitive": false
+    },
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save...",
+     "label": "Save...",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/wconfig.ha",
+     "fieldNames": [
+      "nonce",
+      "maxclients",
+      "ssidname12",
+      "WPSPIN5"
+     ],
+     "selectNames": [
+      "wl80211on"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Update",
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "wconfig",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field maxclients": "80",
+    "Field ssidname12": "Guest",
+    "Field wl80211on": "on"
+   },
+   "tables": [
+    {
+     "Section": "Radio",
+     "Radio": "2.4 GHz",
+     "Enabled": "on",
+     "Standard": "",
+     "Bandwidth": "",
+     "Channel": "",
+     "Power level (%)": ""
+    },
+    {
+     "Section": "Radio",
+     "Radio": "5 GHz (combined configuration)",
+     "Enabled": "",
+     "Standard": "",
+     "Bandwidth": "",
+     "Channel": "",
+     "Power level (%)": ""
+    },
+    {
+     "Section": "SSID",
+     "Radio": "2.4 GHz",
+     "Network": "Home",
+     "Enabled": "",
+     "SSID": "",
+     "Hidden": "",
+     "Security": "",
+     "WPA version": "",
+     "WPS": "",
+     "Maximum clients": "80"
+    },
+    {
+     "Section": "SSID",
+     "Radio": "2.4 GHz",
+     "Network": "Guest",
+     "Enabled": "",
+     "SSID": "Guest",
+     "Hidden": "",
+     "Security": "",
+     "WPA version": "",
+     "WPS": "",
+     "Maximum clients": ""
+    },
+    {
+     "Section": "SSID",
+     "Radio": "5 GHz (combined configuration)",
+     "Network": "Home",
+     "Enabled": "",
+     "SSID": "",
+     "Hidden": "",
+     "Security": "",
+     "WPA version": "",
+     "WPS": "",
+     "Maximum clients": ""
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "abc",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "maxclients",
+     "type": "text",
+     "value": "80",
+     "checked": false,
+     "sensitive": false
+    },
+    {
+     "name": "ssidname12",
+     "type": "text",
+     "value": "Guest",
+     "checked": false,
+     "sensitive": false,
+     "disabled": true
+    },
+    {
+     "name": "WPSPIN5",
+     "type": "text",
+     "value": "",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [
+    {
+     "name": "wl80211on",
+     "value": "on",
+     "options": [
+      "on",
+      "off"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "on",
+       "label": "On",
+       "selected": true,
+       "disabled": false
+      },
+      {
+       "value": "off",
+       "label": "Off",
+       "selected": false,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Update",
+     "type": "submit",
+     "value": "Update",
+     "label": "Update",
+     "sensitive": false
+    },
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save...",
+     "label": "Save...",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/wconfig.ha",
+     "fieldNames": [
+      "nonce",
+      "maxclients",
+      "ssidname12",
+      "WPSPIN5"
+     ],
+     "selectNames": [
+      "wl80211on"
+     ],
+     "textareaNames": [],
+     "buttonNames": [
+      "Update",
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/WCONFIG_SAVE_DOTS_HTML": {
+  "redacted": {
+   "page": "wconfig",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field maxclients": "80"
+   },
+   "tables": [
+    {
+     "Section": "Radio",
+     "Radio": "2.4 GHz",
+     "Enabled": "",
+     "Standard": "",
+     "Bandwidth": "",
+     "Channel": "",
+     "Power level (%)": ""
+    },
+    {
+     "Section": "Radio",
+     "Radio": "5 GHz (combined configuration)",
+     "Enabled": "",
+     "Standard": "",
+     "Bandwidth": "",
+     "Channel": "",
+     "Power level (%)": ""
+    },
+    {
+     "Section": "SSID",
+     "Radio": "2.4 GHz",
+     "Network": "Home",
+     "Enabled": "",
+     "SSID": "",
+     "Hidden": "",
+     "Security": "",
+     "WPA version": "",
+     "WPS": "",
+     "Maximum clients": "80"
+    },
+    {
+     "Section": "SSID",
+     "Radio": "2.4 GHz",
+     "Network": "Guest",
+     "Enabled": "",
+     "SSID": "",
+     "Hidden": "",
+     "Security": "",
+     "WPA version": "",
+     "WPS": "",
+     "Maximum clients": ""
+    },
+    {
+     "Section": "SSID",
+     "Radio": "5 GHz (combined configuration)",
+     "Network": "Home",
+     "Enabled": "",
+     "SSID": "",
+     "Hidden": "",
+     "Security": "",
+     "WPA version": "",
+     "WPS": "",
+     "Maximum clients": ""
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "maxclients",
+     "type": "text",
+     "value": "80",
+     "checked": false,
+     "sensitive": false
+    }
+   ],
+   "selects": [],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Update",
+     "type": "submit",
+     "value": "Update",
+     "label": "Update",
+     "sensitive": false
+    },
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save...",
+     "label": "Save...",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/wconfig.ha",
+     "fieldNames": [
+      "nonce",
+      "maxclients"
+     ],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "Update",
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "wconfig",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field maxclients": "80"
+   },
+   "tables": [
+    {
+     "Section": "Radio",
+     "Radio": "2.4 GHz",
+     "Enabled": "",
+     "Standard": "",
+     "Bandwidth": "",
+     "Channel": "",
+     "Power level (%)": ""
+    },
+    {
+     "Section": "Radio",
+     "Radio": "5 GHz (combined configuration)",
+     "Enabled": "",
+     "Standard": "",
+     "Bandwidth": "",
+     "Channel": "",
+     "Power level (%)": ""
+    },
+    {
+     "Section": "SSID",
+     "Radio": "2.4 GHz",
+     "Network": "Home",
+     "Enabled": "",
+     "SSID": "",
+     "Hidden": "",
+     "Security": "",
+     "WPA version": "",
+     "WPS": "",
+     "Maximum clients": "80"
+    },
+    {
+     "Section": "SSID",
+     "Radio": "2.4 GHz",
+     "Network": "Guest",
+     "Enabled": "",
+     "SSID": "",
+     "Hidden": "",
+     "Security": "",
+     "WPA version": "",
+     "WPS": "",
+     "Maximum clients": ""
+    },
+    {
+     "Section": "SSID",
+     "Radio": "5 GHz (combined configuration)",
+     "Network": "Home",
+     "Enabled": "",
+     "SSID": "",
+     "Hidden": "",
+     "Security": "",
+     "WPA version": "",
+     "WPS": "",
+     "Maximum clients": ""
+    }
+   ],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "n",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "maxclients",
+     "type": "text",
+     "value": "80",
+     "checked": false,
+     "sensitive": false
+    }
+   ],
+   "selects": [],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Update",
+     "type": "submit",
+     "value": "Update",
+     "label": "Update",
+     "sensitive": false
+    },
+    {
+     "name": "Save",
+     "type": "submit",
+     "value": "Save...",
+     "label": "Save...",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/wconfig.ha",
+     "fieldNames": [
+      "nonce",
+      "maxclients"
+     ],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "Update",
+      "Save"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/WIFI_WARN_HTML": {
+  "redacted": {
+   "page": "wconfig",
+   "title": "Wi-Fi Warning",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Continue",
+     "type": "submit",
+     "value": "Continue",
+     "label": "Continue",
+     "sensitive": false
+    },
+    {
+     "name": "Cancel",
+     "type": "submit",
+     "value": "Cancel",
+     "label": "Cancel",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/wconfig.ha",
+     "fieldNames": [
+      "nonce"
+     ],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "Continue"
+     ]
+    },
+    {
+     "method": "POST",
+     "action": "/cgi-bin/wifiwarn_advanced.ha",
+     "fieldNames": [
+      "nonce"
+     ],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "Cancel"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "wconfig",
+   "title": "Wi-Fi Warning",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "n",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "nonce",
+     "type": "hidden",
+     "value": "n",
+     "checked": false,
+     "sensitive": true
+    }
+   ],
+   "selects": [],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Continue",
+     "type": "submit",
+     "value": "Continue",
+     "label": "Continue",
+     "sensitive": false
+    },
+    {
+     "name": "Cancel",
+     "type": "submit",
+     "value": "Cancel",
+     "label": "Cancel",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "POST",
+     "action": "/cgi-bin/wconfig.ha",
+     "fieldNames": [
+      "nonce"
+     ],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "Continue"
+     ]
+    },
+    {
+     "method": "POST",
+     "action": "/cgi-bin/wifiwarn_advanced.ha",
+     "fieldNames": [
+      "nonce"
+     ],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "Cancel"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "integration/WIFI_WARN_NO_CONTINUE_HTML": {
+  "redacted": {
+   "page": "wifiwarn_advanced",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Cancel",
+     "type": "submit",
+     "value": "Cancel",
+     "label": "Cancel",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "GET",
+     "action": "/cgi-bin/wifiwarn_advanced.ha",
+     "fieldNames": [],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "Cancel"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "wifiwarn_advanced",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [
+    {
+     "name": "Cancel",
+     "type": "submit",
+     "value": "Cancel",
+     "label": "Cancel",
+     "sensitive": false
+    }
+   ],
+   "forms": [
+    {
+     "method": "GET",
+     "action": "/cgi-bin/wifiwarn_advanced.ha",
+     "fieldNames": [],
+     "selectNames": [],
+     "textareaNames": [],
+     "buttonNames": [
+      "Cancel"
+     ]
+    }
+   ],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "hand/colspan-header": {
+  "redacted": {
+   "page": "x",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [
+    {
+     "Name": "a",
+     "Name 2": "b",
+     "Value": "c"
+    }
+   ],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "x",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [
+    {
+     "Name": "a",
+     "Name 2": "b",
+     "Value": "c"
+    }
+   ],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "hand/rowspan-label": {
+  "redacted": {
+   "page": "x",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Password": "[redacted]",
+    "Channel": "6"
+   },
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [
+    {
+     "section": "",
+     "label": "Password",
+     "value": "[redacted]"
+    },
+    {
+     "section": "",
+     "label": "Channel",
+     "value": "6"
+    }
+   ],
+   "links": []
+  },
+  "secrets": {
+   "page": "x",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Password": "one",
+    "Channel": "6"
+   },
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [
+    {
+     "section": "",
+     "label": "Password",
+     "value": "one"
+    },
+    {
+     "section": "",
+     "label": "Channel",
+     "value": "6"
+    }
+   ],
+   "links": []
+  }
+ },
+ "hand/nested-tables": {
+  "redacted": {
+   "page": "x",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Label": "Inner 1",
+    "Password": "[redacted]",
+    "Inner": "1"
+   },
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [
+    {
+     "section": "Outer",
+     "label": "Label",
+     "value": "Inner 1"
+    },
+    {
+     "section": "Outer",
+     "label": "Password",
+     "value": "[redacted]"
+    },
+    {
+     "section": "Outer",
+     "label": "Inner",
+     "value": "1"
+    }
+   ],
+   "links": []
+  },
+  "secrets": {
+   "page": "x",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Label": "Inner 1",
+    "Password": "s3cret",
+    "Inner": "1"
+   },
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [
+    {
+     "section": "Outer",
+     "label": "Label",
+     "value": "Inner 1"
+    },
+    {
+     "section": "Outer",
+     "label": "Password",
+     "value": "s3cret"
+    },
+    {
+     "section": "Outer",
+     "label": "Inner",
+     "value": "1"
+    }
+   ],
+   "links": []
+  }
+ },
+ "hand/band-headings": {
+  "redacted": {
+   "page": "x",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Current Channel": "36 (80 MHz)"
+   },
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [
+    {
+     "section": "2.4 GHz",
+     "label": "Current Channel",
+     "value": "6 (20 MHz)"
+    },
+    {
+     "section": "5 GHz",
+     "label": "Current Channel",
+     "value": "36 (80 MHz)"
+    }
+   ],
+   "links": []
+  },
+  "secrets": {
+   "page": "x",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Current Channel": "36 (80 MHz)"
+   },
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [
+    {
+     "section": "2.4 GHz",
+     "label": "Current Channel",
+     "value": "6 (20 MHz)"
+    },
+    {
+     "section": "5 GHz",
+     "label": "Current Channel",
+     "value": "36 (80 MHz)"
+    }
+   ],
+   "links": []
+  }
+ },
+ "hand/unclosed-markup": {
+  "redacted": {
+   "page": "x",
+   "title": "",
+   "heading": "Status Currently Up A B C D x y 1 2 para Describe",
+   "values": {
+    "A": "B",
+    "Status": "Up A B C D x y 1 2 para Describe",
+    "Description": "Describe",
+    "Field s": "2"
+   },
+   "tables": [],
+   "fields": [],
+   "selects": [
+    {
+     "name": "s",
+     "value": "2",
+     "options": [
+      "1",
+      "2"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "1",
+       "label": "1",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "2",
+       "label": "2",
+       "selected": true,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [
+    {
+     "section": "Status Currently Up",
+     "label": "A",
+     "value": "B"
+    }
+   ],
+   "links": []
+  },
+  "secrets": {
+   "page": "x",
+   "title": "",
+   "heading": "Status Currently Up A B C D x y 1 2 para Describe",
+   "values": {
+    "A": "B",
+    "Status": "Up A B C D x y 1 2 para Describe",
+    "Description": "Describe",
+    "Field s": "2"
+   },
+   "tables": [],
+   "fields": [],
+   "selects": [
+    {
+     "name": "s",
+     "value": "2",
+     "options": [
+      "1",
+      "2"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "1",
+       "label": "1",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "2",
+       "label": "2",
+       "selected": true,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [
+    {
+     "section": "Status Currently Up",
+     "label": "A",
+     "value": "B"
+    }
+   ],
+   "links": []
+  }
+ },
+ "hand/wide-table-with-th": {
+  "redacted": {
+   "page": "x",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [
+    {
+     "Name": "a",
+     "Status": "up",
+     "Passphrase": "[redacted]"
+    },
+    {
+     "Name": "b",
+     "Status": "down",
+     "Passphrase": "[redacted]"
+    }
+   ],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "x",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [
+    {
+     "Name": "a",
+     "Status": "up",
+     "Passphrase": "k"
+    },
+    {
+     "Name": "b",
+     "Status": "down",
+     "Passphrase": "m"
+    }
+   ],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "hand/stray-end-tags": {
+  "redacted": {
+   "page": "x",
+   "title": "",
+   "heading": "",
+   "values": {
+    "k": "v"
+   },
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [
+    {
+     "section": "",
+     "label": "k",
+     "value": "v"
+    }
+   ],
+   "links": []
+  },
+  "secrets": {
+   "page": "x",
+   "title": "",
+   "heading": "",
+   "values": {
+    "k": "v"
+   },
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [
+    {
+     "section": "",
+     "label": "k",
+     "value": "v"
+    }
+   ],
+   "links": []
+  }
+ },
+ "hand/secret-label-controls": {
+  "redacted": {
+   "page": "x",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field x1": "[redacted]",
+    "Field x2": "ok"
+   },
+   "tables": [],
+   "fields": [
+    {
+     "name": "x1",
+     "type": "text",
+     "value": "[redacted]",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "x2",
+     "type": "text",
+     "value": "ok",
+     "checked": false,
+     "sensitive": false
+    }
+   ],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "x",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field x1": "s3",
+    "Field x2": "ok"
+   },
+   "tables": [],
+   "fields": [
+    {
+     "name": "x1",
+     "type": "text",
+     "value": "s3",
+     "checked": false,
+     "sensitive": true
+    },
+    {
+     "name": "x2",
+     "type": "text",
+     "value": "ok",
+     "checked": false,
+     "sensitive": false
+    }
+   ],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "hand/tricky-00": {
+  "redacted": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field a": "<b>x</b> & y"
+   },
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [
+    {
+     "name": "a",
+     "value": "<b>x</b> & y",
+     "sensitive": false
+    }
+   ],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field a": "<b>x</b> & y"
+   },
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [
+    {
+     "name": "a",
+     "value": "<b>x</b> & y",
+     "sensitive": false
+    }
+   ],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "hand/tricky-01": {
+  "redacted": {
+   "page": "sysinfo",
+   "title": "A & <b>B",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "sysinfo",
+   "title": "A & <b>B",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "hand/tricky-02": {
+  "redacted": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "hand/tricky-03": {
+  "redacted": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "hand/tricky-04": {
+  "redacted": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "hand/tricky-05": {
+  "redacted": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field a": "\"x\""
+   },
+   "tables": [],
+   "fields": [
+    {
+     "name": "a",
+     "type": "text",
+     "value": "\"x\"",
+     "checked": false,
+     "sensitive": false
+    }
+   ],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field a": "\"x\""
+   },
+   "tables": [],
+   "fields": [
+    {
+     "name": "a",
+     "type": "text",
+     "value": "\"x\"",
+     "checked": false,
+     "sensitive": false
+    }
+   ],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "hand/tricky-06": {
+  "redacted": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field a": "2"
+   },
+   "tables": [],
+   "fields": [],
+   "selects": [
+    {
+     "name": "a",
+     "value": "2",
+     "options": [
+      "1",
+      "2"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "1",
+       "label": "1",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "2",
+       "label": "2",
+       "selected": true,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field a": "2"
+   },
+   "tables": [],
+   "fields": [],
+   "selects": [
+    {
+     "name": "a",
+     "value": "2",
+     "options": [
+      "1",
+      "2"
+     ],
+     "sensitive": false,
+     "optionDetails": [
+      {
+       "value": "1",
+       "label": "1",
+       "selected": false,
+       "disabled": false
+      },
+      {
+       "value": "2",
+       "label": "2",
+       "selected": true,
+       "disabled": false
+      }
+     ]
+    }
+   ],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "hand/tricky-07": {
+  "redacted": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "hand/tricky-08": {
+  "redacted": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "hand/tricky-09": {
+  "redacted": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "hand/tricky-10": {
+  "redacted": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "hand/tricky-11": {
+  "redacted": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [
+    {
+     "name": "t",
+     "value": "",
+     "sensitive": false
+    }
+   ],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [
+    {
+     "name": "t",
+     "value": "",
+     "sensitive": false
+    }
+   ],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "hand/tricky-12": {
+  "redacted": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field t": "<!-- x -->"
+   },
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [
+    {
+     "name": "t",
+     "value": "<!-- x -->",
+     "sensitive": false
+    }
+   ],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {
+    "Field t": "<!-- x -->"
+   },
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [
+    {
+     "name": "t",
+     "value": "<!-- x -->",
+     "sensitive": false
+    }
+   ],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "hand/tricky-13": {
+  "redacted": {
+   "page": "sysinfo",
+   "title": "<!-- x -->",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "sysinfo",
+   "title": "<!-- x -->",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "hand/tricky-14": {
+  "redacted": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  }
+ },
+ "hand/tricky-15": {
+  "redacted": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  },
+  "secrets": {
+   "page": "sysinfo",
+   "title": "",
+   "heading": "",
+   "values": {},
+   "tables": [],
+   "fields": [],
+   "selects": [],
+   "textareas": [],
+   "buttons": [],
+   "forms": [],
+   "valueEntries": [],
+   "links": []
+  }
+ }
+}

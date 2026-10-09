@@ -7,6 +7,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+from integration_html import CHANGES_SAVED_HTML, allocation_saved_html
 from page_builders import (
     apphosting_page,
     button,
@@ -23,6 +24,7 @@ from page_builders import (
 
 from bgwcli import restore
 from bgwcli.restore import (
+    CONTINUE_NOT_POSTED,
     FORM_SAVE_BUTTONS,
     RESTORE_PAGE_ORDER,
     RestoreDeferredForward,
@@ -271,7 +273,8 @@ def test_missing_live_page_blocks_its_steps_instead_of_throwing():
 
 def test_form_step_never_assigns_a_disabled_control_even_if_the_dump_differs():
     pages = {**live_pages(), "dosprotect": default_dosprotect(disabled=True)}
-    assert not [s for s in plan(dump(), pages) if s.kind == "form" and s.page == "dosprotect"]
+    forms = [s for s in plan(dump(), pages) if s.kind == "form" and s.page == "dosprotect"]
+    assert len(forms) == 1 and forms[0].blocked is not None and forms[0].raw_payload is None
 
 
 def test_form_step_skips_fields_absent_from_the_dump():
@@ -380,8 +383,8 @@ def test_form_step_description_redacts_secrets_unless_include_secrets():
 # --- Executor --------------------------------------------------------------------------------------
 
 
-def post_response(status_code: int = 302, location: str | None = None):
-    return SimpleNamespace(status_code=status_code, headers={"location": location} if location else {})
+def post_response(status_code: int = 302, location: str | None = None, body: str = ""):
+    return SimpleNamespace(status_code=status_code, headers={"location": location} if location else {}, body=body)
 
 
 def get_response(status_code: int, body: str = ""):
@@ -392,12 +395,18 @@ class FakeClient:
     def __init__(self, post=None, get=None):
         self.posted: list[tuple[str, dict[str, str]]] = []
         self.gets: list[str] = []
+        self.forms: list[tuple[str, str]] = []
         self._post = post or (lambda page, fields: post_response(302, f"/cgi-bin/{page}.ha"))
         self._get = get or (lambda page: (_ for _ in ()).throw(AssertionError("get_cgi_page should not be called")))
 
     def post_cgi_page(self, page, fields):
         self.posted.append((page, dict(fields)))
         return self._post(page, fields)
+
+    def post_form(self, nonce_page, post_path, fields):
+        # The warning page's Continue: nonce read from `nonce_page`, POST to its owning form's action.
+        self.forms.append((nonce_page, post_path))
+        return self.post_cgi_page(post_path.removesuffix(".ha"), fields)
 
     def get_cgi_page(self, page):
         self.gets.append(page)
@@ -429,10 +438,11 @@ def fake_steps() -> list[RestoreStep]:
 
 
 def test_execute_restore_posts_only_runnable_steps_in_order_and_records_statuses():
-    client = FakeClient()
+    client = FakeClient(get=lambda p: get_response(200, CHANGES_SAVED_HTML))
     seen: list[str] = []
     execution = execute_restore(client, list(reversed(fake_steps())), lambda r: seen.append(f"{r.order}:{r.status}"))
     assert [p for p, _ in client.posted] == ["services", "dosprotect", "wconfig"]
+    assert client.gets == ["services", "dosprotect", "wconfig"]
     assert [s.status for s in execution.steps] == ["applied", "blocked", "skipped", "applied", "applied"]
     assert execution.steps[0].location == "/cgi-bin/services.ha"
     assert execution.steps[0].status_code == 302
@@ -454,7 +464,7 @@ def test_execute_restore_stops_at_the_first_failure_and_marks_the_rest_not_run()
         calls["n"] += 1
         if calls["n"] == 2:
             raise RuntimeError("Router rejected dosprotect.ha with HTTP 500.")
-        return post_response(200)
+        return post_response(200, body=CHANGES_SAVED_HTML)
 
     execution = execute_restore(FakeClient(post=post), fake_steps())
     assert [s.status for s in execution.steps] == ["applied", "blocked", "skipped", "failed", "not-run"]
@@ -467,13 +477,15 @@ def test_execute_restore_fails_a_step_on_a_non_2xx_3xx_status():
     execution = execute_restore(FakeClient(post=lambda p, f: post_response(500)), fake_steps()[:1])
     assert execution.steps[0].status == "failed"
     assert execution.steps[0].status_code == 500
-    assert execution.steps[0].error == "unexpected HTTP 500"
+    assert execution.steps[0].error.startswith("unexpected HTTP 500")
+    assert "sent once" in execution.steps[0].error
     assert execution.stopped_at == 1
 
 
 def test_execute_restore_reads_location_case_insensitively_and_from_lists():
     client = FakeClient(
-        post=lambda p, f: SimpleNamespace(status_code=302, headers={"Location": ["/cgi-bin/a.ha", "x"]})
+        post=lambda p, f: SimpleNamespace(status_code=302, headers={"Location": ["/cgi-bin/a.ha", "x"]}, body=""),
+        get=lambda p: get_response(200, CHANGES_SAVED_HTML),
     )
     execution = execute_restore(client, fake_steps()[:1])
     assert execution.steps[0].location == "/cgi-bin/a.ha"
@@ -737,11 +749,14 @@ def reserve_fake(mac: str, ip: str) -> RestoreStep:
 
 def test_execute_restore_performs_allocate_reads_the_entry_form_then_posts_save(fake_parser):
     fake_parser["entry"] = entry_page(MAC, ["192.168.1.67", "192.168.1.68"])
+    saved_html = allocation_saved_html(MAC, "192.168.1.67")
+    fake_parser[saved_html] = ipalloc_page(rows=[("192.168.1.67", MAC, "on", "Fixed Allocation")])
     client = FakeClient(
-        post=lambda p, f: post_response(302, "/cgi-bin/ipalloc.ha"), get=lambda p: get_response(200, "entry")
+        post=lambda p, f: post_response(302, "/cgi-bin/ipalloc.ha"),
+        get=lambda p: get_response(200, "entry" if len(client.posted) == 1 else saved_html),
     )
     execution = execute_restore(client, [reserve_fake(MAC, "192.168.1.67")])
-    assert client.gets == ["ipalloc", "ipalloc"]  # entry form, then the post-redirect banner check
+    assert client.gets == ["ipalloc", "ipalloc"]  # entry form, then acknowledgement and fixed allocation
     assert client.posted == [
         ("ipalloc", {f"Allocate_{MAC}": "Allocate"}),
         ("ipalloc", {f"alloc_{MAC}": "192.168.1.67", "Save": "Save"}),
@@ -751,24 +766,28 @@ def test_execute_restore_performs_allocate_reads_the_entry_form_then_posts_save(
     assert execution.stopped_at is None
 
 
-def test_execute_restore_fails_the_reserve_step_without_posting_save_when_the_address_is_not_offered(fake_parser):
+def test_execute_restore_blocks_the_reserve_step_without_posting_save_when_the_address_is_not_offered(fake_parser):
+    """Nothing was written (the Allocate POST only opens the entry editor): a pre-write refusal is
+    `blocked` and the rest of the plan still runs."""
     fake_parser["entry"] = entry_page(MAC, ["192.168.1.68"])
     client = FakeClient(post=lambda p, f: post_response(302), get=lambda p: get_response(200, "entry"))
     skip = RestoreStep(2, "skip", "packetfilter", "skip")
     execution = execute_restore(client, [reserve_fake(MAC, "192.168.1.67"), skip])
     assert [list(f) for _, f in client.posted] == [[f"Allocate_{MAC}"]]
-    assert execution.steps[0].status == "failed"
+    assert execution.steps[0].status == "blocked"
+    assert execution.steps[0].write_attempted is False
     assert "not offered" in (execution.steps[0].error or "")
-    assert execution.stopped_at == 1
-    assert execution.steps[1].status == "not-run"
+    assert execution.stopped_at is None
+    assert execution.steps[1].status == "skipped"
 
 
-def test_execute_restore_fails_the_reserve_step_when_the_entry_form_belongs_to_a_different_device(fake_parser):
+def test_execute_restore_blocks_the_reserve_step_when_the_entry_form_belongs_to_a_different_device(fake_parser):
     fake_parser["entry"] = entry_page("aa:bb:cc:dd:ee:ff", ["192.168.1.67"])
     client = FakeClient(post=lambda p, f: post_response(302), get=lambda p: get_response(200, "entry"))
     execution = execute_restore(client, [reserve_fake(MAC, "192.168.1.67")])
-    assert execution.steps[0].status == "failed"
+    assert execution.steps[0].status == "blocked"
     assert execution.steps[0].error == f"IP Allocation Entry did not open for {MAC}"
+    assert execution.stopped_at is None
 
 
 def test_execute_restore_fails_the_reserve_step_when_the_follow_up_save_returns_a_bad_status(fake_parser):
@@ -812,10 +831,10 @@ def test_execute_restore_refuses_to_post_an_allocation_value_that_is_not_a_dotte
     fake_parser["entry"] = entry_page(MAC, ["192.168.1.67"])
     client = FakeClient(post=lambda p, f: post_response(302), get=lambda p: get_response(200, "entry"))
     execution = execute_restore(client, [reserve_fake(MAC, "normal")])
-    assert execution.steps[0].status == "failed"
+    assert execution.steps[0].status == "blocked"
     assert execution.steps[0].error == "refusing to post non-IPv4 allocation value 'normal'"
     assert [list(f) for _, f in client.posted] == [[f"Allocate_{MAC}"]]
-    assert execution.stopped_at == 1
+    assert execution.stopped_at is None
 
 
 # The gateway keeps an "IP Allocation Entry" block rendered for the rest of the web session after
@@ -848,30 +867,36 @@ def test_a_reserve_step_posts_only_the_allocate_button_never_a_sticky_entry_bloc
 # POST has to carry the value the entry page actually renders ("Save..." on some firmwares).
 def test_execute_restore_posts_the_save_buttons_rendered_value_not_its_name(fake_parser):
     fake_parser["entry"] = entry_page(MAC, ["192.168.1.67"], save="Save...")
-    client = FakeClient(post=lambda p, f: post_response(302), get=lambda p: get_response(200, "entry"))
+    saved_html = allocation_saved_html(MAC, "192.168.1.67")
+    fake_parser[saved_html] = ipalloc_page(rows=[("192.168.1.67", MAC, "on", "Fixed Allocation")])
+    client = FakeClient(
+        post=lambda p, f: post_response(200, body=saved_html) if "Save" in f else post_response(302),
+        get=lambda p: get_response(200, "entry"),
+    )
     execution = execute_restore(client, [reserve_fake(MAC, "192.168.1.67")])
     assert execution.steps[0].status == "applied"
+    assert client.gets == ["ipalloc"]  # Save's HTTP 200 body already confirms the allocation
     assert client.posted[1] == ("ipalloc", {f"alloc_{MAC}": "192.168.1.67", "Save": "Save..."})
 
 
-def test_execute_restore_fails_the_reserve_step_when_the_entry_form_has_no_save_button(fake_parser):
+def test_execute_restore_blocks_the_reserve_step_when_the_entry_form_has_no_save_button(fake_parser):
     fake_parser["entry"] = entry_page(MAC, ["192.168.1.67"], save=None)
     client = FakeClient(post=lambda p, f: post_response(302), get=lambda p: get_response(200, "entry"))
     execution = execute_restore(client, [reserve_fake(MAC, "192.168.1.67")])
-    assert execution.steps[0].status == "failed"
+    assert execution.steps[0].status == "blocked"
     assert execution.steps[0].error == "IP Allocation Entry has no 'Save' button"
     assert [list(f) for _, f in client.posted] == [[f"Allocate_{MAC}"]]
-    assert execution.stopped_at == 1
+    assert execution.stopped_at is None
 
 
-def test_execute_restore_fails_the_reserve_step_when_the_matching_address_option_is_disabled(fake_parser):
+def test_execute_restore_blocks_the_reserve_step_when_the_matching_address_option_is_disabled(fake_parser):
     fake_parser["entry"] = entry_page(MAC, ["192.168.1.67"], disabled_ips=["192.168.1.67"])
     client = FakeClient(post=lambda p, f: post_response(302), get=lambda p: get_response(200, "entry"))
     execution = execute_restore(client, [reserve_fake(MAC, "192.168.1.67")])
-    assert execution.steps[0].status == "failed"
+    assert execution.steps[0].status == "blocked"
     assert "not offered" in (execution.steps[0].error or "")
     assert [list(f) for _, f in client.posted] == [[f"Allocate_{MAC}"]]
-    assert execution.stopped_at == 1
+    assert execution.stopped_at is None
 
 
 def test_add_forward_matches_a_custom_service_that_the_router_lists_with_a_star_prefix():
@@ -930,31 +955,42 @@ WCONFIG_SAVE = RestoreStep(
 
 def test_a_form_save_that_redirects_to_the_wifi_warning_page_is_confirmed_with_continue(fake_parser):
     fake_parser["warn"] = wifi_warn_page()
-    fake_parser["blank"] = page("blank")
 
     def post(page, fields):
         return post_response(302, "/cgi-bin/wconfig.ha" if "Continue" in fields else "/cgi-bin/wifiwarn_advanced.ha")
 
-    client = FakeClient(post=post, get=lambda p: get_response(200, "warn" if p == "wifiwarn_advanced" else "blank"))
+    client = FakeClient(
+        post=post, get=lambda p: get_response(200, "warn" if p == "wifiwarn_advanced" else CHANGES_SAVED_HTML)
+    )
     execution = execute_restore(client, [WCONFIG_SAVE])
-    assert client.gets == ["wifiwarn_advanced"]
+    assert client.gets == ["wifiwarn_advanced", "wconfig"]
     assert client.posted == [
         ("wconfig", {"maxclients": "81", "Save": "Save..."}),
         ("wconfig", {"Continue": "Continue"}),
     ]
+    # Continue's nonce comes from the warning page's own form, posted to the owning form's action.
+    assert client.forms == [("wifiwarn_advanced", "wconfig.ha")]
+    assert len(client.posted) == 2
     assert execution.steps[0].status == "applied"
     assert execution.steps[0].location == "/cgi-bin/wconfig.ha"
 
 
-def test_continue_falls_back_to_the_warning_page_when_no_form_owns_the_button(fake_parser):
+def test_continue_is_refused_when_no_form_owns_the_button(fake_parser):
     fake_parser["warn"] = page("wifiwarn_advanced", buttons=[button("Continue", "Go on")])
     client = FakeClient(
-        post=lambda p, f: post_response(302, "/cgi-bin/wifiwarn_advanced.ha" if "Continue" not in f else None),
+        post=lambda p, f: post_response(200, body=CHANGES_SAVED_HTML)
+        if "Continue" in f else post_response(302, "/cgi-bin/wifiwarn_advanced.ha"),
         get=lambda p: get_response(200, "warn"),
     )
     execution = execute_restore(client, [WCONFIG_SAVE])
-    assert client.posted[1] == ("wifiwarn_advanced", {"Continue": "Go on"})
-    assert execution.steps[0].status == "applied"
+    assert [p for p, _ in client.posted] == ["wconfig"], "only the Save: Continue is never posted to the warning page"
+    assert client.forms == []
+    step = execution.steps[0]
+    assert step.status == "failed"
+    assert "posts to no action, not to a page this tool can confirm" in step.error
+    assert CONTINUE_NOT_POSTED in step.error and "discards an unconfirmed Wi-Fi change" in step.error
+    assert step.write_attempted is True and step.write_response_received is True and step.status_code == 302
+    assert step.location == "/cgi-bin/wifiwarn_advanced.ha"
 
 
 def test_a_wifi_warning_page_without_a_continue_button_fails_the_step_without_a_second_post(fake_parser):
@@ -971,7 +1007,13 @@ def test_a_wifi_warning_page_without_a_continue_button_fails_the_step_without_a_
     )
     assert [p for p, _ in client.posted] == ["wconfig"]
     assert execution.steps[0].status == "failed"
-    assert execution.steps[0].error == "wifiwarn_advanced has no Continue button; change not confirmed"
+    assert execution.steps[0].error == (
+        "wifiwarn_advanced has no Continue button; change not confirmed. "
+        "The Wi-Fi Warning was not confirmed: Continue was not posted. "
+        "The change was sent once; verify the gateway state before retrying."
+    )
+    # The save POST was sent and answered with the redirect: a write reached the gateway.
+    assert execution.steps[0].write_attempted is True and execution.steps[0].write_response_received is True
     assert execution.stopped_at == 1
 
 
@@ -992,7 +1034,10 @@ def test_a_warning_page_that_fails_to_load_or_confirm_fails_the_step(fake_parser
     )
     execution = execute_restore(client, [WCONFIG_SAVE])
     assert execution.steps[0].status == "failed"
-    assert execution.steps[0].error == "unexpected HTTP 500 reading wifiwarn_advanced"
+    assert execution.steps[0].error.startswith(
+        "unexpected HTTP 500 reading wifiwarn_advanced. The Wi-Fi Warning was not confirmed: Continue was not posted."
+    )
+    assert "sent once" in execution.steps[0].error and execution.steps[0].write_attempted is True
 
     def post(page, fields):
         return post_response(302, "/cgi-bin/wifiwarn_advanced.ha") if "Continue" not in fields else post_response(500)
@@ -1000,7 +1045,8 @@ def test_a_warning_page_that_fails_to_load_or_confirm_fails_the_step(fake_parser
     client = FakeClient(post=post, get=lambda p: get_response(200, "warn"))
     execution = execute_restore(client, [WCONFIG_SAVE])
     assert execution.steps[0].status == "failed"
-    assert execution.steps[0].error == "unexpected HTTP 500 confirming wconfig"
+    assert execution.steps[0].error.startswith("unexpected HTTP 500 confirming wconfig")
+    assert "sent once" in execution.steps[0].error
     assert execution.stopped_at == 1
 
 
@@ -1082,9 +1128,16 @@ def deferred_steps() -> list[RestoreStep]:
 
 def test_execute_restore_re_reads_the_dropdown_and_posts_a_deferred_forward_once_its_service_exists(fake_parser):
     fake_parser["apphosting"] = apphosting_with_star_mosh()
-    client = FakeClient(get=lambda p: get_response(200, "apphosting"))
+    fake_parser[CHANGES_SAVED_HTML] = apphosting_page()
+    client = FakeClient(
+        get=lambda p: get_response(
+            200,
+            "apphosting" if p == "apphosting" and not any(name == p for name, _ in client.posted)
+            else CHANGES_SAVED_HTML,
+        )
+    )
     execution = execute_restore(client, deferred_steps())
-    # services 302 -> banner check; apphosting dropdown re-read + banner check; dosprotect banner check
+    # services acknowledgement; apphosting dropdown re-read + acknowledgement; dosprotect acknowledgement
     assert client.gets == ["services", "apphosting", "apphosting", "dosprotect"]
     assert [p for p, _ in client.posted] == ["services", "apphosting", "dosprotect"]
     assert client.posted[1][1].items() >= {"service": "*Mosh", "device": "aa:bb:cc:dd:ee:02", "Add": "Add"}.items()
@@ -1095,7 +1148,10 @@ def test_execute_restore_re_reads_the_dropdown_and_posts_a_deferred_forward_once
 
 def test_execute_restore_leaves_a_deferred_forward_blocked_when_the_dropdown_still_lacks_its_service(fake_parser):
     fake_parser["apphosting"] = apphosting_without_mosh()
-    client = FakeClient(post=lambda p, f: post_response(302), get=lambda p: get_response(200, "apphosting"))
+    client = FakeClient(
+        post=lambda p, f: post_response(200, body=CHANGES_SAVED_HTML),
+        get=lambda p: get_response(200, "apphosting"),
+    )
     execution = execute_restore(client, deferred_steps())
     assert [p for p, _ in client.posted] == ["services", "dosprotect"]
     assert [s.status for s in execution.steps] == ["applied", "blocked", "applied"]
@@ -1107,7 +1163,7 @@ def test_execute_restore_records_a_failed_deferred_forward_when_re_reading_appho
     def get(page):
         raise RuntimeError("Timed out reading apphosting.ha")
 
-    client = FakeClient(post=lambda p, f: post_response(302), get=get)
+    client = FakeClient(post=lambda p, f: post_response(200, body=CHANGES_SAVED_HTML), get=get)
     execution = execute_restore(client, deferred_steps())
     assert [p for p, _ in client.posted] == ["services"]
     assert [s.status for s in execution.steps] == ["applied", "failed", "not-run"]
@@ -1116,19 +1172,82 @@ def test_execute_restore_records_a_failed_deferred_forward_when_re_reading_appho
 
 
 def test_execute_restore_fails_a_deferred_forward_on_a_non_200_re_read_or_rejected_post(fake_parser):
-    client = FakeClient(post=lambda p, f: post_response(302), get=lambda p: get_response(503, ""))
+    client = FakeClient(
+        post=lambda p, f: post_response(200, body=CHANGES_SAVED_HTML), get=lambda p: get_response(503, "")
+    )
     execution = execute_restore(client, deferred_steps())
     assert execution.steps[1].status == "failed"
     assert execution.steps[1].error == "unexpected HTTP 503 re-reading apphosting"
     fake_parser["apphosting"] = apphosting_with_star_mosh()
     client = FakeClient(
-        post=lambda p, f: post_response(500 if p == "apphosting" else 302),
+        post=lambda p, f: post_response(500) if p == "apphosting" else post_response(200, body=CHANGES_SAVED_HTML),
         get=lambda p: get_response(200, "apphosting"),
     )
     execution = execute_restore(client, deferred_steps())
     assert execution.steps[1].status == "failed"
     assert execution.steps[1].status_code == 500
     assert execution.stopped_at == 2
+
+
+LOGIN_BODY = (
+    '<title>Login</title><form action="/cgi-bin/login.ha"><input name="nonce" value="n">'
+    '<input name="password"></form>'
+)
+NO_FORM_REASON = "answered without any form controls"
+UNREADABLE_RE_READS = {
+    "please-wait": (
+        "Please wait body",
+        lambda: ParsedPage("apphosting", "Please wait", ""),
+        NO_FORM_REASON,
+    ),
+    "truncated": (
+        "truncated body",
+        lambda: replace(apphosting_with_star_mosh(), truncated=True),
+        "larger than the parser's bounds",
+    ),
+    "nonce-only": (
+        "nonce only body",
+        lambda: ParsedPage("apphosting", "Applications", "", fields=[field("nonce", "hidden", "n")]),
+        NO_FORM_REASON,
+    ),
+    "login": (LOGIN_BODY, apphosting_with_star_mosh, "answered with the Login page"),
+    "page-not-found": (
+        "not found body",
+        lambda: replace(apphosting_with_star_mosh(), title="Page not found"),
+        "answered Page not found",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(UNREADABLE_RE_READS))
+def test_execute_restore_fails_a_deferred_forward_whose_re_read_is_not_a_readable_form(fake_parser, case):
+    body, build, reason = UNREADABLE_RE_READS[case]
+    fake_parser[body] = build()
+    client = FakeClient(
+        post=lambda p, f: post_response(200, body=CHANGES_SAVED_HTML),
+        get=lambda p: get_response(200, body if p == "apphosting" else CHANGES_SAVED_HTML),
+    )
+    fake_parser[CHANGES_SAVED_HTML] = apphosting_page()
+    execution = execute_restore(client, deferred_steps())
+    assert [p for p, _ in client.posted] == ["services"]
+    assert [s.status for s in execution.steps] == ["applied", "failed", "not-run"]
+    failed = execution.steps[1]
+    assert failed.error.startswith("re-reading apphosting: ")
+    assert reason in failed.error
+    assert "not offered" not in failed.error
+    assert failed.write_attempted is False
+    assert failed.error_type == "SnapshotExtractionError"
+    assert execution.steps[0].write_attempted is True
+    assert execution.stopped_at == 2
+
+
+def test_unreadable_form_problem_is_none_for_a_readable_form_and_names_each_bad_answer():
+    from bgwcli.restore import _unreadable_form_problem
+
+    assert _unreadable_form_problem("apphosting", "<html></html>", apphosting_with_star_mosh()) is None
+    for body, build, reason in UNREADABLE_RE_READS.values():
+        html = body if body is LOGIN_BODY else "<html></html>"
+        assert reason in (_unreadable_form_problem("apphosting", html, build()) or "")
 
 
 # --- Unchecked controls ------------------------------------------------------------------------------
@@ -1177,7 +1296,7 @@ def test_identical_unchecked_state_on_both_sides_is_not_a_difference():
     assert diff_snapshots(wanted, live).forms == {}
 
 
-def test_a_text_field_whose_dump_value_is_literally_unchecked_is_assigned_not_omitted():
+def test_an_unchecked_dump_value_for_a_text_control_is_a_skip_note_never_posted():
     pages = {
         **live_pages(),
         "dosprotect": dosprotect_page(
@@ -1190,9 +1309,12 @@ def test_a_text_field_whose_dump_value_is_literally_unchecked_is_assigned_not_om
         forwards=live.forwards,
         forms={"dosprotect": {"display_label": UNCHECKED, "reflexive": UNCHECKED}},
     )
-    form_step = find(plan(wanted, pages), "form", "dosprotect")
-    # The sentinel only means "off" for a checkable control; for the text input it is the literal value.
-    assert form_step.raw_payload == {"display_label": UNCHECKED, "Save": "Save"}
+    steps = plan(wanted, pages)
+    form_step = find(steps, "form", "dosprotect")
+    # The sentinel only means "off" for a checkable control; a text input is never sent it.
+    assert UNCHECKED not in (form_step.raw_payload or {}).values()
+    skips = [s for s in steps if s.kind == "skip" and "display_label" in s.description]
+    assert skips and skips[0].warning and "display_label" in skips[0].warning
 
 
 def test_pages_restricts_the_plan_to_the_selected_sections_and_pages():
@@ -1273,7 +1395,7 @@ def test_form_step_includes_dumped_values_for_live_disabled_fields_when_the_same
     assert form.raw_payload["security11"] == "wpa" and form.raw_payload["key11"] == "s3cret"
 
 
-def test_form_step_still_skips_a_page_whose_only_differing_field_is_disabled():
+def test_form_step_blocks_a_page_whose_only_differing_field_is_disabled():
     from page_builders import button, field, hidden, page
 
     wconfig = page(
@@ -1285,8 +1407,12 @@ def test_form_step_still_skips_a_page_whose_only_differing_field_is_disabled():
     pages = {**live_pages(), "wconfig": wconfig}
     live = extract_snapshot(pages, ts="t", router_host="r")
     wanted = replace(dump_no_service_adds(), forwards=live.forwards, forms={**live.forms, "wconfig": {"key11": "s3cret"}})  # noqa: E501
-    steps = build_restore_plan(diff_snapshots(wanted, live), wanted, pages, RestoreOptions())
-    assert not [s for s in steps if s.kind == "form" and s.page == "wconfig"]
+    diff = diff_snapshots(wanted, live)
+    steps = build_restore_plan(diff, wanted, pages, RestoreOptions())
+    forms = [s for s in steps if s.kind == "form" and s.page == "wconfig"]
+    assert len(forms) == 1 and forms[0].raw_payload is None
+    assert "key11" in (forms[0].blocked or "") and "s3cret" not in (forms[0].blocked or "")
+    assert restore_converged(diff, False)
 
 
 ERROR_BANNER_HTML = """<html><body><form method="post" action="/cgi-bin/apphosting.ha">
@@ -1332,13 +1458,13 @@ def test_execute_restore_reports_a_step_failed_when_the_redirect_target_carries_
     assert execution.stopped_at == 1
 
 
-def test_execute_restore_keeps_applied_when_the_redirect_target_has_no_error_banner():
+def test_execute_restore_keeps_applied_when_the_redirect_target_confirms_changes_saved():
     class Client:
         def post_cgi_page(self, page, fields):
             return HttpResponse(302, "Found", {"location": "/cgi-bin/apphosting.ha"}, "", "https://r/cgi-bin/apphosting.ha")
 
         def get_cgi_page(self, page, *, auth=True):
-            return HttpResponse(200, "OK", {}, "<html><body><table><tr><th>Service</th></tr></table></body></html>", f"https://r/cgi-bin/{page}.ha")
+            return HttpResponse(200, "OK", {}, CHANGES_SAVED_HTML, f"https://r/cgi-bin/{page}.ha")
 
     step = RestoreStep(
         order=1, kind="add-forward", page="apphosting", description="add", button="Add", raw_payload={"Add": "Add"}
@@ -1361,3 +1487,225 @@ def test_router_error_banner_ignores_the_success_banner_and_requires_the_error_i
     assert router_error_banner(success) is None
     assert router_error_banner(error) == "A required setting is empty A required setting is empty"
     assert router_error_banner("<html><body>no banner</body></html>") is None
+
+
+# --- Wi-Fi MAC filtering: a filtering mode is restored only with its filter list -----------------
+
+MODE_ROWS = [
+    {"Radio": "2.4 GHz", "Network": "Home", "Filtering": "none"},
+    {"Radio": "5 GHz", "Network": "Home", "Filtering": "none"},
+]
+MAC_ROW = {"MAC Address": "aa:bb:cc:dd:ee:01", "Name": "laptop"}
+
+
+def wmacauth_page(list_rows: list[dict[str, str]]) -> ParsedPage:
+    return page(
+        "wmacauth",
+        fields=[hidden("nonce", "n")],
+        selects=[
+            select("wmacr1user", ["allow", "deny", "none"], selected="none"),
+            select("wmacr2user", ["allow", "deny", "none"], selected="none"),
+        ],
+        tables=[*MODE_ROWS, *list_rows],
+        buttons=[button("Save")],
+    )
+
+
+def wmacauth_dump(mode: str, list_rows: list[dict[str, str]]) -> Snapshot:
+    return Snapshot(
+        meta=SnapshotMeta(schema=2, firmware="", ts="t", router_host="r"),
+        forms={"wmacauth": {"wmacr1user": mode, "wmacr2user": "none"}},
+        tables={"wmacauth": [{"Radio": "2.4 GHz", "Network": "Home", "Filtering": mode}, *list_rows]},
+    )
+
+
+@pytest.mark.parametrize("dump_rows", [[MAC_ROW], []])
+def test_a_non_none_mac_filter_mode_is_blocked_while_the_live_filter_list_lacks_the_dumped_rows(dump_rows):
+    pages = {"wmacauth": wmacauth_page([])}
+    steps = plan(wmacauth_dump("allow", dump_rows), pages, RestoreOptions(pages=("wmacauth",)))
+    step = find(steps, "form")
+    assert step.blocked is not None and "lock" in step.blocked and "wmacr1user" in step.blocked
+    assert step.raw_payload is None
+
+
+def test_a_non_none_mac_filter_mode_is_planned_when_the_live_filter_list_has_the_dumped_rows():
+    pages = {"wmacauth": wmacauth_page([{"MAC Address": "AA:BB:CC:DD:EE:01", "Name": "laptop"}])}
+    steps = plan(wmacauth_dump("allow", [MAC_ROW]), pages, RestoreOptions(pages=("wmacauth",)))
+    step = find(steps, "form")
+    assert step.blocked is None
+    assert step.raw_payload["wmacr1user"] == "allow"
+
+
+def test_restoring_mac_filtering_to_none_never_needs_the_filter_list():
+    pages = {"wmacauth": wmacauth_page([])}
+    pages["wmacauth"] = replace(
+        pages["wmacauth"], selects=[select("wmacr1user", ["allow", "deny", "none"], selected="deny"),
+                                    select("wmacr2user", ["allow", "deny", "none"], selected="none")],
+    )
+    steps = plan(wmacauth_dump("none", [MAC_ROW]), pages, RestoreOptions(pages=("wmacauth",)))
+    step = find(steps, "form")
+    assert step.blocked is None and step.raw_payload["wmacr1user"] == "none"
+
+
+# --- prune: a custom service is removed only once no live forward uses it -----------------------
+
+SVC_A = ("svcA", "61000-61000", "61000", "TCP")
+SVC_B = ("svcB", "62000-62000", "62000", "TCP")
+
+
+def keep_only_custom_ssh(pages: dict[str, ParsedPage]) -> Snapshot:
+    live = live_snapshot(pages)
+    return replace(
+        dump_no_service_adds(),
+        services=[s for s in live.services if s.name == "custom_ssh"],
+        forwards=[f for f in live.forwards if f.service == "custom_ssh"],
+    )
+
+
+def test_prune_blocks_a_service_remove_while_a_live_forward_that_stays_still_uses_it():
+    pages = {
+        **live_pages(),
+        "services": services_page(rows=[CUSTOM_SSH, SVC_A, SVC_B]),
+        "apphosting": apphosting_page(
+            rows=[("custom_ssh", "host-b"), ("svcB", "host-a"), ("svcA", "host-b")], device_options=DEVICES,
+        ),
+    }
+    steps = plan(keep_only_custom_ssh(pages), pages, PRUNE)
+    forward_removes = [s for s in steps if s.kind == "remove-forward"]
+    assert [s.description for s in forward_removes if s.blocked is None] == ["remove forward svcB -> host-a"]
+    svc_a = find(steps, "remove-service", "svcA")
+    assert svc_a.blocked is not None and "forward" in svc_a.blocked and svc_a.raw_payload is None
+    # svcB's only forward is removed earlier in the same run, so svcB is the one real service remove.
+    svc_b = find(steps, "remove-service", "svcB")
+    assert svc_b.blocked is None and svc_b.raw_payload is not None
+    assert svc_b.order > forward_removes[0].order
+
+
+def test_prune_with_only_services_selected_still_checks_the_live_forwards():
+    pages = {
+        **live_pages(),
+        "services": services_page(rows=[CUSTOM_SSH, SVC_A]),
+        "apphosting": apphosting_page(rows=[("custom_ssh", "host-b"), ("svcA", "host-b")], device_options=DEVICES),
+    }
+    options = replace(PRUNE, pages=("services",))
+    step = find(plan(keep_only_custom_ssh(pages), pages, options), "remove-service")
+    assert step.blocked is not None and "forward" in step.blocked and not any(
+        s.kind == "remove-forward" for s in plan(keep_only_custom_ssh(pages), pages, options)
+    )
+    without_forwards = {"services": pages["services"]}
+    step = find(plan(keep_only_custom_ssh(pages), without_forwards, options), "remove-service")
+    assert step.blocked is not None and "not inspected" in step.blocked
+
+
+def test_cli_restore_prune_with_only_services_selected_reads_the_forwards_and_posts_nothing(
+    tmp_env, monkeypatch, capsys
+):
+    import json
+
+    from integration_html import RESTORE_APPHOSTING_HTML, RESTORE_SERVICES_HTML
+    from save_helpers import client_with, html
+
+    from bgwcli import cli
+
+    forwards = RESTORE_APPHOSTING_HTML.replace(
+        "</table>", '<tr><td>Stale</td><td>host-a</td><td><input type="submit" name="Remove_2" value="Remove"></td>'
+        "</tr></table>",
+    )
+    data = {
+        "meta": {"schema": 2, "firmware": "", "ts": "", "routerHost": "r"},
+        "services": [{"name": "custom_ssh", "extMinPort": 2483, "extMaxPort": 2483, "intStartPort": 22,
+                      "protocol": "TCP"}],
+        "forwards": [], "reservations": [], "forms": {}, "tables": {},
+    }
+    path = tmp_env / "d.json"
+    path.write_text(json.dumps(data))
+    client, wire = client_with(lambda request, n: html(
+        RESTORE_SERVICES_HTML if "services" in request.url else forwards if "apphosting" in request.url else ""
+    ))
+    monkeypatch.setattr(cli, "_client_factory", lambda *a, **k: client)
+    code = cli.main(["restore", str(path), "--include", "services", "--prune", "--commit", "--confirm", "RESTORE",
+                     "--json"])
+    out = json.loads(capsys.readouterr().out)
+    assert sum(r.method == "POST" and "login" not in r.url for r in wire.requests) == 0
+    assert any("apphosting" in r.url for r in wire.requests)
+    step = next(s for s in out["execution"]["steps"] if s["kind"] == "remove-service")
+    assert step["status"] == "blocked" and "forward" in step["error"]
+    assert code == 1
+
+
+# --- a custom service whose ports/protocol changed on the router under the same name ------------
+
+MOSH_WIDE = ("Mosh", "60001-60020", "60001", "UDP")
+
+
+def changed_mosh_pages() -> dict[str, ParsedPage]:
+    return {**live_pages(), "services": services_page(rows=[CUSTOM_SSH, MOSH_WIDE])}
+
+
+def changed_mosh_dump(*extra: SnapshotService) -> Snapshot:
+    return replace(
+        dump(),
+        services=[SnapshotService("custom_ssh", 2483, 2483, 22, "TCP"), SnapshotService("Mosh", 60001, 60010, 60001,
+                                                                                         "UDP"), *extra],
+        forwards=[SnapshotForward("custom_ssh", "host-b", "aa:bb:cc:dd:ee:01"),
+                  SnapshotForward("Mosh", "host-a", "aa:bb:cc:dd:ee:02")],
+    )
+
+
+def test_a_changed_same_name_service_is_never_added_twice_without_prune():
+    steps = plan(changed_mosh_dump(), changed_mosh_pages())
+    add = find(steps, "add-service", "Mosh")
+    assert add.blocked is not None and "same name" in add.blocked and "--prune" in add.blocked
+    assert add.raw_payload is None
+    assert not any(s.kind == "remove-service" for s in steps)
+
+
+def test_prune_replaces_a_changed_same_name_service_by_removing_it_before_adding_the_dumped_one():
+    steps = plan(changed_mosh_dump(), changed_mosh_pages(), PRUNE)
+    remove = find(steps, "remove-service", "Mosh")
+    add = find(steps, "add-service", "Mosh")
+    assert remove.blocked is None and remove.button == "Remove_2"
+    assert add.blocked is None and add.order == remove.order + 1
+    assert add.raw_payload["extMaxPort"] == "60010"
+    forward = find(steps, "add-forward", "Mosh")
+    assert forward.blocked is not None and "replaced" in forward.blocked and forward.raw_payload is None
+
+
+def test_prune_defers_a_replacement_while_another_service_add_is_pending_on_the_page():
+    steps = plan(changed_mosh_dump(SnapshotService("New", 7000, 7000, 7000, "TCP")), changed_mosh_pages(), PRUNE)
+    assert find(steps, "add-service", "New").blocked is None
+    remove = find(steps, "remove-service", "Mosh")
+    add = find(steps, "add-service", "Mosh")
+    assert remove.blocked is not None and "pending adds" in remove.blocked
+    assert add.blocked is not None and "remove" in add.blocked and add.raw_payload is None
+
+
+def test_executing_a_replacement_posts_the_remove_then_the_add_once_each():
+    steps = [s for s in plan(changed_mosh_dump(), changed_mosh_pages(), PRUNE) if s.page == "services"]
+    client = FakeClient(get=lambda page_id: get_response(200, CHANGES_SAVED_HTML))
+    execution = execute_restore(client, [replace(s, postcondition=None) for s in steps])
+    assert [s.status for s in execution.steps] == ["applied", "applied"]
+    assert [next(k for k in fields if k in ("Remove_2", "Add")) for _, fields in client.posted] == ["Remove_2", "Add"]
+
+
+def test_a_forward_to_a_device_whose_label_another_device_shares_is_blocked():
+    twins = (("aa:bb:cc:dd:ee:01", "host-b"), ("aa:bb:cc:dd:ee:05", "iPhone"), ("aa:bb:cc:dd:ee:06", "iPhone"))
+    pages = {
+        **live_pages(),
+        "apphosting": apphosting_page(rows=[("custom_ssh", "host-b")], device_options=twins,
+                                      service_options=("custom_ssh", "Mosh")),
+    }
+    wanted = replace(dump_no_service_adds(), forwards=[*live_snapshot(pages).forwards,
+                                                       SnapshotForward("Mosh", "iPhone", "aa:bb:cc:dd:ee:05")])
+    add = find(plan(wanted, pages), "add-forward", "Mosh")
+    assert add.blocked is not None and "iPhone" in add.blocked and "2 devices" in add.blocked
+    assert add.raw_payload is None
+
+
+def test_execute_restore_refuses_an_allocation_address_with_an_octet_above_255(fake_parser):
+    fake_parser["entry"] = entry_page(MAC, ["999.999.999.999"])
+    client = FakeClient(post=lambda p, f: post_response(302), get=lambda p: get_response(200, "entry"))
+    execution = execute_restore(client, [reserve_fake(MAC, "999.999.999.999")])
+    assert execution.steps[0].status == "blocked"
+    assert "non-IPv4 allocation value '999.999.999.999'" in execution.steps[0].error
+    assert [list(f) for _, f in client.posted] == [[f"Allocate_{MAC}"]]

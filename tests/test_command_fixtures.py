@@ -5,6 +5,7 @@ Fixture-backed assertions skip when tests/fixtures/{expected,parsed} are absent.
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -107,7 +108,9 @@ def parsed_page_from_json(data: dict) -> ParsedPage:
 
 def require_fixture(path: Path) -> None:
     if not path.exists():
-        pytest.skip(f"{path.relative_to(FIXTURE_ROOT.parent)} not present; capture the router fixture pack first")
+        pytest.skip(
+            f"{path.relative_to(FIXTURE_ROOT.parent)} not present; capture the pack with `bgwcli fixtures-capture`"
+        )
 
 
 @pytest.mark.parametrize(("command", "page"), COMMAND_PAGES, ids=[" ".join(c) for c, _ in COMMAND_PAGES])
@@ -118,7 +121,10 @@ def test_human_router_tab_commands_resolve_to_captured_fixture_pages(command: li
     assert tab is not None, " ".join(command)
     assert tab.page == page
     expected_path = EXPECTED_DIR / f"{page}.json"
-    if expected_path.exists():
+    pack_present = EXPECTED_DIR.is_dir() and any(EXPECTED_DIR.glob("*.json"))
+    if pack_present:
+        # A captured pack must cover every command page; a missing one is a gap, not a pass.
+        assert expected_path.exists(), f"{expected_path.name} missing from the captured fixture pack"
         expected = read_expected(page)
         assert expected["page"] == page
         assert expected["secretsRedacted"] is True
@@ -157,7 +163,8 @@ def test_diagnostics_troubleshoot_fixture_proves_inputs_actions_progress_and_for
         assert expected[flag] is True, flag
     assert "WebAddress" in expected["fieldNames"]
     assert "protopref" in expected["fieldNames"]
-    assert "ProgressWindow" in expected["textareaNames"]
+    # Current firmware renders the progress window without a textarea; a capture holding one is just as valid.
+    assert set(expected["textareaNames"]) <= {"ProgressWindow"}
     assert set(expected["buttonNames"]) >= {
         "AuthDetails", "DNSDetails", "EthDetails", "IPDetails", "Lookup", "Ping",
         "RunFullDiagnostics", "SendDiagnostics", "Trace",
@@ -172,17 +179,36 @@ def test_fixture_backed_parsed_page_json_includes_scriptable_summaries():
     def parsed_output(page: str) -> dict:
         return fmt.parsed_page_output(parsed_page_from_json(read_parsed(page)))
 
+    # Counts come from the captured rows: a fresh capture has a different speed-test history and
+    # NAT session count, and the summaries must agree with whatever the pack holds.
+    # A freshly reset gateway has no speed-test history at all; the summary then has no result counts.
+    speed_rows = read_parsed("speed")["tables"]
     speed = parsed_output("speed")
-    assert speed["summary"]["Results"] == "8"
-    assert speed["summary"]["By result"] == "Success: 8"
-    assert len(speed["tables"]) == 8
+    assert len(speed["tables"]) == len(speed_rows)
+    if speed_rows:
+        assert speed["summary"]["Results"] == str(len(speed_rows))
+        for result, count in Counter(row.get("Result") or "(blank)" for row in speed_rows).items():
+            assert f"{result}: {count}" in speed["summary"]["By result"].split(", ")
+    else:
+        assert "Results" not in speed["summary"]
 
+    nat_rows = read_parsed("nattable")["tables"]
     nat_table = parsed_output("nattable")
     assert isinstance(nat_table["summary"]["Total sessions available"], str)
-    assert nat_table["summary"]["Displayed sessions"] == "356"
+    assert nat_table["summary"].get("Displayed sessions") == (str(len(nat_rows)) if nat_rows else None)
 
     diagnostics = parsed_output("diag")
     assert isinstance(diagnostics["summary"]["Description"], str)
     assert diagnostics["summary"]["Field protopref"] == "IPv4"
     tests = {row.get("Test") for row in diagnostics["tables"]}
     assert tests >= {"Ethernet", "Authentication", "IP", "DNS"}
+
+
+def test_a_speed_page_without_history_has_no_results_to_summarise():
+    from bgwcli import format as fmt
+    from bgwcli.parser import parse_page
+
+    html = "<html><h1>Speed Test</h1><form><input type=submit name=Start value=Start></form></html>"
+    page = parse_page("speed", html)
+    output = fmt.parsed_page_output(page)
+    assert output["tables"] == [] and "Results" not in output["summary"]

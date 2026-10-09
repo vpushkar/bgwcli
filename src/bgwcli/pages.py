@@ -10,6 +10,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Literal
 
+from .errors import UsageError
+
 RouterSectionName = Literal["Device", "Broadband", "Home Network", "Voice", "Firewall", "Diagnostics"]
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
@@ -24,10 +26,6 @@ class RouterTab:
     # True on guarded tabs, None otherwise: TS `routerTabs` only carry `dangerous: true`, and
     # to_json_dict() drops None, so `tabs --json` omits the key exactly like JSON.stringify does.
     dangerous: bool | None = None
-
-    @property
-    def is_dangerous(self) -> bool:
-        return bool(self.dangerous)
 
     @property
     def path(self) -> str:
@@ -130,6 +128,30 @@ def resolve_page(value: str) -> str:
     """Map a CGI id, tab label, ``Section/Tab`` path or alias to its CGI page id; unknown input passes through."""
     tab = resolve_tab(value)
     return tab.page if tab else value
+
+
+def canonical_cgi_page(value: str) -> str:
+    """Validate a raw CGI identifier, optionally suffixed with .ha, before URL construction."""
+    if not re.fullmatch(r"[a-z0-9_]+(?:\.ha)?", value, re.IGNORECASE):
+        raise UsageError(f"Invalid CGI page identifier: {value!r}.")
+    page = value.lower()
+    return page.removesuffix(".ha")
+
+
+def resolve_cgi_page(value: str) -> str:
+    """Resolve known human aliases; reject URL syntax in raw page identifiers."""
+    # Human tab paths (Home Network/Wi-Fi) are supported; arbitrary URL paths are not.
+    # Never let normalization erase query, encoding or traversal syntax before validation.
+    if any(character in value for character in "?%#\\."):
+        return canonical_cgi_page(value)
+    tab = resolve_tab(value)
+    if tab:
+        if "/" in value:
+            paths = (tab.path, *tab.aliases)
+            if value.lower() not in {alias.lower() for alias in paths}:
+                raise UsageError(f"Invalid CGI page identifier: {value!r}.")
+        return tab.page
+    return canonical_cgi_page(value)
 
 
 def section_for_root(root: str) -> RouterSectionName | None:

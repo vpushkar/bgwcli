@@ -89,8 +89,8 @@ def test_router_tab_json_omits_dangerous_unless_true():
     assert "dangerous" not in by_page["sysinfo"]
     assert by_page["restart"]["dangerous"] is True
     assert {p for p, t in by_page.items() if "dangerous" in t} == {"routerpasswd", "restart", "update", "reset"}
-    # truthiness semantics preserved for code that reads tab.dangerous / tab.is_dangerous
+    # truthiness semantics preserved for code that reads tab.dangerous
     sysinfo = next(tab for tab in ROUTER_TABS if tab.page == "sysinfo")
     restart = next(tab for tab in ROUTER_TABS if tab.page == "restart")
-    assert not sysinfo.dangerous and sysinfo.is_dangerous is False
-    assert restart.dangerous and restart.is_dangerous is True
+    assert not sysinfo.dangerous
+    assert restart.dangerous

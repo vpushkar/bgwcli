@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Access Code</title></head>
+<body>
+<div id="content">
+<h1>Access Code</h1>
+<div class="desc">The Device Access Code is required to change settings. Login with the current code first.</div>
+<form name="routerpasswd" method="post" action="/cgi-bin/routerpasswd.ha">
+<input type="hidden" name="nonce" value="0123456789abcdef">
+<table><tr><th><label for="password">Old Access Code</label></th>
+<td><input type="text" id="password" name="old_password" value=""></td></tr>
+<tr><th><label for="new_password">New Access Code</label></th>
+<td><input type="text" id="new_password" name="new_password" value=""></td></tr></table>
+<input type="submit" name="Save" value="Save">
+</form>
+</div>
+</body>
+</html>

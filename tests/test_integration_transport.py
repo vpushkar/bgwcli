@@ -14,7 +14,7 @@ import threading
 from urllib.parse import parse_qs
 
 import pytest
-from integration_html import APPHOSTING_HTML, SERVICES_HTML, SYSINFO_HTML
+from integration_html import APPHOSTING_HTML, SERVICES_HTML, SYSINFO_HTML, saved_configuration_html
 
 from bgwcli.client import BGW320Client
 from bgwcli.errors import RouterAuthError
@@ -70,8 +70,12 @@ class _Gateway(http.server.BaseHTTPRequestHandler):
             self._send(200, LOGIN_HTML, {"Set-Cookie": "SessionID=s1; Path=/"})
             return
         page = self._page()
-        if page in PAGES:
-            self._send(200, PAGES[page])
+        if page in self.server.pages:
+            body = self.server.pages[page]
+            if page in self.server.saved_pages:
+                body = body.replace("</body>", '<div id="error-message-text">Changes saved</div></body>')
+                self.server.saved_pages.remove(page)
+            self._send(200, body)
         else:
             self._send(200, NOT_FOUND_HTML)
 
@@ -89,6 +93,13 @@ class _Gateway(http.server.BaseHTTPRequestHandler):
         if not self._authenticated():
             self._send(200, LOGIN_HTML)
             return
+        service_fields = {"Add", "Service", "extMinPort", "extMaxPort", "intStartPort", "protocol"}
+        if self._page() == "services" and service_fields <= fields.keys():
+            # Emulate persisted service state as well as the one-shot acknowledgement.
+            self.server.pages["services"] = saved_configuration_html("services", fields).replace(
+                '<div id="error-message-text">Changes saved</div>', ""
+            )
+        self.server.saved_pages.add(self._page())
         self._send(302, "", {"Location": self.path})
 
 
@@ -97,6 +108,8 @@ class _GatewayServer(http.server.ThreadingHTTPServer):
         super().__init__(address, _Gateway)
         self.gets: list[str] = []
         self.posts: list[tuple[str, dict[str, str], dict[str, str]]] = []
+        self.saved_pages: set[str] = set()
+        self.pages = dict(PAGES)
 
     @property
     def login_posts(self) -> list[dict[str, str]]:

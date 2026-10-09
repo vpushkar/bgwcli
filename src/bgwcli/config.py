@@ -57,10 +57,43 @@ def env_number(name: str, fallback: int, minimum: int) -> int | float:
     return int(value) if value.is_integer() else value
 
 
-def env_default_options() -> GlobalOptions:
+# Same ceiling as --timeout (3600 s): a larger request deadline would hang for hours against a dead
+# gateway, and a huge one overflows the platform timer.
+TIMEOUT_MAX_MS = 3600 * 1000
+
+
+def env_timeout_ms() -> int | float:
+    value = env_number("BGW_TIMEOUT_MS", 15000, 1)
+    if value > TIMEOUT_MAX_MS:
+        raise UsageError(
+            f"BGW_TIMEOUT_MS is in milliseconds and must be at most {TIMEOUT_MAX_MS}; "
+            f"got {os.environ.get('BGW_TIMEOUT_MS', '').strip()}."
+        )
+    return value
+
+
+def env_host() -> str:
+    """BGW_HOST, then ROUTER_IP, then the default. A variable that is set but empty or whitespace-only
+    is a usage error (never skipped), mirroring an empty --host; an unset one falls through."""
+    default = f"the default {DEFAULT_HOST}"
+    router_ip = os.environ.get("ROUTER_IP")
+    bgw_fallback = "ROUTER_IP" if router_ip is not None and router_ip.strip() else default
+    for name, fallback in (("BGW_HOST", bgw_fallback), ("ROUTER_IP", default)):
+        value = os.environ.get(name)
+        if value is None:
+            continue
+        if not value.strip():
+            raise UsageError(f"{name} is empty: give the router host, or unset {name} to use {fallback}")
+        return value
+    return DEFAULT_HOST
+
+
+def env_default_options(*, host: str | None = None) -> GlobalOptions:
+    """Defaults from the environment. The host variables are consulted only when no host is given: an
+    explicit host (or the fixed one a help command carries) never reads BGW_HOST or ROUTER_IP."""
     return GlobalOptions(
-        host=os.environ.get("BGW_HOST") or os.environ.get("ROUTER_IP") or DEFAULT_HOST,
-        timeout_ms=env_number("BGW_TIMEOUT_MS", 15000, 1),
+        host=env_host() if host is None else host,
+        timeout_ms=env_timeout_ms(),
         timeout_explicit=bool(os.environ.get("BGW_TIMEOUT_MS")),
         insecure_tls=os.environ.get("BGW_INSECURE_TLS") != "0",
         wait_for_session=os.environ.get("BGW_WAIT_FOR_SESSION") == "1",
@@ -73,14 +106,14 @@ def env_default_options() -> GlobalOptions:
 
 
 def resolve_access_code(options: GlobalOptions, stdin=None) -> str | None:
-    """Explicit option, then BGW_ACCESS_CODE, then stdin when --access-code-stdin was given."""
+    """Explicit option, then stdin when --access-code-stdin was given, then BGW_ACCESS_CODE.
+
+    The flag is a per-command choice, so it wins over an exported code: a script piping a code
+    must never silently use whatever BGW_ACCESS_CODE happens to hold in the environment."""
     if options.access_code:
         return options.access_code
-    env = os.environ.get("BGW_ACCESS_CODE")
-    if env:
-        return env
-    if not options.access_code_stdin:
-        return None
-    stream = stdin if stdin is not None else sys.stdin
-    # TS `trimEnd()`: strip every trailing whitespace character, keep leading whitespace.
-    return stream.read().rstrip()
+    if options.access_code_stdin:
+        stream = stdin if stdin is not None else sys.stdin
+        # TS `trimEnd()`: strip every trailing whitespace character, keep leading whitespace.
+        return stream.read().rstrip()
+    return os.environ.get("BGW_ACCESS_CODE") or None

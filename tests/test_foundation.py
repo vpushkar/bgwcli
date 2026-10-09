@@ -1,7 +1,8 @@
 import pytest
 
 from bgwcli import config, exit_codes, redact
-from bgwcli.errors import DumpFileError, RouterAuthError, UsageError
+from bgwcli.client import RouterResponseError
+from bgwcli.errors import BgwError, DumpFileError, RouterAuthError, SessionLockTimeoutError, UsageError
 from bgwcli.types import ParsedField, ParsedPage, to_json_dict
 
 
@@ -15,7 +16,15 @@ def test_redact_by_sensitive_name():
 def test_exit_codes():
     assert exit_codes.fatal_exit_code(DumpFileError("x")) == 2
     assert exit_codes.fatal_exit_code(RouterAuthError("x")) == 2
-    assert exit_codes.fatal_exit_code(ValueError("x")) == 1
+    # An HTTP error status or an oversized body is "no answer", not a negative answer.
+    assert exit_codes.fatal_exit_code(RouterResponseError("x", status_code=500)) == 2
+    # Unexpected faults (bugs, OS errors, unknown BgwError subclasses) are "no answer" too.
+    assert exit_codes.fatal_exit_code(ValueError("x")) == 2
+    assert exit_codes.fatal_exit_code(OSError("x")) == 2
+    assert exit_codes.fatal_exit_code(BgwError("x")) == 2
+    # Only bad usage and lock contention timeouts stay exit 1.
+    assert exit_codes.fatal_exit_code(UsageError("x")) == 1
+    assert exit_codes.fatal_exit_code(SessionLockTimeoutError("x")) == 1
 
 
 def test_env_defaults(tmp_env, monkeypatch):
@@ -72,3 +81,61 @@ def test_timeout_is_explicit_only_when_the_user_set_it(tmp_env, monkeypatch):
     assert config.env_default_options().timeout_explicit is False
     monkeypatch.setenv("BGW_TIMEOUT_MS", "20000")
     assert config.env_default_options().timeout_explicit is True
+
+
+def test_package_version_has_a_single_source():
+    """bgwcli.__version__ is the only version literal; the user agents and the build metadata derive from it."""
+    import re
+    from pathlib import Path
+
+    import bgwcli
+    from bgwcli import cli, client
+
+    root = Path(__file__).resolve().parent.parent
+    pyproject = (root / "pyproject.toml").read_text(encoding="utf-8")
+    # Plain-text checks of the few asserted keys so the test also runs on 3.10 (no tomllib, no deps).
+    tables = dict(re.findall(r"(?ms)^\[([^\]\n]+)\]\n(.*?)(?=^\[|\Z)", pyproject))
+    assert not re.search(r"(?m)^version\s*=", tables["project"])
+    assert re.search(r'(?m)^dynamic\s*=\s*\[[^\]]*"version"', tables["project"])
+    assert re.search(
+        r'(?m)^version\s*=\s*\{\s*attr\s*=\s*"bgwcli\.__version__"\s*\}', tables["tool.setuptools.dynamic"]
+    )
+
+    expected_agent = f"bgw/{bgwcli.__version__}"
+    assert {client.DEFAULT_USER_AGENT, cli.USER_AGENT} == {expected_agent}
+    literal = re.compile(r"[\"']\d+\.\d+\.\d+[\"']")
+    for module in ("client.py", "cli.py"):
+        source = (root / "src" / "bgwcli" / module).read_text(encoding="utf-8")
+        assert not literal.search(source), f"{module} carries its own version literal"
+
+
+def test_bgw_timeout_ms_is_capped_at_one_hour_like_the_timeout_flag(tmp_env, monkeypatch):
+    monkeypatch.setenv("BGW_TIMEOUT_MS", "3600000")
+    assert config.env_default_options().timeout_ms == 3600000
+    for too_large in ("3600001", "1e9", "1e16"):
+        monkeypatch.setenv("BGW_TIMEOUT_MS", too_large)
+        with pytest.raises(UsageError, match=r"BGW_TIMEOUT_MS is in milliseconds and must be at most 3600000"):
+            config.env_default_options()
+
+
+
+def test_explicit_access_code_stdin_wins_over_the_environment(tmp_env, monkeypatch):
+    import io
+
+    monkeypatch.setenv("BGW_ACCESS_CODE", "from-env")
+    stdin_opts = config.GlobalOptions(access_code_stdin=True)
+    assert config.resolve_access_code(stdin_opts, stdin=io.StringIO("from-stdin\n")) == "from-stdin"
+    assert config.resolve_access_code(config.GlobalOptions(), stdin=io.StringIO("unused")) == "from-env"
+
+
+@pytest.fixture
+def leaked_environment(monkeypatch):
+    """Variables a developer's shell (or the autorestore EnvironmentFile) may export."""
+    monkeypatch.setenv("BGW_FALLBACK_ACCESS_CODE", "sticker-from-shell")
+
+
+def test_tmp_env_isolates_every_access_code_variable(leaked_environment, tmp_env):
+    import os
+
+    assert "BGW_FALLBACK_ACCESS_CODE" not in os.environ
+    assert "BGW_ACCESS_CODE" not in os.environ

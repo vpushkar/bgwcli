@@ -275,7 +275,7 @@ def test_restore_committed_without_stop_uses_last_applied_status_code():
         ]
     )
     result = restore_committed(execution)
-    assert result.result == "2 applied, 0 failed, 0 not run"
+    assert result.result == "2 applied, 0 failed, 0 not run, 1 skipped"
     assert result.status_code == 200
 
     none_applied = restore_committed(_Execution(steps=[]))

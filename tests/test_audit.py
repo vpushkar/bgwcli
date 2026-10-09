@@ -1,10 +1,10 @@
+import io
 import json
 import os
 import stat
 from dataclasses import replace
 
-import pytest
-from test_sweep import FakeClient, backend, fake_parse_page, fake_parsed, fake_parsed_data_count  # noqa: F401
+from sweep_helpers import FakeClient, fake_parse_page, fake_parsed, fake_parsed_data_count  # noqa: F401
 
 from bgwcli.audit import (
     ExpectedFixture,
@@ -13,7 +13,6 @@ from bgwcli.audit import (
     expected_fixture,
     write_fixture_set,
 )
-from bgwcli.errors import BgwError
 from bgwcli.sweep import SweepOptions, SweepPage, sweep_router
 from bgwcli.types import ParsedField, ParsedPage, to_json_dict
 
@@ -135,7 +134,7 @@ def test_write_fixture_set_writes_owner_only_files_in_fixture_layout(tmp_path):
     assert "error" not in json.loads(without_error[2].read_text())
 
 
-def test_capture_fixture_pack_sanitizes_and_writes_every_swept_page(backend, tmp_path, capsys):  # noqa: F811
+def test_capture_fixture_pack_sanitizes_and_writes_every_swept_page(backend, tmp_path, capsys):
     pages = sweep_router(
         FakeClient(fail_pages={"dhcpserver"}),
         SweepOptions(pages=["diag", "dhcpserver"], include_raw=True, include_parsed=True, use_fallbacks=False),
@@ -158,7 +157,7 @@ def test_capture_fixture_pack_sanitizes_and_writes_every_swept_page(backend, tmp
     assert "capturing diag... ok" in out and "capturing dhcpserver... failed: boom dhcpserver" in out
 
 
-def test_capture_fixture_pack_refuses_sensitive_residue(backend, tmp_path, monkeypatch):  # noqa: F811
+def test_capture_fixture_pack_refuses_sensitive_residue(backend, tmp_path, monkeypatch):
     from bgwcli import audit as audit_module
 
     def leaky_parse(page, html, include_secrets=False):
@@ -170,6 +169,48 @@ def test_capture_fixture_pack_refuses_sensitive_residue(backend, tmp_path, monke
     pages = sweep_router(
         FakeClient(), SweepOptions(pages=["diag"], include_raw=True, include_parsed=True, use_fallbacks=False)
     )
-    with pytest.raises(BgwError, match="Refusing to write diag"):
-        capture_fixture_pack(pages, tmp_path)
-    assert not (tmp_path / "router-html" / "diag.html").exists()
+    assert capture_fixture_pack(pages, tmp_path, stdout=io.StringIO()) == 0
+    written = (tmp_path / "router-html" / "diag.html").read_text()
+    assert written.startswith("<!-- bgw fixture capture failed for diag: Refusing to write diag")
+
+
+def test_capture_fixture_pack_residue_check_uses_the_unredacted_parse(tmp_path, monkeypatch):
+    """The redacted parse shows `[redacted]` for a secret the sanitizer missed, so the residue check
+    must run against an include_secrets parse of the sanitized HTML."""
+    from bgwcli import audit as audit_module
+    from bgwcli.parser import parse_page
+
+    monkeypatch.setattr(audit_module, "sanitize_router_fixture", lambda value: value)
+    monkeypatch.setattr(
+        audit_module, "_parse_page", lambda page, html, include_secrets=False: parse_page(page, html, include_secrets)
+    )
+    leaked = '<title>w</title><form><input type="password" name="entry" value="hunter2"></form>'
+    pages = [
+        SweepPage(section="Home Network", label="Wi-Fi", page="w", dangerous=False, guarded=False, ok=True,
+                  raw_html=leaked)
+    ]
+    assert capture_fixture_pack(pages, tmp_path, stdout=io.StringIO()) == 0
+    written = (tmp_path / "router-html" / "w.html").read_text()
+    assert written.startswith("<!-- bgw fixture capture failed for w: Refusing to write w")
+    assert "hunter2" not in written
+
+
+def test_write_fixture_set_uses_private_dirs_and_utf8_and_tightens_existing_files(tmp_path):
+    parsed = fake_parsed("diag")
+    expected = expected_fixture("diag", parsed, page_loads=True, data_count=6)
+    root = tmp_path / "fixtures"
+    (root / "router-html").mkdir(parents=True, mode=0o755)
+    (root / "router-html").chmod(0o755)
+    stale = root / "router-html" / "diag.html"
+    stale.write_text("old")
+    stale.chmod(0o644)
+    old_umask = os.umask(0o022)
+    try:
+        paths = write_fixture_set(root, "diag", "<title>Café – diag</title>", parsed, expected)
+    finally:
+        os.umask(old_umask)
+    assert paths[0].read_bytes().decode("utf-8") == "<title>Café – diag</title>\n"
+    for path in paths:
+        assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+    for directory in ("router-html", "parsed", "expected"):
+        assert stat.S_IMODE(os.stat(root / directory).st_mode) == 0o700

@@ -13,6 +13,7 @@ import sys
 import threading
 import time
 import types
+import urllib.error
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -26,8 +27,13 @@ from bgwcli.client import (
     router_sessions_full,
 )
 from bgwcli.errors import RouterAuthError, RouterConnectionError, RouterSessionPoolFullError
+from bgwcli.parser import parse_page as _real_parse_page
 from bgwcli.types import HttpResponse, RouterSessionSnapshot
 
+DIAG_FORM = (
+    '<title>diag</title><form action="/cgi-bin/diag.ha"><input name="nonce" value="abc123">'
+    '<input type="submit" name="Ping" value="Ping"></form>'
+)
 POOL_FULL_HTML = "<title>Login</title><p>all web server sessions are in use</p>"
 
 
@@ -48,7 +54,7 @@ def stub_parser(monkeypatch):
         )
 
     module.looks_like_login = looks_like_login
-    module.parse_page = lambda *a, **k: None
+    module.parse_page = _real_parse_page
     monkeypatch.setitem(sys.modules, "bgwcli.parser", module)
     return module
 
@@ -100,7 +106,8 @@ def test_extract_nonce_direct_and_reverse_order():
 
 def test_router_sessions_full_detection():
     assert router_sessions_full(POOL_FULL_HTML)
-    assert router_sessions_full("ALL WEB SERVER SESSIONS ARE IN USE")
+    assert router_sessions_full("<title>Login</title>ALL WEB SERVER SESSIONS ARE IN USE")
+    assert not router_sessions_full("ALL WEB SERVER SESSIONS ARE IN USE"), "no login-shaped page: data"
     assert not router_sessions_full("<title>Login</title>")
 
 
@@ -154,14 +161,79 @@ def test_wait_for_session_retries_only_pool_full_condition():
     assert client.export_session().authenticated is True
 
 
+def test_wait_for_session_without_an_access_code_classifies_a_pool_full_get_as_pool_full():
+    from bgwcli.client import pool_full_metadata
+
+    transport = FakeTransport(lambda req, n: html(POOL_FULL_HTML))
+    client = make_client(
+        transport, access_code=None, wait_for_session=True, session_wait_timeout_ms=50, session_wait_interval_ms=1
+    )
+    client.import_session({"origin": "http://router.local", "authenticated": True, "cookies": {"sid": "test"}})
+    with pytest.raises(RouterSessionPoolFullError) as info:
+        client.get_cgi_page("devices")
+    assert info.value.session_pool_full is True
+    assert pool_full_metadata(info.value) == (0, 0)
+    assert "Access code required" not in str(info.value)
+    assert [c.rsplit(" ", 1)[0] for c in transport.calls] == ["GET /cgi-bin/devices.ha"]
+    assert not client.has_authenticated_session()
+
+
+def test_wait_for_session_with_an_access_code_still_waits_on_a_pool_full_get():
+    def handler(req, n):
+        if n == 1:
+            return html(POOL_FULL_HTML)
+        if n == 2:
+            return html(login_nonce_html("abc123"))
+        if req.method == "POST":
+            return html("", status=302, headers={"location": "/cgi-bin/home.ha"})
+        return html("<title>Devices</title>")
+
+    transport = FakeTransport(handler)
+    client = make_client(transport, wait_for_session=True, session_wait_timeout_ms=50, session_wait_interval_ms=1)
+    client.import_session({"origin": "http://router.local", "authenticated": True, "cookies": {"sid": "test"}})
+    response = client.get_cgi_page("devices")
+    assert "Devices" in response.body
+    assert [c.rsplit(" ", 1)[0] for c in transport.calls] == [
+        "GET /cgi-bin/devices.ha",
+        "GET /cgi-bin/login.ha",
+        "POST /cgi-bin/login.ha",
+        "GET /cgi-bin/devices.ha",
+    ]
+
+
 def test_wait_for_session_stops_after_timeout_with_retry_metadata():
     transport = FakeTransport(lambda req, n: html(POOL_FULL_HTML))
     client = make_client(transport, wait_for_session=True, session_wait_timeout_ms=5, session_wait_interval_ms=1)
     with pytest.raises(RouterSessionPoolFullError) as info:
         client.login()
-    assert info.value.waited_ms == 5
+    assert info.value.waited_ms >= 5  # measured wall time; at least the budget once it is spent
     assert info.value.retry_count > 0
     assert info.value.session_pool_full is True
+
+
+def test_wait_for_session_reports_the_measured_wait_not_the_configured_timeout(monkeypatch):
+    import bgwcli.client as client_module
+
+    clock = {"ms": 1_000_000}
+
+    def fake_sleep(seconds):
+        clock["ms"] += round(seconds * 1000)
+
+    def handler(req, n):
+        clock["ms"] += 7  # each pool-full login.ha answer takes 7 ms
+        return html(POOL_FULL_HTML)
+
+    monkeypatch.setattr(client_module, "_now_ms", lambda: clock["ms"])
+    monkeypatch.setattr(client_module, "_sleep", fake_sleep)
+    client = make_client(
+        FakeTransport(handler), wait_for_session=True, session_wait_timeout_ms=50, session_wait_interval_ms=10
+    )
+    with pytest.raises(RouterSessionPoolFullError) as info:
+        client.login()
+    # Measured from the first pool-full answer to the last retry's answer: sleeps of 10+10+10 ms, then
+    # 6 ms (capped at the remaining budget), plus four 7 ms requests = 64 ms, not the 50 ms budget.
+    assert info.value.retry_count == 4
+    assert info.value.waited_ms == 64
 
 
 def test_bad_access_code_does_not_retry_as_pool_full():
@@ -232,6 +304,37 @@ def test_login_is_noop_when_already_authenticated_unless_forced():
     assert len(transport.calls) == 2
     client.login(force=True)
     assert len(transport.calls) == 4
+
+
+def test_login_attempts_counts_logins_actually_performed():
+    """The counter lets callers tell whether the client logged in again on its own during a request."""
+    state = {"authed": False}
+
+    def handler(req, n):
+        if req.method == "POST":
+            state["authed"] = True
+            return html("", status=302, headers={"location": "/cgi-bin/home.ha", "set-cookie": "sid=abc; Path=/"})
+        if req.url.endswith("/cgi-bin/diag.ha") and state["authed"]:
+            return html("<title>diag</title>")
+        return html(login_nonce_html("abc123"))
+
+    client = make_client(FakeTransport(handler))
+    assert client.login_attempts == 0
+    client.get_cgi_page("diag")  # bounced to the Login page: the client logs in by itself
+    assert client.login_attempts == 1
+    client.login()  # already authenticated: no login performed
+    assert client.login_attempts == 1
+    client.login(force=True)
+    assert client.login_attempts == 2
+
+
+def test_login_attempts_counts_a_refused_login():
+    transport = FakeTransport(lambda req, n: html("<html><body>Login Failed</body></html>")
+                              if req.method == "POST" else html(login_nonce_html("abc123")))
+    client = make_client(transport)
+    with pytest.raises(RouterAuthError):
+        client.login()
+    assert client.login_attempts == 1
 
 
 # --- session snapshots --------------------------------------------------------------
@@ -337,7 +440,7 @@ def test_post_cgi_page_replaces_stale_payload_nonce_with_immediate_page_nonce():
     def handler(req, n):
         if req.method == "POST":
             return html("", status=302, headers={"location": "/cgi-bin/home.ha"})
-        return html('<title>diag</title><input name="nonce" value="abc123">')
+        return html('<title>diag</title><input name="nonce" value="abc123"><input type="submit" name="Ping" value="Ping">')
 
     transport = FakeTransport(handler)
     response = make_client(transport).post_cgi_page("diag", {"nonce": "stale123", "Ping": "Ping"})
@@ -359,7 +462,7 @@ def test_post_cgi_page_rejects_router_error_responses():
     def handler(req, n):
         if req.method == "POST":
             return html("<title>Error</title>", status=500)
-        return html('<title>diag</title><input name="nonce" value="fresh123">')
+        return html('<title>diag</title><input name="nonce" value="fe5a01"><input type="submit" name="Ping" value="Ping">')
 
     with pytest.raises(RouterResponseError, match="HTTP 500"):
         _authenticated(FakeTransport(handler)).post_cgi_page("diag", {"Ping": "Ping"})
@@ -369,7 +472,7 @@ def test_post_cgi_page_detects_pool_full_and_login_page():
     def pool_full(req, n):
         if req.method == "POST":
             return html(POOL_FULL_HTML)
-        return html("<title>diag</title>")
+        return html(DIAG_FORM)
 
     with pytest.raises(RouterSessionPoolFullError):
         _authenticated(FakeTransport(pool_full)).post_cgi_page("diag", {"Ping": "Ping"})
@@ -379,7 +482,7 @@ def test_post_cgi_page_detects_pool_full_and_login_page():
         # login handshake itself never yields a nonce -> the client gives up with RouterAuthError.
         if req.method == "POST":
             return html("<title>Login</title><form><input id='password'></form>")
-        return html("<title>diag</title>")
+        return html(DIAG_FORM)
 
     with pytest.raises(RouterAuthError):
         _authenticated(FakeTransport(login_page)).post_cgi_page("diag", {"Ping": "Ping"})
@@ -450,14 +553,30 @@ def test_cookie_header_and_set_cookie_parsing_match_ts_semantics():
     transport = FakeTransport(handler)
     client = make_client(transport)
     client.get_cgi_page("x", auth=False)
-    # a second Set-Cookie with '=' in the value keeps only the first '=' split, like TS split("=")
+    # A value containing '=' is kept whole (split on the first '=' only); a cookie without a value
+    # sets nothing.
     transport.handler = lambda req, n: RawResponse(
         200, "OK", [("set-cookie", "b=2=3; Path=/"), ("set-cookie", "c=; Path=/")], b""
     )
     client.get_cgi_page("x", auth=False)
     client.get_cgi_page("x", auth=False)
-    assert transport.requests[-1].headers["Cookie"] == "a=1; b=2"
-    assert client.export_session().cookies == {"a": "1", "b": "2"}
+    assert transport.requests[-1].headers["Cookie"] == "a=1; b=2=3"
+    assert client.export_session().cookies == {"a": "1", "b": "2=3"}
+
+
+def test_set_cookie_names_and_values_are_trimmed_and_an_empty_value_deletes_the_cookie():
+    responses = iter([
+        [("set-cookie", " SessionID = abc ; Path=/"), ("set-cookie", "keep=1")],
+        [("set-cookie", "SessionID=; Path=/; Max-Age=0")],
+    ])
+    transport = FakeTransport(lambda req, n: RawResponse(200, "OK", next(responses, []), b""))
+    client = make_client(transport)
+    client.get_cgi_page("x", auth=False)
+    assert client.export_session().cookies == {"SessionID": "abc", "keep": "1"}
+    client.get_cgi_page("x", auth=False)
+    client.get_cgi_page("x", auth=False)
+    assert client.export_session().cookies == {"keep": "1"}
+    assert transport.requests[-1].headers["Cookie"] == "keep=1"
 
 
 def test_from_options_reads_global_options():
@@ -490,7 +609,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
         if self.path == "/cgi-bin/diag.ha":
-            body = f"<title>diag</title><p>{self.headers.get('Cookie', '')}</p>".encode()
+            body = (
+                f"<title>diag</title><p>{self.headers.get('Cookie', '')}</p>"
+                '<form action="/cgi-bin/diag.ha"><input name="nonce" value="abc123">'
+                '<input type="submit" name="Ping" value="Ping"></form>'
+            ).encode()
             self.send_response(200)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -544,6 +667,19 @@ def test_urllib_transport_login_and_cookies_against_local_server(local_server):
     assert client.check()["reachable"] is True
 
 
+@pytest.mark.parametrize("variable", ["http_proxy", "HTTP_PROXY"])
+def test_urllib_transport_never_uses_a_proxy_from_the_environment(local_server, monkeypatch, variable):
+    """The gateway is on the LAN and its session cookies must not leave it: a proxy configured in
+    the environment (here a dead one) is ignored and the request goes straight to the router."""
+    for name in ("no_proxy", "NO_PROXY", "http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv(variable, "http://127.0.0.1:9")
+    host, port = local_server.server_address
+    client = BGW320Client(f"http://{host}:{port}", timeout_ms=2000, user_agent="ua")
+    page = client.get_cgi_page("diag", auth=False)
+    assert page.status_code == 200 and "<title>diag</title>" in page.body
+
+
 def test_urllib_transport_connection_refused_is_connection_error():
     client = BGW320Client("http://127.0.0.1:9", timeout_ms=500, user_agent="ua")
     with pytest.raises(RouterConnectionError):
@@ -588,6 +724,122 @@ def test_urllib_transport_enforces_a_total_deadline_not_just_per_read():
         server.server_close()
 
 
+class _HeaderDribbleHandler(http.server.BaseHTTPRequestHandler):
+    """Sends the status line, then one header byte every 100 ms for ~5 s: every socket read is fast,
+    but the header block never completes inside a sane deadline."""
+
+    def do_GET(self):  # noqa: N802
+        try:
+            self.wfile.write(b"HTTP/1.1 200 OK\r\nX-Pad: ")
+            self.wfile.flush()
+            for _ in range(50):
+                self.wfile.write(b"a")
+                self.wfile.flush()
+                time.sleep(0.1)
+        except OSError:
+            return
+
+    def log_message(self, *args, **kwargs):  # noqa: D102
+        return
+
+
+def test_urllib_transport_total_deadline_covers_the_status_line_and_headers():
+    """The total deadline is not reset per header byte: a gateway dribbling its header block is cut
+    off at --timeout, and the error names the response read (the request already went out)."""
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _HeaderDribbleHandler)
+    server.daemon_threads = True
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        client = BGW320Client(f"http://127.0.0.1:{server.server_port}", timeout_ms=400, timeout_explicit=True)
+        url = f"http://127.0.0.1:{server.server_port}/cgi-bin/sysinfo.ha"
+        started = time.monotonic()
+        with pytest.raises(RouterConnectionError) as info:
+            client.get_cgi_page("sysinfo", auth=False)
+        assert time.monotonic() - started < 1.5
+        assert str(info.value) == f"Timed out reading response from {url}"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+class _SilentHandler(http.server.BaseHTTPRequestHandler):
+    """Accepts the connection and reads the request, then sends nothing for 2 s."""
+
+    def do_GET(self):  # noqa: N802
+        time.sleep(2)
+
+    def log_message(self, *args, **kwargs):  # noqa: D102
+        return
+
+
+@pytest.mark.parametrize("handler", [_SilentHandler, _DribbleHandler], ids=["no-headers", "slow-body"])
+def test_urllib_transport_timeout_after_connecting_names_the_response_read(handler):
+    """The connection was made and the request sent, so the router may have acted on it: the error
+    must not claim the CLI never got through."""
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    server.daemon_threads = True
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        client = BGW320Client(f"http://127.0.0.1:{server.server_port}", timeout_ms=300, timeout_explicit=True)
+        url = f"http://127.0.0.1:{server.server_port}/cgi-bin/sysinfo.ha"
+        with pytest.raises(RouterConnectionError) as info:
+            client.get_cgi_page("sysinfo", auth=False)
+        assert str(info.value) == f"Timed out reading response from {url}"
+        assert isinstance(info.value.__cause__, TimeoutError)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def _serve_raw_once(payload: bytes) -> int:
+    """One-shot raw socket server: read the request, send ``payload`` as-is, close."""
+    import socket
+
+    server = socket.socket()
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+
+    def run():
+        conn, _ = server.accept()
+        try:
+            conn.recv(65536)
+            conn.sendall(payload)
+        finally:
+            conn.close()
+            server.close()
+
+    threading.Thread(target=run, daemon=True).start()
+    return server.getsockname()[1]
+
+
+def test_urllib_transport_body_shorter_than_its_content_length_is_a_connection_error():
+    """A connection closed before the declared Content-Length arrived is a truncated page, never a
+    complete answer: parsing it could report missing rows/fields as real router state."""
+    port = _serve_raw_once(
+        b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\nContent-Type: text/html\r\n\r\n<html><body>partial"
+    )
+    client = BGW320Client(f"http://127.0.0.1:{port}", timeout_ms=3000, timeout_explicit=True)
+    with pytest.raises(RouterConnectionError, match="ended early"):
+        client.get_cgi_page("sitemap", auth=False)
+
+
+def test_urllib_transport_body_matching_its_content_length_is_returned():
+    port = _serve_raw_once(b"HTTP/1.1 200 OK\r\nContent-Length: 7\r\nContent-Type: text/html\r\n\r\ncomplete")
+    client = BGW320Client(f"http://127.0.0.1:{port}", timeout_ms=3000, timeout_explicit=True)
+    assert client.get_cgi_page("sitemap", auth=False).body == "complet"
+
+
+def test_connect_phase_timeouts_still_name_the_connection():
+    def connect_timeout(req):
+        raise urllib.error.URLError(TimeoutError("timed out"))
+
+    with pytest.raises(RouterConnectionError, match="^Timed out connecting to http://router.local/cgi-bin/sitemap.ha$"):
+        make_client(connect_timeout).get_cgi_page("sitemap", auth=False)
+
+
 def test_post_form_takes_the_nonce_from_one_page_and_posts_to_another_cgi_path():
     """home.ha hosts per-radio Restart forms whose action is /cgi-bin/wrestart.ha?1 (2.4 GHz) or ?2
     (5 GHz): the nonce comes from home.ha, the POST goes to the form's own action."""
@@ -597,7 +849,10 @@ def test_post_form_takes_the_nonce_from_one_page_and_posts_to_another_cgi_path()
             assert req.url.endswith("/cgi-bin/wrestart.ha?1")
             return html("", status=302, headers={"location": "/cgi-bin/home.ha"})
         assert req.url.endswith("/cgi-bin/home.ha")
-        return html('<title>Status</title><input name="nonce" value="a0c3e5">')
+        return html(
+            '<title>Status</title><input name="nonce" value="a0c3e5">'
+            '<input type="submit" name="WRestart1" value="Restart">'
+        )
 
     transport = FakeTransport(handler)
     client = make_client(transport)
@@ -693,6 +948,30 @@ def test_post_form_relogins_and_retries_once_when_the_post_answers_with_the_logi
     assert len(posts) == 2  # stale attempt, then the retry with the fresh cookie
 
 
+@pytest.mark.parametrize("location", ["/cgi-bin/login.ha", "http://router.local/cgi-bin/login.ha?x=1"])
+def test_post_form_answered_by_a_redirect_to_the_login_page_is_a_lost_session(location):
+    """A POST answered 3xx -> login.ha was bounced, not accepted: a session-wide RouterAuthError, the
+    authenticated flag cleared, and no second POST (the re-send is only for a Login-page body)."""
+
+    def handler(req, n):
+        if req.method == "POST":
+            return html("", status=302, headers={"location": location})
+        return html(
+            '<title>Status</title><input name="nonce" value="abc001">'
+            '<input type="submit" name="WRestart1" value="Restart">'
+        )
+
+    transport = FakeTransport(handler)
+    client = make_client(transport)
+    client.import_session({"origin": "http://router.local", "authenticated": True, "cookies": {"SessionID": "ok"}})
+    with pytest.raises(RouterAuthError) as caught:
+        client.post_form("home", "wrestart.ha?1", {"WRestart1": "Restart"})
+    assert "login page" in str(caught.value)
+    assert getattr(caught.value, "page_level", False) is False
+    assert client.has_authenticated_session() is False
+    assert sum(r.method == "POST" for r in transport.requests) == 1
+
+
 def test_slow_pages_get_a_longer_default_timeout_unless_the_timeout_was_set_explicitly():
     """Measured live 2026-09-20: home.ha answers in 17-18 s and lanstatistics.ha in 23-29 s, so the
     15 s default made them fail every time. Per-page floors apply only to the implicit default."""
@@ -751,3 +1030,128 @@ def test_login_accepts_a_200_answer_when_a_protected_page_then_renders():
     client = make_client(FakeTransport(handler))
     client.login()
     assert client.has_authenticated_session() is True
+
+
+def test_get_cgi_page_403_is_page_level_and_keeps_the_session():
+    """One page answering 403 is that page's refusal: the error is marked page-level so per-page
+    readers continue, and the authenticated session is kept so the cache can still be refreshed."""
+    client = BGW320Client("http://router.invalid", transport=lambda request: html("forbidden", 403))
+    client.import_session({"origin": "http://router.invalid", "authenticated": True, "cookies": {"sid": "s"}})
+    with pytest.raises(RouterAuthError) as caught:
+        client.get_cgi_page("fwinfo")
+    assert caught.value.status_code == 403
+    assert caught.value.page_level is True
+    assert client.has_authenticated_session() is True
+
+
+def test_login_403_is_not_page_level_and_clears_the_session():
+    """A 403 from the login handshake is a failed login: not page-level, session cleared, so
+    sweep/scan abort instead of re-logging in on every page."""
+    client = BGW320Client("http://router.invalid", access_code="synthetic", transport=lambda request: html("forbidden", 403))
+    with pytest.raises(RouterAuthError) as caught:
+        client.login()
+    assert caught.value.status_code == 403
+    assert getattr(caught.value, "page_level", False) is False
+    assert client.has_authenticated_session() is False
+
+
+LOGIN_FORBIDDEN_HTML = login_nonce_html("abc123")  # a Login page body carried by a 401/403 answer
+
+
+def test_redirect_to_login_answering_403_is_a_session_failure_not_a_page_failure():
+    """A content GET that bounces to login.ha and gets 401/403 is a lost session: not page-level,
+    authenticated flag cleared, so per-page readers abort instead of recording a page failure."""
+    def handler(req, n):
+        if req.url.endswith("/cgi-bin/dhcpserver.ha"):
+            return html("", status=302, headers={"location": "/cgi-bin/login.ha"})
+        return html(LOGIN_FORBIDDEN_HTML, status=403)
+
+    client = make_client(FakeTransport(handler))
+    client.import_session({"origin": client.session_identity(), "authenticated": True, "cookies": {"sid": "stale"}})
+    with pytest.raises(RouterAuthError) as caught:
+        client.get_cgi_page("dhcpserver")
+    assert caught.value.status_code == 403
+    assert getattr(caught.value, "page_level", False) is False
+    assert client.has_authenticated_session() is False
+
+
+def test_post_login_retry_answering_403_login_page_is_a_session_failure():
+    """Login succeeded, the retried content GET answers 401/403 with the Login page: the session is
+    gone again. Must not be marked page-level and must not leave has_authenticated_session() True
+    (the coordinator would cache it)."""
+    state = {"authed": False}
+
+    def handler(req, n):
+        if req.method == "POST":
+            state["authed"] = True
+            return html("", status=302, headers={"location": "/cgi-bin/home.ha", "set-cookie": "sid=abc"})
+        if state["authed"]:
+            return html(LOGIN_FORBIDDEN_HTML, status=403)
+        return html(login_nonce_html("abc123"))
+
+    client = make_client(FakeTransport(handler))
+    with pytest.raises(RouterAuthError) as caught:
+        client.get_cgi_page("dhcpserver")
+    assert caught.value.status_code == 403
+    assert getattr(caught.value, "page_level", False) is False
+    assert client.has_authenticated_session() is False
+
+
+def test_post_login_retry_answering_403_content_page_stays_page_level():
+    """Contrast: after a successful login the content page itself answers 403 with a content body.
+    That is the page's refusal: page-level, session kept."""
+    state = {"authed": False}
+
+    def handler(req, n):
+        if req.method == "POST":
+            state["authed"] = True
+            return html("", status=302, headers={"location": "/cgi-bin/home.ha", "set-cookie": "sid=abc"})
+        if state["authed"]:
+            return html("<title>Forbidden</title><h1>This feature is not available</h1>", status=403)
+        return html(login_nonce_html("abc123"))
+
+    client = make_client(FakeTransport(handler))
+    with pytest.raises(RouterAuthError) as caught:
+        client.get_cgi_page("dhcpserver")
+    assert caught.value.status_code == 403
+    assert caught.value.page_level is True
+    assert client.has_authenticated_session() is True
+
+
+def test_hostname_resolution_is_bounded_by_the_request_deadline(monkeypatch):
+    """A resolver that hangs cannot hold a request past --timeout: the watchdog has no socket to cut
+    yet, so the name lookup itself is waited on only for the time left, and a lookup that finishes
+    after the deadline never dispatches the request."""
+    import socket
+
+    release = threading.Event()
+    resolved = threading.Event()
+    real_getaddrinfo = socket.getaddrinfo
+
+    def hanging_resolver(host, *args, **kwargs):
+        if host != "router.hang.invalid":
+            return real_getaddrinfo(host, *args, **kwargs)
+        release.wait(5)
+        resolved.set()
+        return real_getaddrinfo("127.0.0.1", *args, **kwargs)
+
+    connects = []
+
+    class RecordingSocket(socket.socket):
+        def connect(self, address):
+            connects.append(address)
+            return super().connect(address)
+
+    monkeypatch.setattr(socket, "getaddrinfo", hanging_resolver)
+    monkeypatch.setattr(socket, "socket", RecordingSocket)
+    client = BGW320Client("http://router.hang.invalid:9", timeout_ms=200, timeout_explicit=True)
+    started = time.monotonic()
+    try:
+        with pytest.raises(RouterConnectionError, match="Timed out connecting"):
+            client.get_cgi_page("sitemap", auth=False)
+        assert time.monotonic() - started < 1.5
+    finally:
+        release.set()
+    resolved.wait(2)
+    time.sleep(0.05)
+    assert connects == []

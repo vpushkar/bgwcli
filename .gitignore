@@ -11,5 +11,8 @@ tests/fixtures/parsed/
 tests/fixtures/expected/
 bgw-*.json
 *.dump.json
-/dumps/
+dumps/
 .venv*/
+.worktrees/
+/.superpowers/
+router-dumps/

@@ -38,6 +38,22 @@ class OperationResult:
     verified: bool | None = None
     mismatches: dict[str, dict[str, str]] | None = None
     warning: str | None = None
+    outcome: str | None = None
+    reconnect_address: str | None = None
+    write_attempted: bool | None = None
+    # True when the gateway answered the write POST (any status), False when no answer arrived.
+    write_response_received: bool | None = None
+    write_performed: bool | None = None
+    acknowledgement_observed: bool | None = None
+    # Configuration POSTs sent for this write. Set to 2 on a write the transport re-sent after a Login-page
+    # answer (whether or not the re-send succeeded), and to the transport's count on a failed POST (which
+    # can be 1); absent on a successful single POST and when the count was not observed.
+    write_attempts: int | None = None
+    # False when the action's redirect answer was deliberately not read (the effect drops the
+    # gateway's web server); absent when the answer was read.
+    answer_read: bool | None = None
+    # Number of post-save verification re-reads performed (1 = first try); absent when none ran.
+    verify_attempts: int | None = None
 
 
 _SAFE_ARG = re.compile(r"^[a-z0-9_.:-]+$", re.IGNORECASE)
@@ -65,7 +81,7 @@ def action_dry_run(action: RouterAction, display_payload: dict[str, str]) -> Ope
     )
 
 
-def action_committed(action: RouterAction, status_code: int, location: str | None) -> OperationResult:
+def action_committed(action: RouterAction, status_code: int | None, location: str | None) -> OperationResult:
     return OperationResult(
         operation="action",
         dry_run=False,
@@ -146,7 +162,18 @@ def submit_dry_run(plan: Any, requested_button: str, confirmation: str) -> Opera
     )
 
 
-def submit_committed(page: str, button: str, status_code: int, location: str | None) -> OperationResult:
+def submit_committed(
+    page: str,
+    button: str,
+    status_code: int,
+    location: str | None,
+    *,
+    verified: bool | None = None,
+    mismatches: dict[str, dict[str, str]] | None = None,
+    warning: str | None = None,
+) -> OperationResult:
+    """`verified`/`mismatches`/`warning` carry the live re-read, run when an acknowledged save did
+    not show its requested state."""
     return OperationResult(
         operation="submit",
         dry_run=False,
@@ -157,6 +184,9 @@ def submit_committed(page: str, button: str, status_code: int, location: str | N
         dangerous=page in DANGEROUS_PAGES,
         status_code=status_code,
         location=location,
+        verified=verified,
+        mismatches=mismatches,
+        warning=warning,
     )
 
 
@@ -177,7 +207,7 @@ def diagnostic_dry_run(kind: str, target: str, payload: dict[str, str], button: 
     )
 
 
-def diagnostic_committed(kind: str, target: str, status_code: int, result: str) -> OperationResult:
+def diagnostic_committed(kind: str, target: str, status_code: int | None, result: str | None) -> OperationResult:
     return OperationResult(
         operation="diagnostic",
         dry_run=False,
@@ -219,11 +249,43 @@ def restore_committed(execution: Any) -> OperationResult:
 
     last_applied = next((step for step in reversed(steps) if step.status == "applied"), None)
     summary = f"{count('applied')} applied, {count('failed')} failed, {count('not-run')} not run"
+    if count("blocked"):
+        summary += f", {count('blocked')} blocked"
+    if count("skipped"):
+        summary += f", {count('skipped')} skipped"
+    if count("reconnect-required"):
+        summary += f", {count('reconnect-required')} reconnect required"
+    if count("unchanged"):
+        summary += f", {count('unchanged')} unchanged"
+    def confirmed_write(step: Any) -> bool:
+        performed = getattr(step, "write_performed", None)
+        return performed is True or (performed is None and step.status == "applied")
+
+    def no_write(step: Any) -> bool:
+        performed = getattr(step, "write_performed", None)
+        if performed is not None:
+            return performed is False
+        if step.status == "applied":
+            return False
+        return getattr(step, "write_attempted", None) is False or step.status in {
+            "blocked", "skipped", "not-run", "unchanged",
+        }
+
+    committed = any(confirmed_write(step) for step in steps)
+    no_save = all(no_write(step) for step in steps)
+    if count("failed"):
+        outcome = "failed"
+    elif count("blocked") or count("not-run") or count("reconnect-required"):
+        outcome = "incomplete"
+    else:
+        outcome = "unchanged" if no_save else None
     stopped_at = getattr(execution, "stopped_at", None)
     return OperationResult(
         operation="restore",
         dry_run=False,
-        committed=True,
+        committed=committed,
+        write_performed=True if committed else (False if no_save else None),
+        outcome=outcome,
         page="restore",
         guarded=True,
         dangerous=False,

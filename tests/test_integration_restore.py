@@ -14,8 +14,10 @@ from typing import Any
 
 from integration_html import (
     APPHOSTING_EXTRA_HTML,
+    APPHOSTING_HTML,
     APPHOSTING_WITH_STAR_MOSH_HTML,
     APPHOSTING_WITHOUT_MOSH_HTML,
+    CHANGES_SAVED_HTML,
     DISABLED_DOSPROTECT_HTML,
     DOSPROTECT_CHECKBOX_HTML,
     DOSPROTECT_RENAMED_BUTTON_HTML,
@@ -40,6 +42,7 @@ from integration_html import (
     WIFI_WARN_HTML,
     WIFI_WARN_NO_CONTINUE_HTML,
     ZZ_TEST_SERVICE_ROW,
+    allocation_saved_html,
     entry_page_html,
     entry_page_html_disabled_option,
     entry_page_html_with_save,
@@ -142,6 +145,7 @@ def only(steps: list[RestoreStep], kind: str, contains: str | None = None) -> Re
 class Post:
     status_code: int
     headers: dict[str, str] = field(default_factory=dict)
+    body: str = ""
 
 
 @dataclass(frozen=True)
@@ -169,6 +173,9 @@ class FakeRouter:
         if self._answer is not None:
             return self._answer(page, body)
         return Post(302, {"location": f"/cgi-bin/{page}.ha"})
+
+    def post_form(self, nonce_page: str, post_path: str, fields: Mapping[str, str]) -> Post:
+        return self.post_cgi_page(post_path.removesuffix(".ha"), fields)
 
     def get_cgi_page(self, page: str) -> Get:
         self.gets.append(page)
@@ -293,7 +300,10 @@ def test_missing_live_page_blocks_its_steps_instead_of_throwing():
 
 def test_form_step_never_assigns_a_disabled_control_even_if_the_dump_differs():
     steps = plan(dump(), live_pages(dosprotect=DISABLED_DOSPROTECT_HTML))
-    assert not [s for s in steps if s.kind == "form" and s.page == "dosprotect"]
+    forms = [s for s in steps if s.kind == "form" and s.page == "dosprotect"]
+    # Reported as blocked (with the reason) instead of silently dropped; nothing is posted.
+    assert len(forms) == 1 and forms[0].blocked is not None and "disabled" in forms[0].blocked
+    assert forms[0].raw_payload is None
 
 
 def test_a_missing_or_renamed_save_button_blocks_only_that_form_step():
@@ -588,32 +598,41 @@ SKIP_STEP = RestoreStep(order=2, kind="skip", page="packetfilter", description="
 
 
 def test_execute_restore_performs_allocate_reads_the_entry_form_then_posts_save_with_the_chosen_address():
-    router = FakeRouter({"ipalloc": entry_page_html(MAC, ["192.168.1.67", "192.168.1.68"])})
+    router = FakeRouter(
+        lambda p: Get(
+            200,
+            entry_page_html(MAC, ["192.168.1.67", "192.168.1.68"])
+            if len(router.posted) == 1
+            else allocation_saved_html(MAC, "192.168.1.67"),
+        )
+    )
     execution = execute_restore(router, [reserve_step(MAC, "192.168.1.67")])
     assert router.posted == [
         ("ipalloc", {f"Allocate_{MAC}": "Allocate"}),
         ("ipalloc", {f"alloc_{MAC}": "192.168.1.67", "Save": "Save"}),
     ]
     assert statuses(execution) == ["applied"]
+    assert router.gets == ["ipalloc", "ipalloc"]  # entry GET, then the saved allocation GET
     assert execution.stopped_at is None
 
 
-def test_execute_restore_fails_the_reserve_step_without_posting_save_when_the_address_is_not_offered():
+def test_execute_restore_blocks_the_reserve_step_without_posting_save_when_the_address_is_not_offered():
     router = FakeRouter({"ipalloc": entry_page_html(MAC, ["192.168.1.68"])}, answer=lambda p, f: Post(302))
     execution = execute_restore(router, [reserve_step(MAC, "192.168.1.67"), SKIP_STEP])
     assert [",".join(f) for _, f in router.posted] == [f"Allocate_{MAC}"]
-    assert statuses(execution) == ["failed", "not-run"]
+    assert statuses(execution) == ["blocked", "skipped"]
     assert execution.steps[0].error is not None and "not offered" in execution.steps[0].error
-    assert execution.stopped_at == 1
+    assert execution.stopped_at is None
 
 
-def test_execute_restore_fails_the_reserve_step_when_the_entry_form_belongs_to_a_different_device():
+def test_execute_restore_blocks_the_reserve_step_when_the_entry_form_belongs_to_a_different_device():
     router = FakeRouter(
         {"ipalloc": entry_page_html("aa:bb:cc:dd:ee:ff", ["192.168.1.67"])}, answer=lambda p, f: Post(302)
     )
     execution = execute_restore(router, [reserve_step(MAC, "192.168.1.67")])
-    assert statuses(execution) == ["failed"]
+    assert statuses(execution) == ["blocked"]
     assert execution.steps[0].error is not None and f"did not open for {MAC}" in execution.steps[0].error
+    assert execution.stopped_at is None
 
 
 def test_execute_restore_fails_the_reserve_step_when_the_follow_up_save_post_returns_a_non_2xx_3xx_status():
@@ -653,42 +672,45 @@ def test_execute_restore_fails_the_reserve_step_when_the_follow_up_get_returns_a
 def test_execute_restore_refuses_to_post_an_allocation_value_that_is_not_a_dotted_ipv4_address():
     router = FakeRouter({"ipalloc": entry_page_html(MAC, ["192.168.1.67"])}, answer=lambda p, f: Post(302))
     execution = execute_restore(router, [reserve_step(MAC, "normal")])
-    assert statuses(execution) == ["failed"]
+    assert statuses(execution) == ["blocked"]
     assert execution.steps[0].error is not None
     assert "refusing to post non-IPv4 allocation value 'normal'" in execution.steps[0].error
     assert [",".join(f) for _, f in router.posted] == [f"Allocate_{MAC}"]
-    assert execution.stopped_at == 1
+    assert execution.stopped_at is None
 
 
 def test_execute_restore_posts_the_save_button_rendered_value_not_its_name():
     router = FakeRouter(
-        {"ipalloc": entry_page_html_with_save(MAC, ["192.168.1.67"], "Save...")}, answer=lambda p, f: Post(302)
+        {"ipalloc": entry_page_html_with_save(MAC, ["192.168.1.67"], "Save...")},
+        answer=lambda p, f: Post(200, body=allocation_saved_html(MAC, "192.168.1.67"))
+        if "Save" in f else Post(302),
     )
     execution = execute_restore(router, [reserve_step(MAC, "192.168.1.67")])
     assert statuses(execution) == ["applied"]
+    assert router.gets == ["ipalloc"]  # Save's HTTP 200 body already confirms the allocation
     assert router.posted[1] == ("ipalloc", {f"alloc_{MAC}": "192.168.1.67", "Save": "Save..."})
 
 
-def test_execute_restore_fails_the_reserve_step_when_the_entry_form_has_no_save_button():
+def test_execute_restore_blocks_the_reserve_step_when_the_entry_form_has_no_save_button():
     router = FakeRouter(
         {"ipalloc": entry_page_html_with_save(MAC, ["192.168.1.67"], None)}, answer=lambda p, f: Post(302)
     )
     execution = execute_restore(router, [reserve_step(MAC, "192.168.1.67")])
-    assert statuses(execution) == ["failed"]
+    assert statuses(execution) == ["blocked"]
     assert (
         execution.steps[0].error is not None and "IP Allocation Entry has no 'Save' button" in execution.steps[0].error
     )
     assert [",".join(f) for _, f in router.posted] == [f"Allocate_{MAC}"]
-    assert execution.stopped_at == 1
+    assert execution.stopped_at is None
 
 
-def test_execute_restore_fails_the_reserve_step_when_the_matching_address_option_is_disabled():
+def test_execute_restore_blocks_the_reserve_step_when_the_matching_address_option_is_disabled():
     router = FakeRouter({"ipalloc": entry_page_html_disabled_option(MAC)}, answer=lambda p, f: Post(302))
     execution = execute_restore(router, [reserve_step(MAC, "192.168.1.67")])
-    assert statuses(execution) == ["failed"]
+    assert statuses(execution) == ["blocked"]
     assert execution.steps[0].error is not None and "not offered" in execution.steps[0].error
     assert [",".join(f) for _, f in router.posted] == [f"Allocate_{MAC}"]
-    assert execution.stopped_at == 1
+    assert execution.stopped_at is None
 
 
 def test_a_form_save_that_redirects_to_the_wifi_warning_page_is_confirmed_with_continue():
@@ -698,7 +720,7 @@ def test_a_form_save_that_redirects_to_the_wifi_warning_page_is_confirmed_with_c
         return Post(302, {"location": "/cgi-bin/wifiwarn_advanced.ha"})
 
     def pages(page: str) -> Get:
-        return Get(200, WIFI_WARN_HTML if page == "wifiwarn_advanced" else "<html></html>")
+        return Get(200, WIFI_WARN_HTML if page == "wifiwarn_advanced" else CHANGES_SAVED_HTML)
 
     router = FakeRouter(pages, answer=answer)
     step = RestoreStep(
@@ -715,7 +737,7 @@ def test_a_form_save_that_redirects_to_the_wifi_warning_page_is_confirmed_with_c
         ("wconfig", {"maxclients": "81", "Save": "Save..."}),
         ("wconfig", {"Continue": "Continue"}),
     ]
-    assert router.gets == ["wifiwarn_advanced"]
+    assert router.gets == ["wifiwarn_advanced", "wconfig"]
     assert statuses(execution) == ["applied"]
     assert execution.steps[0].location == "/cgi-bin/wconfig.ha"
 
@@ -764,9 +786,16 @@ def deferred_steps() -> list[RestoreStep]:
 
 
 def test_execute_restore_re_reads_the_nat_gaming_dropdown_and_posts_a_deferred_forward_once_its_service_exists():
-    router = FakeRouter({"apphosting": APPHOSTING_WITH_STAR_MOSH_HTML})
+    router = FakeRouter(
+        lambda p: Get(
+            200,
+            APPHOSTING_WITH_STAR_MOSH_HTML
+            if p == "apphosting" and not any(name == p for name, _ in router.posted)
+            else (CHANGES_SAVED_HTML + APPHOSTING_HTML if p == "apphosting" else CHANGES_SAVED_HTML),
+        )
+    )
     execution = execute_restore(router, deferred_steps())
-    assert router.gets == ["services", "apphosting", "apphosting", "dosprotect"]  # + post-redirect banner checks
+    assert router.gets == ["services", "apphosting", "apphosting", "dosprotect"]  # includes save acknowledgements
     assert [p for p, _ in router.posted] == ["services", "apphosting", "dosprotect"]
     assert router.posted[1][1].items() >= {"service": "*Mosh", "device": "aa:bb:cc:dd:ee:02", "Add": "Add"}.items()
     assert statuses(execution) == ["applied", "applied", "applied"]
@@ -774,7 +803,9 @@ def test_execute_restore_re_reads_the_nat_gaming_dropdown_and_posts_a_deferred_f
 
 
 def test_execute_restore_leaves_a_deferred_forward_blocked_when_the_dropdown_still_lacks_its_service():
-    router = FakeRouter({"apphosting": APPHOSTING_WITHOUT_MOSH_HTML}, answer=lambda p, f: Post(302))
+    router = FakeRouter(
+        {"apphosting": APPHOSTING_WITHOUT_MOSH_HTML}, answer=lambda p, f: Post(200, body=CHANGES_SAVED_HTML)
+    )
     execution = execute_restore(router, deferred_steps())
     assert [p for p, _ in router.posted] == ["services", "dosprotect"]
     assert statuses(execution) == ["applied", "blocked", "applied"]
@@ -786,7 +817,7 @@ def test_execute_restore_records_a_failed_deferred_forward_when_re_reading_appho
     def boom(page: str) -> Get:
         raise RuntimeError("Timed out reading apphosting.ha")
 
-    router = FakeRouter(boom, answer=lambda p, f: Post(302))
+    router = FakeRouter(boom, answer=lambda p, f: Post(200, body=CHANGES_SAVED_HTML))
     execution = execute_restore(router, deferred_steps())
     assert [p for p, _ in router.posted] == ["services"]
     assert statuses(execution) == ["applied", "failed", "not-run"]
@@ -833,16 +864,63 @@ def test_identical_unchecked_state_on_both_sides_is_not_a_difference():
     assert diff_snapshots(wanted, snapshot).forms == {}
 
 
-def test_a_text_field_whose_dump_value_is_literally_unchecked_is_assigned_not_omitted():
+def test_an_unchecked_dump_value_for_a_text_control_is_a_skip_note_never_posted():
     pages = live_pages(dosprotect=TEXT_FIELD_LITERAL_UNCHECKED_HTML)
     wanted = replace(
         dump_no_service_adds(),
         forwards=live(pages).forwards,
         forms={"dosprotect": {"display_label": UNCHECKED, "reflexive": UNCHECKED}},
     )
+    steps = [s for s in plan(wanted, pages) if s.page == "dosprotect"]
+    form = only(steps, "form")
+    # The sentinel only means "off" for a checkable control; a text input is never sent it.
+    assert UNCHECKED not in (form.raw_payload or {}).values()
+    assert any(s.kind == "skip" and "display_label" in s.description for s in steps)
+
+
+def test_an_unchecked_dump_value_for_a_control_the_live_page_lacks_is_neither_posted_nor_awaited():
+    pages = live_pages(dosprotect=DOSPROTECT_CHECKBOX_HTML)
+    wanted = replace(
+        dump_no_service_adds(),
+        forwards=live(pages).forwards,
+        forms={"dosprotect": {"reflexive": UNCHECKED, "algsip": UNCHECKED, "ghostbox": UNCHECKED}},
+    )
     form = only([s for s in plan(wanted, pages) if s.page == "dosprotect"], "form")
-    # The sentinel only means "off" for a checkable control; for the text input it is the literal value.
-    assert form.raw_payload == {"display_label": UNCHECKED, "Save": "Save"}
+    assert form.blocked is None
+    assert form.raw_payload == {"Save": "Save"}, "the sentinel string must never be posted"
+    assert form.postcondition is not None
+    assert "ghostbox" not in form.postcondition.form_fields
+    assert "ghostbox" not in form.postcondition.unchecked_fields
+    assert form.postcondition.unchecked_fields == ("reflexive",)
+
+
+def test_only_absent_unchecked_differences_are_no_difference_and_plan_nothing():
+    pages = live_pages(dosprotect=DOSPROTECT_CHECKBOX_HTML)
+    wanted = replace(
+        dump_no_service_adds(),
+        forwards=live(pages).forwards,
+        forms={"dosprotect": {"reflexive": "on", "algsip": UNCHECKED, "ghostbox": UNCHECKED}},
+    )
+    assert "dosprotect" not in diff_snapshots(wanted, live(pages)).forms
+    assert [s for s in plan(wanted, pages) if s.page == "dosprotect"] == []
+
+
+def test_a_dump_field_the_live_page_does_not_render_is_noted_while_its_siblings_are_posted():
+    pages = live_pages(dosprotect=DOSPROTECT_CHECKBOX_HTML)
+    wanted = replace(
+        dump_no_service_adds(),
+        forwards=live(pages).forwards,
+        forms={"dosprotect": {"reflexive": UNCHECKED, "algsip": UNCHECKED, "ghosttext": "x"}},
+    )
+    steps = [s for s in plan(wanted, pages) if s.page == "dosprotect"]
+    note = only(steps, "skip")
+    assert "ghosttext" in note.description and "does not render" in note.description
+    form = only(steps, "form")
+    assert form.blocked is None
+    # reflexive is unchecked by omission; ghosttext is never posted and never awaited.
+    assert form.raw_payload == {"Save": "Save"}
+    assert form.postcondition is not None and form.postcondition.unchecked_fields == ("reflexive",)
+    assert "ghosttext" not in form.postcondition.form_fields
 
 
 # --- end to end: dump pages -> plan -> execute -> convergence ----------------------------------------
@@ -863,7 +941,8 @@ def test_end_to_end_plan_from_real_pages_executes_and_converges_against_the_post
     forward = only(steps, "add-forward")
     assert forward.deferred is None and forward.raw_payload is not None
 
-    router = FakeRouter()
+    from integration_html import saved_configuration_html
+    router = FakeRouter(lambda p: Get(200, saved_configuration_html(p, router.posted[-1][1])))
     execution = execute_restore(router, steps)
     assert statuses(execution) == ["applied", "applied", "skipped"]
     assert [p for p, _ in router.posted] == ["services", "apphosting"]

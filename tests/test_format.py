@@ -7,12 +7,13 @@ from __future__ import annotations
 import io
 import json
 
+import pytest
+
 from bgwcli import format as fmt
 from bgwcli.actions import ROUTER_ACTIONS
 from bgwcli.audit import build_audit
 from bgwcli.devices import DeviceListResult
 from bgwcli.fetch import ParsedPageResult
-from bgwcli.mutations import MutationPlan
 from bgwcli.operations import (
     OperationResult,
     action_committed,
@@ -20,7 +21,6 @@ from bgwcli.operations import (
     diagnostic_committed,
     restore_committed,
     set_committed,
-    set_dry_run,
     submit_committed,
 )
 from bgwcli.pages import ROUTER_TABS
@@ -68,6 +68,21 @@ def test_sanitize_terminal_text_strips_ansi_osc_and_control_chars():
     value = f"{ESC}[31mred{ESC}[0m {ESC}]52;c;payload\x07name\x00\x7f\x9b tab\tnl\n"
     assert fmt.sanitize_terminal_text(value) == "red name tab\tnl\n"
     assert fmt.sanitize_terminal_text(value, single_line=True) == "red name tab nl "
+
+
+def test_sanitize_terminal_text_strips_bidi_and_format_characters():
+    value = "safe\u202eexe.txt\u2066x\u2069\u200b\ufeffend\u00adok"
+    assert fmt.sanitize_terminal_text(value) == "safeexe.txtxendok"
+    assert fmt.sanitize_terminal_text("Café 2.4 GHz – ünïcode") == "Café 2.4 GHz – ünïcode"
+
+
+def test_print_json_escapes_c1_and_bidi_controls_but_keeps_other_unicode():
+    stream = io.StringIO()
+    fmt.print_json({"name": "a\x9b31mb\u202ec\x85", "label": "Café"}, stream=stream)
+    out = stream.getvalue()
+    assert "\x9b" not in out and "\u202e" not in out and "\x85" not in out
+    assert "\\u009b" in out and "\\u202e" in out and "\\u0085" in out and "Café" in out
+    assert json.loads(out) == {"name": "a\x9b31mb\u202ec\x85", "label": "Café"}
 
 
 def test_human_output_strips_terminal_control_sequences():
@@ -408,6 +423,13 @@ def test_print_device_list_fallback_header_and_empty():
     assert "(none)" in output
 
 
+def test_print_parsed_page_renders_a_parsed_logs_page_generically():
+    page = ParsedPage(page="logs", title="Logs", heading="Logs", values={"Log level": "Info"})
+    output = capture(fmt.print_parsed_page, page)
+    assert "No log entries found." not in output
+    assert "Log level" in output and "Info" in output
+
+
 def test_print_logs_empty_and_populated():
     assert capture(fmt.print_logs, []) == "No log entries found.\n"
     logs = [
@@ -420,6 +442,10 @@ def test_print_logs_empty_and_populated():
     assert "blocked: 2, allowed: 1" in output
     assert "TCP: 1, UDP: 1, (blank): 1" in output
     assert "Destination" in output and "t3" in output
+    limited = capture(fmt.print_logs, logs, limit=2)
+    assert "Entries".ljust(12) + "  3" in limited and "blocked: 2, allowed: 1" in limited
+    assert "t2" in limited and "t3" not in limited
+    assert "... 1 more rows. Use --limit 3 to show all." in limited
 
 
 # --- sweep / scan / audit ---------------------------------------------------------------------
@@ -498,23 +524,6 @@ def test_print_operation_dry_run_and_committed():
     assert "diagnostic committed" in output
     assert "Target".ljust(12) + "  example.com" in output
     assert output.endswith("\nResult\nPING ok\n")
-
-
-def test_print_mutation_plan_shows_payload_and_commit_command():
-    plan = MutationPlan(
-        page="dosprotect",
-        blocked=False,
-        raw_payload={"nonce": "n", "algsip": "on"},
-        display_payload={"nonce": "[redacted]", "algsip": "on"},
-        display_changes={"algsip": "on"},
-    )
-    output = capture(fmt.print_mutation_plan, plan, confirmation="DOSPROTECT")
-    assert output.startswith("dry-run: no router set was sent\n")
-    assert '{"nonce":"[redacted]","algsip":"on"}' in output
-    assert '{"algsip":"on"}' in output
-    assert "--commit --confirm DOSPROTECT" in output
-    # identical to printing the set_dry_run operation
-    assert output == capture(fmt.print_operation, set_dry_run(plan, "DOSPROTECT"))
 
 
 def test_operation_output_emits_explicit_null_location_when_committed():
@@ -841,6 +850,20 @@ def test_print_restore_step_result_prints_status_code_and_location():
     assert capture(fmt.print_restore_step_result, blocked) == "[3] blocked x\n"
 
 
+def test_print_restore_step_result_flushes_its_line():
+    class Stream(io.StringIO):
+        flushes = 0
+
+        def flush(self):
+            type(self).flushes += 1
+            super().flush()
+
+    stream = Stream()
+    fmt.print_restore_step_result(RestoreStepResult(order=1, page="x", kind="skip", description="d", status="blocked"),
+                                  stream)
+    assert stream.getvalue() == "[1] blocked x\n" and Stream.flushes == 1
+
+
 def test_display_restore_steps_drops_raw_payload_and_redacts_assignments():
     steps = [RestoreStep(
         order=1, kind="form", page="wconfig", description="apply", button="Save",
@@ -862,3 +885,56 @@ def test_summarize_fetch_failures_drops_parsed_pages():
     failures = [ParsedPageResult(page="diag", ok=False, status_code=500, error="x",
                                  parsed=ParsedPage(page="diag", title="", heading="", values={"k": "secret"}))]
     assert fmt.summarize_fetch_failures(failures) == [{"page": "diag", "ok": False, "statusCode": 500, "error": "x"}]
+
+
+@pytest.mark.parametrize(
+    "page_name",
+    ["sysinfo", "diag", "wconfig_unified", "restart", "events", "firewall", "dhcpserver", "voice", "ipalloc", "speed"],
+)
+def test_limit_applies_to_every_table_and_button_block(page_name):
+    rows = [
+        {"Test": f"t{i}", "Status": "up", "Radio": f"row{i}", "Section": "S", "Time": f"row{i}", "Result": "ok",
+         "IPv4 Address / Name": f"row{i}", "Metric": f"row{i}"}
+        for i in range(30)
+    ]
+    buttons = [ParsedButton(f"btn{i}", "submit", f"B{i}", f"B{i}", False) for i in range(30)]
+    page = ParsedPage(page=page_name, title="T", heading="", values={"Description": "d"}, tables=rows, buttons=buttons)
+    output = capture(fmt.print_parsed_page, page, limit=3)
+    assert ("row2" in output) == (page_name not in ("firewall", "dhcpserver")) and "row3" not in output, page_name
+    assert "btn2" in output and "btn3" not in output, page_name
+    table_blocks = 0 if page_name in ("firewall", "dhcpserver") else 1
+    assert output.count("... 27 more rows. Use --limit 30 to show all.") == 1 + table_blocks, page_name
+    full = capture(fmt.print_parsed_page, page, limit=30)
+    assert ("row29" in full) == bool(table_blocks) and "btn29" in full and "more rows" not in full, page_name
+
+
+def test_print_rows_truncates_long_headers_like_cells():
+    header = "A very long column header that is wider than any cell limit"
+    output = capture(fmt.print_rows, [{header: "x", "B": "y"}], [header, "B"])
+    lines = output.splitlines()
+    assert len(lines[0]) == len(lines[1]) == len(lines[2])
+    assert lines[0].startswith(header[:35] + "…")
+
+
+def test_an_osc_sequence_ends_at_its_own_terminator_and_never_swallows_later_text():
+    from bgwcli.format import sanitize_terminal_text
+
+    assert sanitize_terminal_text("a\x1b]0;title\x1b\\ visible \x07 more") == "a visible  more"
+    assert sanitize_terminal_text("a\x1b]8;;http://x\x07link\x1b]8;;\x07 end") == "alink end"
+    # An unterminated sequence is dropped to the end of its line; later lines survive.
+    assert sanitize_terminal_text("a\x1b]0;never ends\nsecond line\x07 tail") == "a\nsecond line tail"
+
+
+def test_terminal_module_is_importable_without_the_renderers_and_matches_format():
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    from bgwcli import terminal
+
+    assert fmt.sanitize_terminal_text is terminal.sanitize_terminal_text
+    error = RuntimeError("router said\x1b[31m red \x1b]0;t\x07‮evil\nsecond line")
+    assert terminal.printable_error(error) == "router said red evil second line"
+    src = str(Path(terminal.__file__).resolve().parent.parent)
+    code = f"import sys; sys.path.insert(0, {src!r}); import bgwcli.terminal; sys.exit('bgwcli.format' in sys.modules)"
+    assert subprocess.run([sys.executable, "-c", code], check=False).returncode == 0

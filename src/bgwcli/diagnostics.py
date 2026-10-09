@@ -65,6 +65,7 @@ def extract_diagnostic_result(parsed: ParsedPage) -> str:
 
 
 _sleep = time.sleep  # monkeypatch seam for tests
+_monotonic = time.monotonic  # monkeypatch seam for tests
 
 
 def poll_diagnostic_result(
@@ -74,22 +75,41 @@ def poll_diagnostic_result(
     interval_ms: int = 500,
     include_secrets: bool = False,
     sleep=None,
+    initial_body: str | None = None,
 ):
     """Follow up a diagnostic POST: the gateway answers 302 with an empty body, fills the
     ProgressWindow textarea asynchronously (~3 s later for ping), lets it grow while the tool
     runs, and then BLANKS it once the run is over (observed live 2026-09-20). So: remember the
     last non-empty text and return it when the window clears, when it stops changing between two
     polls, or when the deadline passes. Returns (text, last_page_with_content); "" if none seen.
+
+    The window is elapsed (monotonic) time, so slow reads use it up as well as the sleeps between
+    them; no poll starts once it has passed (a read already running finishes under its own request
+    deadline). The summed sleeps are a second bound, so an injected no-op sleep still ends the loop.
+
+    ``initial_body`` is a diag page the caller already fetched after the POST (e.g. while checking for
+    a rejection banner): output it carries is the starting state, never discarded.
     """
     from .parser import parse_page
 
     do_sleep = sleep if sleep is not None else _sleep
+    deadline = _monotonic() + timeout_ms / 1000
     waited = 0
     last_text = ""
     last_page = None
+    if initial_body is not None:
+        initial = parse_page(DIAG_PAGE, initial_body, include_secrets=include_secrets)
+        if text := extract_diagnostic_result(initial):
+            last_text, last_page = text, initial
     while waited < timeout_ms:
-        do_sleep(interval_ms / 1000)
+        remaining = deadline - _monotonic()
+        if remaining <= 0:
+            break
+        pause = min(interval_ms / 1000, remaining)
+        do_sleep(pause)
         waited += interval_ms
+        if _monotonic() > deadline:
+            break
         response = client.get_cgi_page(DIAG_PAGE)
         page = parse_page(DIAG_PAGE, response.body, include_secrets=include_secrets)
         text = extract_diagnostic_result(page)

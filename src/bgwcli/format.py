@@ -15,7 +15,7 @@ import json
 import re
 import sys
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import fields, is_dataclass, replace
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, TextIO, TypeVar
 
@@ -23,8 +23,8 @@ from .actions import RouterAction
 from .audit import AuditResult
 from .devices import DeviceListResult
 from .fetch import ParsedPageResult
-from .mutations import DANGEROUS_PAGES, MutationPlan, confirm_token_for_page
-from .operations import OperationResult, set_dry_run
+from .mutations import DANGEROUS_PAGES, confirm_token_for_page
+from .operations import OperationResult
 from .pages import RouterTab
 from .redact import redact_value
 from .restore import RestoreExecution, RestoreStep, RestoreStepResult, follow_up_payload
@@ -33,7 +33,9 @@ from .snapshot import Snapshot, SnapshotService
 from .snapshot_diff import FormFieldDiff, ReservationChange, SnapshotDiff
 from .status import StatusResult, StatusSection
 from .sweep import SweepPage
-from .types import Device, LogEntry, ParsedField, ParsedPage, ParsedSelect, SitemapEntry, _camel, to_json_dict
+from .terminal import is_terminal_hazard as _is_terminal_hazard
+from .terminal import sanitize_terminal_text
+from .types import Device, LogEntry, ParsedField, ParsedPage, ParsedSelect, SitemapEntry, to_json_dict
 
 T = TypeVar("T")
 DEFAULT_LIMIT = 20
@@ -41,22 +43,30 @@ _MAX_KEY_WIDTH = 42
 _MAX_CELL_WIDTH = 36
 _HIDDEN_FIELDS = frozenset({"nonce", "hashpassword"})
 
-_OSC = re.compile("\x1b\\][^\x07]*(?:\x07|\x1b\\\\)")
-_CSI = re.compile("\x1b\\[[0-?]*[ -/]*[@-~]")
-_WHITESPACE_RUN = re.compile(r"[\n\t]+")
+# Every character json.dumps(ensure_ascii=False) may leave raw beyond printable ASCII; the
+# replacement callback escapes only the terminal hazards among them.
+_JSON_NON_ASCII = re.compile("[^\x00-\x7e]")
 
 
 # ---------------------------------------------------------------------------------------------
 # primitives
 
 
-def sanitize_terminal_text(value: str, *, single_line: bool = False) -> str:
-    """Strip OSC/CSI escape sequences and control characters (keeping \\n and \\t) from router text."""
-    sanitized = _CSI.sub("", _OSC.sub("", value))
-    sanitized = "".join(
-        ch for ch in sanitized if ch in "\n\t" or (ord(ch) >= 32 and not 127 <= ord(ch) <= 159)
-    )
-    return _WHITESPACE_RUN.sub(" ", sanitized) if single_line else sanitized
+def _json_escape_hazard(match: re.Match[str]) -> str:
+    ch = match.group(0)
+    if not _is_terminal_hazard(ch):
+        return ch
+    code = ord(ch)
+    if code > 0xFFFF:
+        code -= 0x10000
+        return f"\\u{0xD800 + (code >> 10):04x}\\u{0xDC00 + (code & 0x3FF):04x}"
+    return f"\\u{code:04x}"
+
+
+def _escape_json_hazards(text: str) -> str:
+    """json.dumps(ensure_ascii=False) leaves DEL, C1 controls and format characters raw; escape
+    them (``\\u009b``) so --json output cannot drive the terminal, other Unicode stays as-is."""
+    return _JSON_NON_ASCII.sub(_json_escape_hazard, text)
 
 
 def _line(text: str) -> str:
@@ -70,7 +80,8 @@ def _compact_json(value: Any) -> str:
 
 def print_json(value: Any, stream: TextIO | None = None) -> None:
     """Pretty JSON (2-space indent) for --json output; dataclasses go through to_json_dict."""
-    (stream or sys.stdout).write(json.dumps(to_json_dict(value), indent=2, ensure_ascii=False) + "\n")
+    text = json.dumps(to_json_dict(value), indent=2, ensure_ascii=False)
+    (stream or sys.stdout).write(_escape_json_hazards(text) + "\n")
 
 
 def json_with_nulls(value: Any, null_keys: Iterable[str]) -> Any:
@@ -80,24 +91,7 @@ def json_with_nulls(value: Any, null_keys: Iterable[str]) -> Any:
     e.g. OperationResult.location / RestoreStepResult.location after a committed POST without a
     Location header. Use this where parity with that output matters.
     """
-    keep = frozenset(null_keys)
-
-    def convert(item: Any) -> Any:
-        if is_dataclass(item) and not isinstance(item, type):
-            out: dict[str, Any] = {}
-            for f in fields(item):
-                v = getattr(item, f.name)
-                if v is None and f.name not in keep:
-                    continue
-                out[_camel(f.name)] = convert(v)
-            return out
-        if isinstance(item, dict):
-            return {k: convert(v) for k, v in item.items()}
-        if isinstance(item, (list, tuple)):
-            return [convert(v) for v in item]
-        return item
-
-    return convert(value)
+    return to_json_dict(value, null_fields=null_keys)
 
 
 def print_key_values(values: Mapping[str, str], stream: TextIO | None = None) -> None:
@@ -110,7 +104,7 @@ def print_key_values(values: Mapping[str, str], stream: TextIO | None = None) ->
 
 
 def print_rows(rows: Sequence[Mapping[str, str]], columns: Sequence[str], stream: TextIO | None = None) -> None:
-    """Generic table: header, dashed rule, rows; cells clipped to 36 chars with an ellipsis."""
+    """Generic table: header, dashed rule, rows; headers and cells clipped to 36 chars with an ellipsis."""
     out = stream or sys.stdout
     if not rows:
         out.write("(none)\n")
@@ -119,7 +113,10 @@ def print_rows(rows: Sequence[Mapping[str, str]], columns: Sequence[str], stream
         min(_MAX_CELL_WIDTH, max(len(column), *(len(str(row.get(column, "") or "")) for row in rows)))
         for column in columns
     ]
-    out.write("  ".join(_line(column).ljust(width) for column, width in zip(columns, widths, strict=True)) + "\n")
+    out.write(
+        "  ".join(_truncate(_line(column), width).ljust(width) for column, width in zip(columns, widths, strict=True))
+        + "\n"
+    )
     out.write("  ".join("-" * width for width in widths) + "\n")
     for row in rows:
         cells = (
@@ -269,11 +266,14 @@ def print_device_list(result: DeviceListResult, *, limit: int = DEFAULT_LIMIT, s
         out.write("Device List (fallback from IP Allocation)\n")
         if result.error:
             out.write(f"devices.ha did not return: {_line(result.error)}\n")
+        if result.fallback_error:
+            out.write(f"IP Allocation fallback unavailable: {_line(result.fallback_error)}\n")
         out.write("\n")
     _print_devices(result.devices, limit, out)
 
 
-def print_logs(logs: Sequence[LogEntry], stream: TextIO | None = None) -> None:
+def print_logs(logs: Sequence[LogEntry], stream: TextIO | None = None, *, limit: int | None = None) -> None:
+    """The summary counts every entry; the row listing shows at most `limit` rows plus the overflow hint."""
     out = stream or sys.stdout
     if not logs:
         out.write("No log entries found.\n")
@@ -292,7 +292,10 @@ def print_logs(logs: Sequence[LogEntry], stream: TextIO | None = None) -> None:
         "Destination": entry.destination,
         "Proto": entry.protocol,
         "Reason": entry.reason,
-    } for entry in logs], ["Time", "Source", "Destination", "Proto", "Reason"], out)
+    } for entry in (logs if limit is None else logs[:limit])],
+        ["Time", "Source", "Destination", "Proto", "Reason"], out)
+    if limit is not None:
+        _print_overflow(len(logs), limit, out)
 
 
 _SCAN_COLUMNS = [
@@ -369,8 +372,10 @@ def print_operation(result: OperationResult, stream: TextIO | None = None) -> No
     out = stream or sys.stdout
     if result.dry_run:
         out.write(f"dry-run: no router {result.operation} was sent\n")
-    else:
+    elif result.committed:
         out.write(f"{result.operation} committed\n")
+    else:
+        out.write(f"{result.operation}: {_line(result.outcome or 'unconfirmed')}\n")
 
     values: dict[str, str] = {
         "Operation": result.operation,
@@ -412,11 +417,6 @@ def print_operation(result: OperationResult, stream: TextIO | None = None) -> No
         out.write(f"{sanitize_terminal_text(result.result)}\n")
 
 
-def print_mutation_plan(plan: MutationPlan, *, confirmation: str | None = None, stream: TextIO | None = None) -> None:
-    """Dry-run view of a `set` plan: redacted payload, changes and the commit command."""
-    print_operation(set_dry_run(plan, confirmation or confirm_token_for_page(plan.page)), stream)
-
-
 # TS builders that take `location: string | null` and always assign it (operations.ts actionCommitted /
 # setCommitted / submitCommitted). diagnosticCommitted and restoreCommitted never set the key.
 _OPERATIONS_WITH_LOCATION = frozenset({"action", "set", "submit"})
@@ -433,14 +433,17 @@ def operation_output(result: OperationResult) -> dict[str, Any]:
 def execution_output(execution: RestoreExecution) -> dict[str, Any]:
     """--json dict for a RestoreExecution mirroring restore.ts executeRestore.
 
-    Only step results built from a POST response (`applied` / `failed` with a statusCode) assign
-    `location` (string or null); thrown/blocked/skipped/not-run steps never carry the key. Non-null
-    locations (confirmWarningPage failures) survive to_json_dict on their own.
+    Results with an observed POST response and statusCode assign `location` (string or null).
+    Legacy applied/failed/unchanged results with a statusCode keep the same convention unless
+    evidence explicitly rules out a POST response. Other results omit an absent location.
     """
     out = to_json_dict(execution)
     out["steps"] = [
         json_with_nulls(step, {"location"})
-        if step.status in ("applied", "failed") and step.status_code is not None
+        if step.status_code is not None and (
+            step.write_response_received is True
+            or (step.write_response_received is not False and step.status in ("applied", "failed", "unchanged"))
+        )
         else to_json_dict(step)
         for step in execution.steps
     ]
@@ -560,7 +563,8 @@ def print_parsed_page(
 
     if page.buttons and not forms:
         out.write("\nAvailable actions\n")
-        print_rows(_button_rows(page.buttons), ["Name", "Label", "Type"], out)
+        print_rows(_button_rows(page.buttons[:limit]), ["Name", "Label", "Type"], out)
+        _print_overflow(len(page.buttons), limit, out)
 
     if not forms and (page.fields or page.selects or page.textareas):
         _print_controls(page, out)
@@ -780,8 +784,9 @@ def _print_specialized_page(page: ParsedPage, limit: int, out: TextIO) -> bool:
     elif name == "diag":
         if page.tables:
             out.write("Diagnostics\n")
-            print_rows(page.tables, list(page.tables[0]), out)
-        _print_actions_and_controls(page, DEFAULT_LIMIT, out)
+            print_rows(page.tables[:limit], list(page.tables[0]), out)
+            _print_overflow(len(page.tables), limit, out)
+        _print_actions_and_controls(page, limit, out)
     elif name == "speed":
         if page.tables:
             print_key_values(summarize_parsed_page(page), out)
@@ -795,8 +800,9 @@ def _print_specialized_page(page: ParsedPage, limit: int, out: TextIO) -> bool:
         print_key_values(_wifi_summary(page), out)
         if page.tables:
             out.write("\nCurrent radios\n")
-            print_rows(page.tables, ["Radio", "Current Channel", "Channel Width", "Mode"], out)
-        _print_actions_and_controls(page, DEFAULT_LIMIT, out)
+            print_rows(page.tables[:limit], ["Radio", "Current Channel", "Channel Width", "Mode"], out)
+            _print_overflow(len(page.tables), limit, out)
+        _print_actions_and_controls(page, limit, out)
     elif name == "wconfig":
         print_key_values(_advanced_wifi_summary(page), out)
         if page.tables:
@@ -806,23 +812,21 @@ def _print_specialized_page(page: ParsedPage, limit: int, out: TextIO) -> bool:
         _print_actions_and_controls(page, limit, out)
     elif name in ("broadbandconfig", "dhcpserver", "ippass", "apphosting", "dosprotect"):
         print_key_values(_SUMMARY_BUILDERS[name](page), out)
-        _print_actions_and_controls(page, DEFAULT_LIMIT, out)
+        _print_actions_and_controls(page, limit, out)
     elif name in _FORM_STATE_PAGES:
-        _print_form_state_page(page, *_FORM_STATE_PAGES[name], out=out)
+        _print_form_state_page(page, *_FORM_STATE_PAGES[name], limit=limit, out=out)
     elif name in _CONFIG_PAGES:
         values = _select_keys(page.values, _CONFIG_PAGES[name])
         if values:
             print_key_values(values, out)
-        _print_actions_and_controls(page, DEFAULT_LIMIT, out)
+        _print_actions_and_controls(page, limit, out)
     elif name in _ACTION_ONLY_PAGES:
         if page.values:
             print_key_values(page.values, out)
-        _print_tables_block(page, DEFAULT_LIMIT, out)
-        _print_actions_and_controls(page, DEFAULT_LIMIT, out)
+        _print_tables_block(page, limit, out)
+        _print_actions_and_controls(page, limit, out)
     elif name in _VOICE_PAGES:
         _print_voice_page(page, limit, out)
-    elif name == "logs":
-        out.write("No log entries found.\n")
     else:
         return False
     return True
@@ -836,15 +840,15 @@ def _print_tables_block(page: ParsedPage, limit: int, out: TextIO) -> None:
 
 
 def _print_form_state_page(
-    page: ParsedPage, preferred_fields: Sequence[str], preferred_selects: Sequence[str], *, out: TextIO
+    page: ParsedPage, preferred_fields: Sequence[str], preferred_selects: Sequence[str], *, limit: int, out: TextIO
 ) -> None:
     values = _form_state_values(page, preferred_fields, preferred_selects)
     if values:
         print_key_values(values, out)
     elif page.values:
         print_key_values(page.values, out)
-    _print_tables_block(page, DEFAULT_LIMIT, out)
-    _print_actions_and_controls(page, DEFAULT_LIMIT, out)
+    _print_tables_block(page, limit, out)
+    _print_actions_and_controls(page, limit, out)
 
 
 def _print_voice_page(page: ParsedPage, limit: int, out: TextIO) -> None:
@@ -860,7 +864,7 @@ def _print_voice_page(page: ParsedPage, limit: int, out: TextIO) -> None:
         _print_overflow(len(rows), limit, out)
     else:
         print_key_values(page.values, out)
-    _print_actions_and_controls(page, DEFAULT_LIMIT, out)
+    _print_actions_and_controls(page, limit, out)
 
 
 def _print_form_details(page: ParsedPage, out: TextIO) -> None:
@@ -1071,7 +1075,7 @@ def print_snapshot_summary(snapshot: Snapshot, path: str, stream: TextIO | None 
     out.write(f"Tables: {_line(', '.join(snapshot.tables) or 'none')}\n")
 
 
-def print_snapshot_diff(diff: SnapshotDiff, stream: TextIO | None = None) -> None:
+def print_snapshot_diff(diff: SnapshotDiff, stream: TextIO | None = None, *, include_secrets: bool = False) -> None:
     out = stream or sys.stdout
     if diff.identical and not diff.firmware_changed:
         out.write("No differences.\n")
@@ -1095,11 +1099,18 @@ def print_snapshot_diff(diff: SnapshotDiff, stream: TextIO | None = None) -> Non
     for page, changes in diff.forms.items():
         out.write(f"{_line(page)}:\n")
         for change in changes:
-            live = redact_value(change.field, change.live if change.live is not None else "<absent>", False)
-            dump = redact_value(change.field, change.dump if change.dump is not None else "<absent>", False)
+            secret = _change_secrets(change)
+            live = change.live if change.live is not None else "<absent>"
+            dump = change.dump if change.dump is not None else "<absent>"
+            live = redact_value(change.field, live, include_secrets, secret)
+            dump = redact_value(change.field, dump, include_secrets, secret)
             out.write(f"  ~ {_line(change.field)}: {_line(live)} -> {_line(dump)}\n")
     if diff.firmware_changed:
         out.write("Firmware differs between dump and router.\n")
+
+
+def _change_secrets(change: FormFieldDiff) -> frozenset[str]:
+    return frozenset((change.field,)) if change.sensitive else frozenset()
 
 
 def _format_service(s: SnapshotService) -> str:
@@ -1111,15 +1122,20 @@ def _format_reservation_change(change: ReservationChange) -> str:
 
 
 def display_diff(diff: SnapshotDiff, include_secrets: bool) -> dict[str, Any]:
-    """--json view of a SnapshotDiff; form values redacted by field name unless include_secrets."""
+    """--json view of a SnapshotDiff; form values redacted (by field name, or a password control
+    type recorded by the dump or the live page) unless include_secrets."""
     if include_secrets:
         return to_json_dict(diff)
     forms = {
         page: [
             FormFieldDiff(
                 field=change.field,
-                dump=None if change.dump is None else redact_value(change.field, change.dump, False),
-                live=None if change.live is None else redact_value(change.field, change.live, False),
+                dump=None if change.dump is None else redact_value(
+                    change.field, change.dump, False, _change_secrets(change)
+                ),
+                live=None if change.live is None else redact_value(
+                    change.field, change.live, False, _change_secrets(change)
+                ),
             )
             for change in changes
         ]
@@ -1133,18 +1149,23 @@ def display_restore_steps(steps: Iterable[RestoreStep], include_secrets: bool) -
     shown = []
     for step in steps:
         assignments = (
-            [_redact_assignment(a, include_secrets) for a in step.assignments]
+            [_redact_assignment(a, include_secrets, step.sensitive_names) for a in step.assignments]
             if step.assignments is not None else None
         )
-        shown.append(to_json_dict(replace(step, raw_payload=None, assignments=assignments)))
+        item = to_json_dict(replace(step, raw_payload=None, assignments=assignments, postcondition=None))
+        if not step.reconnect_required:
+            item.pop("reconnectRequired", None)
+        if not step.lan_address_changed:
+            item.pop("lanAddressChanged", None)
+        shown.append(item)
     return shown
 
 
-def _redact_assignment(assignment: str, include_secrets: bool) -> str:
+def _redact_assignment(assignment: str, include_secrets: bool, sensitive_names: frozenset[str] = frozenset()) -> str:
     field_name, separator, value = assignment.partition("=")
     if not separator:
         return assignment
-    return f"{field_name}={redact_value(field_name, value, include_secrets)}"
+    return f"{field_name}={redact_value(field_name, value, include_secrets, sensitive_names)}"
 
 
 def print_restore_plan(steps: Iterable[RestoreStep], stream: TextIO | None = None) -> None:
@@ -1166,13 +1187,30 @@ def print_restore_plan(steps: Iterable[RestoreStep], stream: TextIO | None = Non
             out.write(f"    then: {_line(_compact_json(follow_up_payload(step.follow_up)))}\n")
 
 
-def print_restore_step_result(result: RestoreStepResult, stream: TextIO | None = None) -> None:
+def print_restore_step_result(result: RestoreStepResult, stream: TextIO | None = None) -> bool:
+    """Print one step. Returns False when the stream is a closed pipe (BrokenPipeError, and only that:
+    any other error propagates), so the caller stops writing; an output fault never ends the run."""
     out = stream or sys.stdout
+    try:
+        _write_restore_step_result(result, out)
+    except BrokenPipeError:
+        return False
+    return True
+
+
+def _write_restore_step_result(result: RestoreStepResult, out: TextIO) -> None:
     location = f" -> {_line(result.location)}" if result.location else ""
     if result.status_code is not None:
         detail = f" ({result.status_code}{location})"
+        if result.error:
+            detail += f" {_line(result.error)}"
     elif result.error:
         detail = f" ({_line(result.error)})"
     else:
         detail = ""
     out.write(f"[{result.order}] {result.status} {_line(result.page)}{detail}\n")
+    if result.warning:
+        out.write(f"    warning: {_line(result.warning)}\n")
+    # Progress for an unattended run (stdout is a pipe under a service manager): each step line
+    # reaches the journal as it is written, so a kill loses at most the line in flight.
+    out.flush()

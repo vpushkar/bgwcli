@@ -30,6 +30,7 @@ from bgwcli.snapshot import (
     SnapshotService,
     extract_snapshot,
     forward_key,
+    missing_form_controls,
     reservation_key,
     resolve_include,
     service_key,
@@ -75,7 +76,6 @@ def test_snapshot_pages_and_form_pages_are_fixed():
         "packetfilter",
         "dosprotect",
         "wconfig",
-        "wconfig_unified",
         "etherlan",
         "dhcpserver",
         "ippass",
@@ -108,7 +108,7 @@ def test_resolve_include_none_all_list_and_unknown():
 
 def test_snapshot_pages_for_never_lists_an_optional_page_that_was_not_included():
     assert snapshot_pages_for(()) == tuple(p for p in SNAPSHOT_PAGES if p not in OPTIONAL_FORM_PAGES)
-    assert "wconfig_unified" in snapshot_pages_for(()) and "packetfilter" in snapshot_pages_for(())
+    assert "wconfig_unified" not in snapshot_pages_for(()) and "packetfilter" in snapshot_pages_for(())
     assert snapshot_pages_for(("dhcpserver",)) == tuple(
         p for p in SNAPSHOT_PAGES if p not in ("etherlan", "ippass", "wmacauth")
     )
@@ -402,3 +402,38 @@ def test_wmacauth_filter_list_is_documentary_and_its_modes_are_form_fields():
     s = extract_snapshot({"wmacauth": wm}, ts="t", router_host="r", include=("wmacauth",))
     assert s.forms["wmacauth"] == {"wmacr1user": "none", "wmacr2user": "deny"}
     assert s.tables["wmacauth"] == [{"Radio": "2.4 GHz", "Network": "Home", "Filtering": "none"}]
+
+
+# --- missing_form_controls: the hidden session inputs are not controls --------------------------------
+
+
+@pytest.mark.parametrize("name", ["nonce", "hashpassword", "Nonce", "HashPassword"])
+def test_a_page_whose_only_input_is_a_hidden_session_input_has_no_form_controls(name):
+    parsed = page("dosprotect", fields=[hidden(name, "abc")])
+    assert "without any form controls" in (missing_form_controls("dosprotect", parsed) or "")
+    # any_page covers a page outside FORM_PAGES too
+    assert "without any form controls" in (missing_form_controls("apphosting", parsed, any_page=True) or "")
+    assert "without any form controls" in (missing_form_controls("dosprotect", parsed, any_page=True) or "")
+    assert missing_form_controls("apphosting", parsed) is None  # a non-form page is not checked without any_page
+
+
+def test_both_hidden_session_inputs_together_are_still_no_form_controls():
+    parsed = page("wconfig", fields=[hidden("nonce", "a"), hidden("hashpassword", "b")])
+    assert missing_form_controls("wconfig", parsed) is not None
+
+
+def test_a_real_field_next_to_the_nonce_is_a_form_control():
+    parsed = page("dosprotect", fields=[hidden("nonce", "a"), field("flag", "text", "x")])
+    assert missing_form_controls("dosprotect", parsed) is None
+    assert missing_form_controls("dosprotect", parsed, any_page=True) is None
+
+
+def test_a_select_or_textarea_next_to_the_nonce_is_a_form_control():
+    with_select = page("dosprotect", fields=[hidden("nonce", "a")], selects=[select("mode", ["a", "b"])])
+    assert missing_form_controls("dosprotect", with_select) is None
+
+
+def test_a_button_next_to_the_nonce_counts_only_with_any_page():
+    parsed = page("apphosting", fields=[hidden("nonce", "a")], buttons=[button("Save")])
+    assert missing_form_controls("apphosting", parsed, any_page=True) is None
+    assert missing_form_controls("dosprotect", parsed) is not None

@@ -11,6 +11,10 @@ def test_router_actions_includes_observed_button_style_operations():
         "restart",
         "clear-device-list",
         "run-speed-test",
+        "detect-wifi-congestion-2.4",
+        "detect-wifi-congestion-5",
+        "clear-connection-statistics",
+        "clear-lan-statistics",
         "run-full-diagnostics",
         "send-diagnostics",
         "diagnostics-ethernet-details",
@@ -39,6 +43,16 @@ def test_confirm_tokens_pages_payloads_and_dangerous_flags_preserved():
         "restart": ("restart", "RESTART", {"Restart": "Restart Device"}, True),
         "clear-device-list": ("devices", "CLEAR-DEVICES", {"Clear": "Clear Device List"}, False),
         "run-speed-test": ("speed", "SPEED", {"run": "Run Speed Test"}, False),
+        "detect-wifi-congestion-2.4": (
+            "lanstatistics", "CONGESTION-2.4", {"Congestion": "Congestion Detection 2.4 GHz"}, False,
+        ),
+        "detect-wifi-congestion-5": (
+            "lanstatistics", "CONGESTION-5", {"CongRadio2": "Congestion Detection 5 GHz"}, False,
+        ),
+        "clear-connection-statistics": (
+            "lanstatistics", "CLEAR-CONNECTION-STATISTICS", {"ClearSta": "Clear Connection Statistics"}, True,
+        ),
+        "clear-lan-statistics": ("lanstatistics", "CLEAR-LAN-STATISTICS", {"Clear": "Clear Statistics"}, True),
         "run-full-diagnostics": ("diag", "DIAG", {"RunFullDiagnostics": "Run Full Diagnostics"}, False),
         "send-diagnostics": ("diag", "SEND-DIAGNOSTICS", {"SendDiagnostics": "Send Diagnostics"}, False),
         "diagnostics-ethernet-details": ("diag", "DIAG", {"EthDetails": "Details"}, False),

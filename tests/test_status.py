@@ -268,3 +268,16 @@ def test_fetch_status_sections_reraises_pool_full_error():
 def test_fetch_device_status_reraises_pool_full_error():
     with pytest.raises(RouterSessionPoolFullError):
         fetch_device_status(object(), fetch_parsed_page=_Fetcher({"home": session_pool_full_error()}))
+
+
+def test_status_answered_is_false_only_when_nothing_was_read():
+    from bgwcli.status import StatusResult, StatusSection, status_answered
+
+    bad = StatusSection(page="sysinfo", ok=False, error="x")
+    good = StatusSection(page="firewall", ok=True)
+    assert status_answered(StatusResult(page="home", fallback=False, sections=[good])) is True
+    assert status_answered(StatusResult(page="home", fallback=True, sections=[bad, good])) is True
+    assert status_answered(StatusResult(page="home", fallback=True, sections=[bad])) is False
+    assert status_answered(StatusResult(page="home", fallback=True, sections=[])) is False
+    assert status_answered([bad, good]) is True
+    assert status_answered([bad]) is False

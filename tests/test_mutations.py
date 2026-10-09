@@ -90,9 +90,74 @@ def test_build_submit_plan_matches_button_by_normalized_name_value_or_label():
     assert build_submit_plan("diag", with_button, "BTN GO", []).button is not None
 
 
+def test_build_submit_plan_prefers_the_single_button_whose_name_is_exactly_the_text():
+    ambiguous = page("diag", buttons=[button("Save", "Apply"), button("btnSave", "Save")])
+    plan = build_submit_plan("diag", ambiguous, "Save", [])
+    assert plan.button is not None and plan.button.name == "Save"
+    assert plan.raw_payload == {"Save": "Apply"} and "btnSave" not in plan.raw_payload
+
+
+def test_build_submit_plan_still_refuses_when_two_buttons_share_the_exact_name():
+    twins = page("diag", buttons=[button("Save", "One"), button("Save", "Two")])
+    with pytest.raises(UsageError, match="matches more than one button on diag") as info:
+        build_submit_plan("diag", twins, "Save", [])
+    assert "Nothing was posted" in str(info.value)
+
+
+def test_build_submit_plan_name_preference_is_case_sensitive():
+    mixed = page("diag", buttons=[button("save", "Apply"), button("btnSave", "Save")])
+    with pytest.raises(UsageError, match="matches more than one button on diag"):
+        build_submit_plan("diag", mixed, "Save", [])
+
+
+def _ambiguous_save_page_html() -> str:
+    return (
+        '<form action="/cgi-bin/diag.ha"><input name="nonce" value="abc123">'
+        '<input type="text" name="setting" value="old">'
+        '<input type="submit" name="btnSave" value="Save">'
+        '<input type="submit" name="Save" value="Apply"></form>'
+    )
+
+
+def test_cli_submit_with_an_ambiguous_label_posts_the_exactly_named_button(tmp_env, clock, monkeypatch, capsys):
+    import json
+
+    from save_helpers import SAVED_RED, client_with, html
+
+    from bgwcli import cli
+
+    state = {"posted": False}
+
+    def handler(request, _n):
+        if request.method == "POST":
+            state["posted"] = True
+            return html("", 302, {"location": "/cgi-bin/diag.ha"})
+        return html((SAVED_RED if state["posted"] else "") + _ambiguous_save_page_html())
+
+    client, wire = client_with(handler)
+    monkeypatch.setattr(cli, "_client_factory", lambda *a, **kw: client)
+    code = cli.main(["submit", "diag", "Save", "--json"])
+    dry = json.loads(capsys.readouterr().out)
+    assert code == 0 and dry["dryRun"] is True and dry["button"] == "Apply"  # the chosen button's label
+    assert dry["payload"] == {"setting": "old", "Save": "Apply"}
+    assert [r.method for r in wire.requests] == ["GET"]
+    code = cli.main(["submit", "diag", "Save", "--commit", "--confirm", "DIAG", "--json"])
+    capsys.readouterr()
+    posts = [r for r in wire.requests if r.method == "POST"]
+    assert code == 0 and len(posts) == 1
+    body = posts[0].body if isinstance(posts[0].body, str) else posts[0].body.decode()
+    assert "Save=Apply" in body and "btnSave" not in body
+
+
 def test_build_submit_plan_raises_when_button_is_missing():
     with pytest.raises(UsageError, match="Button 'Nope' was not found on diag"):
         build_submit_plan("diag", WIFI_PAGE, "Nope", [])
+
+
+def test_build_submit_plan_refuses_a_disabled_button():
+    disabled = button("Ping", "Ping", disabled=True)
+    with pytest.raises(UsageError, match="Button 'Ping' is disabled on diag"):
+        build_submit_plan("diag", page("diag", buttons=[disabled]), "Ping", [])
 
 
 def test_build_submit_plan_allows_dangerous_page_dry_run():
@@ -205,3 +270,67 @@ def test_build_mutation_plan_warns_when_the_page_has_no_save_button():
     assert plan.raw_payload == {"enable": "1", "mode": "manual"}
     assert plan.button is None
     assert plan.warning is not None and "no Save button" in plan.warning
+
+
+# --- IP Allocation: set/submit never carry another device's sticky allocation select -------------
+
+
+class _AllocClient:
+    def __init__(self):
+        from integration_html import IPALLOC_STICKY_HTML
+
+        self.body = IPALLOC_STICKY_HTML
+        self.posts = []
+
+    def get_cgi_page(self, page, **_):
+        from bgwcli.types import HttpResponse
+
+        return HttpResponse(200, "OK", {}, self.body, "https://r/")
+
+    def post_cgi_page(self, page, fields):
+        from bgwcli.types import HttpResponse
+
+        self.posts.append((page, dict(fields)))
+        return HttpResponse(302, "Found", {"location": "/cgi-bin/ipalloc.ha"}, "", "https://r/")
+
+
+def test_plans_on_ipalloc_drop_every_allocation_select_the_user_did_not_assign():
+    from integration_html import IPALLOC_STICKY_HTML
+
+    from bgwcli.parser import parse_page
+
+    parsed = parse_page("ipalloc", IPALLOC_STICKY_HTML, include_secrets=True)
+    assert "alloc_aa:bb:cc:dd:ee:ff" in base_payload(parsed)
+    submit = build_submit_plan("ipalloc", parsed, "Allocate_02:0a:0b:0c:0d:04", [])
+    assert not any(k.lower().startswith("alloc_") for k in submit.raw_payload)
+    assert not any(k.lower().startswith("alloc_") for k in submit.display_payload)
+    mutation = build_mutation_plan("ipalloc", parsed, ["alloc_aa:bb:cc:dd:ee:ff=192.168.1.68"])
+    assert mutation.raw_payload["alloc_aa:bb:cc:dd:ee:ff"] == "192.168.1.68"
+
+
+@pytest.mark.parametrize("argv", [
+    ["submit", "ipalloc", "Allocate_02:0a:0b:0c:0d:04", "--commit", "--confirm", "IPALLOC", "--json"],
+    ["set", "ipalloc", "alloc_02:0a:0b:0c:0d:04=192.168.1.68", "--commit", "--confirm", "IPALLOC", "--json"],
+])
+def test_committed_set_or_submit_on_ipalloc_never_posts_a_foreign_allocation(argv, capsys, monkeypatch):
+    from bgwcli import cli, restore
+
+    monkeypatch.setattr(restore, "SAVE_CONFIRMATION_TIMEOUT_SECONDS", 0.0)
+    monkeypatch.setattr(cli, "sleep", lambda s: None, raising=False)
+    client = _AllocClient()
+    cli.run_command(client, cli.parse_args(argv))
+    capsys.readouterr()
+    assert len(client.posts) == 1
+    assert not any(k == "alloc_aa:bb:cc:dd:ee:ff" for k in client.posts[0][1])
+
+
+def test_cli_submit_of_a_disabled_button_posts_nothing(tmp_env, clock, monkeypatch, capsys):
+    from save_helpers import client_with, form, html
+
+    from bgwcli import cli
+
+    live = form("diag", "old").replace('<input type="submit" name="Save"', '<input type="submit" disabled name="Save"')
+    client, wire = client_with(lambda request, _n: html(live))
+    monkeypatch.setattr(cli, "_client_factory", lambda *a, **kw: client)
+    code = cli.main(["submit", "diag", "Save", "--commit", "--confirm", "DIAG", "--json"])
+    assert code != 0 and sum(r.method == "POST" for r in wire.requests) == 0

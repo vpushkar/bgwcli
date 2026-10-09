@@ -57,7 +57,7 @@ class FakeClient:
 
 def test_parsed_page_result_shape():
     names = [f.name for f in fields(ParsedPageResult)]
-    assert names == ["page", "ok", "status_code", "parsed", "error"]
+    assert names == ["page", "ok", "status_code", "parsed", "error", "structural"]
     assert ParsedPageResult(page="home", ok=True).status_code is None
 
 
@@ -123,6 +123,27 @@ def test_fetch_parsed_page_reports_connection_errors_but_rethrows_auth_errors():
         fetch_parsed_page(FakeClient(error=session_pool_full_error()), "home")
 
 
+def test_fetch_parsed_page_reports_a_page_level_401_or_403_instead_of_raising():
+    """A 401/403 answered by one page (status_code attached by the client) is that page's failure;
+    a failed login or login-page bounce (no status) still propagates and aborts the caller."""
+    for status in (401, 403):
+        error = RouterAuthError(f"Router rejected https://r/cgi-bin/home.ha with HTTP {status}.")
+        error.status_code = status
+        error.url = "https://r/cgi-bin/home.ha"
+        error.page_level = True
+        result = fetch_parsed_page(FakeClient(error=error), "home")
+        assert result.ok is False and result.page == "home"
+        assert f"HTTP {status}" in (result.error or "")
+
+    # The login handshake attaches the same status on 403 but does not mark it page-level:
+    # that is a failed login and must still propagate.
+    login_failed = RouterAuthError("Router rejected https://r/cgi-bin/login.ha with HTTP 403.")
+    login_failed.status_code = 403
+    login_failed.url = "https://r/cgi-bin/login.ha"
+    with pytest.raises(RouterAuthError):
+        fetch_parsed_page(FakeClient(error=login_failed), "home")
+
+
 def test_parsed_data_count_sums_every_bucket():
     page = ParsedPage(
         page="p",
@@ -140,3 +161,24 @@ def test_parsed_data_count_sums_every_bucket():
     )
     assert parsed_data_count(page) == 2 + 1 + 3 + 1 + 2 + 1 + 2
     assert parsed_data_count(ParsedPage(page="p", title="", heading="")) == 0
+
+
+def test_login_and_page_not_found_answers_are_structural_failures_but_transport_faults_are_not():
+    from bgwcli.errors import RouterConnectionError
+
+    class Getter:
+        def __init__(self, body=None, error=None):
+            self.body, self.error = body, error
+
+        def get_cgi_page(self, page, *, auth=True):
+            if self.error:
+                raise self.error
+            return HttpResponse(200, "OK", {}, self.body, f"https://router.local/cgi-bin/{page}.ha")
+
+    login_body = '<title>Login</title><input name="nonce" value="abc"><input name="password">'
+    missing_body = "<html><head><title>Page not found</title></head><body></body></html>"
+    login = fetch_parsed_page(Getter(login_body), "services")
+    missing = fetch_parsed_page(Getter(missing_body), "services")
+    down = fetch_parsed_page(Getter(error=RouterConnectionError("timed out")), "services")
+    assert [r.ok for r in (login, missing, down)] == [False, False, False]
+    assert [r.structural for r in (login, missing, down)] == [True, True, False]

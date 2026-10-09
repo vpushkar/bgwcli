@@ -48,8 +48,8 @@ def _pack_complete() -> bool:
 PACK_COMPLETE = _pack_complete()
 requires_pack = pytest.mark.skipif(
     not PACK_COMPLETE,
-    reason="router fixture pack not present; capture it with the TS `bun run fixtures:capture` "
-    "(BGW_ACCESS_CODE set) and copy tests/fixtures here",
+    reason="router fixture pack not present; capture it with `bgwcli fixtures-capture` "
+    "(BGW_ACCESS_CODE set; writes tests/fixtures)",
 )
 
 

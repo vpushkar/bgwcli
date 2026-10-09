@@ -113,8 +113,9 @@ def test_build_submit_plan_matches_the_button_by_name_value_or_label_case_insens
     page = parsed("services", SERVICES_HTML)
     assert build_submit_plan("services", page, "add", []).button is not None
     assert build_submit_plan("services", page, "remove_1", []).button is not None
-    # "Remove" (the value) is shared by two buttons; the first in document order wins, as in TS.
-    assert build_submit_plan("services", page, "Remove", []).button.name == "Remove_1"  # type: ignore[union-attr]
+    # "Remove" (the value) is shared by two buttons: the token is ambiguous, so nothing is chosen.
+    with pytest.raises(UsageError, match="Remove_1, Remove_2"):
+        build_submit_plan("services", page, "Remove", [])
 
 
 def test_build_submit_plan_raises_usage_error_for_a_button_the_page_does_not_render():

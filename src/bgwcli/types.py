@@ -3,6 +3,7 @@ JSON output uses the same camelCase keys as the TS CLI via to_json_dict()."""
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field, fields, is_dataclass
 from typing import Any, Literal
 
@@ -15,21 +16,28 @@ def _camel(name: str) -> str:
     return head + "".join(part.capitalize() for part in rest)
 
 
-def to_json_dict(value: Any) -> Any:
-    """Recursively convert dataclasses to dicts with camelCase keys, dropping None values."""
-    if is_dataclass(value) and not isinstance(value, type):
-        out: dict[str, Any] = {}
-        for f in fields(value):
-            v = getattr(value, f.name)
-            if v is None:
-                continue
-            out[_camel(f.name)] = to_json_dict(v)
-        return out
-    if isinstance(value, dict):
-        return {k: to_json_dict(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [to_json_dict(v) for v in value]
-    return value
+def to_json_dict(value: Any, *, null_fields: Iterable[str] = ()) -> Any:
+    """Convert dataclasses to camelCase JSON, respecting private fields and explicit nulls."""
+    keep = frozenset(null_fields)
+
+    def convert(item: Any) -> Any:
+        if is_dataclass(item) and not isinstance(item, type):
+            out: dict[str, Any] = {}
+            for f in fields(item):
+                if not f.metadata.get("serialize", True):
+                    continue
+                v = getattr(item, f.name)
+                if v is None and f.name not in keep:
+                    continue
+                out[_camel(f.name)] = convert(v)
+            return out
+        if isinstance(item, dict):
+            return {k: convert(v) for k, v in item.items()}
+        if isinstance(item, (list, tuple)):
+            return [convert(v) for v in item]
+        return item
+
+    return convert(value)
 
 
 @dataclass(frozen=True)
@@ -64,6 +72,8 @@ class ParsedField:
     sensitive: bool
     disabled: bool | None = None
     read_only: bool | None = None
+    # Live HTML provenance only; old dumps cannot distinguish absent and explicit empty values.
+    _value_omitted: bool = field(default=False, repr=False, compare=False, metadata={"serialize": False})
 
 
 @dataclass(frozen=True)
@@ -143,6 +153,11 @@ class ParsedPage:
     forms: list[ParsedForm] = field(default_factory=list)
     value_entries: list[ParsedValueEntry] | None = None
     links: list[ParsedLink] | None = None
+    # True when a parser bound cut the page: more than 150000 elements (the rest is unread), a table grid
+    # past 250000 cells (its later rows are unread), a colspan/rowspan above 64 (read as 64), tables or
+    # headings nested past 256 (the deeper markup is text), or an element's text past 5000 pieces /
+    # 100000 characters. Nothing past a cut is ever shown unredacted. Absent otherwise.
+    truncated: bool | None = None
 
 
 @dataclass(frozen=True)

@@ -159,6 +159,33 @@ def test_write_dump_file_cleans_up_its_temp_file_when_writing_fails(tmp_path, mo
     assert list(tmp_path.iterdir()) == []
 
 
+def test_write_dump_file_names_the_target_not_the_temp_file_when_the_open_fails(tmp_path, monkeypatch):
+    path = tmp_path / "dump.json"
+
+    def refuse(file, *_args, **_kwargs):
+        raise PermissionError(13, "Permission denied", str(file))
+
+    monkeypatch.setattr(os, "open", refuse)
+    with pytest.raises(PermissionError) as caught:
+        write_dump_file(path, SNAPSHOT)
+    assert str(path) in str(caught.value) and ".tmp" not in str(caught.value)
+    assert caught.value.errno == 13
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_write_dump_file_names_the_target_not_the_temp_file_when_the_rename_fails(tmp_path, monkeypatch):
+    path = tmp_path / "dump.json"
+
+    def refuse(source, _destination):
+        raise OSError(30, "Read-only file system", str(source))
+
+    monkeypatch.setattr(os, "replace", refuse)
+    with pytest.raises(OSError) as caught:
+        write_dump_file(path, SNAPSHOT)
+    assert str(path) in str(caught.value) and ".tmp" not in str(caught.value)
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_read_dump_file_rejects_missing_malformed_and_wrong_schema_files(tmp_path):
     with pytest.raises(DumpFileError, match="Cannot read dump file"):
         read_dump_file(tmp_path / "missing.json")
@@ -301,3 +328,32 @@ def test_read_dump_file_rejects_malformed_form_and_table_sections(tmp_path):
     rejects(tmp_path, lambda d: d["tables"].__setitem__("ipalloc", {"a": "b"}), r"tables\.ipalloc")
     rejects(tmp_path, lambda d: d["tables"].__setitem__("ipalloc", [{"a": 1}]), r"tables\.ipalloc")
     rejects(tmp_path, lambda d: d.__setitem__("tables", 3), "tables must be an object")
+
+
+@pytest.mark.parametrize("ip", ["999.999.999.999", "1.2.3.256", "10.0.0.1\n"])
+def test_read_dump_file_rejects_a_reservation_address_with_an_octet_above_255(tmp_path, ip):
+    path = tmp_path / "octet.json"
+    d = snapshot_to_dict(SNAPSHOT)
+    d["reservations"] = [{"mac": "02:0a:0b:0c:0d:02", "ip": ip}]
+    path.write_text(json.dumps(d))
+    with pytest.raises(DumpFileError, match="invalid reservation entry"):
+        read_dump_file(path)
+
+
+def test_a_dump_with_two_services_of_one_name_does_not_load(tmp_path):
+    import json
+
+    import pytest
+
+    from bgwcli.dumpfile import read_dump_file
+    from bgwcli.errors import DumpFileError
+
+    entry = {"name": "Probe", "extMinPort": 80, "extMaxPort": 80, "intStartPort": 80, "protocol": "TCP"}
+    path = tmp_path / "dup.json"
+    path.write_text(json.dumps({
+        "meta": {"schema": 2, "firmware": "", "ts": "", "routerHost": "r"},
+        "services": [entry, {**entry, "name": "probe", "extMinPort": 81, "extMaxPort": 81, "intStartPort": 81}],
+        "forwards": [], "reservations": [], "forms": {}, "tables": {},
+    }))
+    with pytest.raises(DumpFileError, match="more than once"):
+        read_dump_file(path)

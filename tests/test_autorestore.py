@@ -25,7 +25,7 @@ from bgwcli.snapshot import (
     SnapshotService,
     extract_snapshot,
 )
-from bgwcli.snapshot_diff import EntryDiff, FormFieldDiff, ReservationDiff, SnapshotDiff
+from bgwcli.snapshot_diff import EntryDiff, FormFieldDiff, ReservationDiff, SnapshotDiff, diff_snapshots
 from bgwcli.types import HttpResponse
 
 META = SnapshotMeta(firmware="4.27.7", ts="2026-09-20T00:00:00.000Z", router_host="router.local")
@@ -129,9 +129,9 @@ def test_pages_selection_narrows_the_sections_that_vote():
     assert detect_factory_reset(diff, dump, pages=("services",))[0] is True
 
 
-def test_on_any_diff_flags_any_difference_but_not_identical():
+def test_on_any_diff_flags_any_restorable_difference_but_not_identical():
     dump = dump_snapshot()
-    detected, reason = detect_factory_reset(a_diff(extra_services=[SSH]), dump, on_any_diff=True)
+    detected, reason = detect_factory_reset(a_diff(services_missing=[SSH]), dump, on_any_diff=True)
     assert detected is True and "on-any-diff" in reason
     assert detect_factory_reset(a_diff(), dump, on_any_diff=True) == (False, "no differences")
 
@@ -149,7 +149,7 @@ def test_reset_signature_counts():
 
 
 class FakeRouter:
-    """Records POSTs; pages are served by the fetch_pages fake below, so this only needs post_cgi_page."""
+    """Records POSTs and exposes an empty ownership table; snapshots use the fetcher below."""
 
     def __init__(self):
         self.posts: list[tuple[str, dict[str, str]]] = []
@@ -160,9 +160,25 @@ class FakeRouter:
 
     def post_cgi_page(self, page, fields):
         self.posts.append((page, dict(fields)))
-        return HttpResponse(200, "OK", {}, "<html><title>ok</title></html>", f"https://router.local/cgi-bin/{page}.ha")
+        from integration_html import saved_configuration_html
+        body = saved_configuration_html(page, fields)
+        return HttpResponse(200, "OK", {}, body, f"https://router.local/cgi-bin/{page}.ha")
 
-    def get_cgi_page(self, page, *, auth=True):  # pragma: no cover - deferred forwards only
+    def get_cgi_page(self, page, *, auth=True):
+        if page == "devices":
+            body = (
+                '<html><head><title>Device List</title></head><body><table>'
+                '<tr><th>IPv4 Address / Name</th><th>MAC Address</th><th>Status</th></tr>'
+                '</table><input type="submit" name="Clear" value="Clear and Rescan for Devices"></body></html>'
+            )
+            return HttpResponse(200, "OK", {}, body, "https://router.local/cgi-bin/devices.ha")
+        if page == "ipalloc":
+            body = (
+                '<html><head><title>IP Allocation</title></head><body><table>'
+                '<tr><th>IPv4 Address / Name</th><th>MAC Address</th><th>Status</th><th>Allocation</th></tr>'
+                '</table></body></html>'
+            )
+            return HttpResponse(200, "OK", {}, body, "https://router.local/cgi-bin/ipalloc.ha")
         raise AssertionError("unused")
 
 
@@ -236,7 +252,7 @@ def test_no_reset_when_the_router_matches_the_dump():
     assert result.status == "no-reset" and result.exit_code == 0 and result.detected is False
     assert result.missing == {"services": 0, "forwards": 0, "reservations": 0, "forms": 0}
     assert router.posts == [] and sleeps == [] and router.logins == 1
-    assert fetcher.calls == [("sysinfo", "services", "apphosting", "ipalloc", "packetfilter", "dosprotect", "wconfig", "wconfig_unified")]
+    assert fetcher.calls == [("sysinfo", "services", "apphosting", "ipalloc", "packetfilter", "dosprotect", "wconfig")]
     assert any("no-reset" in line for line in logs)
 
 
@@ -293,6 +309,63 @@ def test_not_converged_after_max_passes():
     assert any("not-converged" in line for line in logs)
 
 
+@pytest.mark.parametrize("restored_after_timeout", [False, True], ids=["still-missing", "now-matching"])
+def test_save_acknowledgement_timeout_stops_all_passes_but_keeps_the_final_read_only_diff(
+    monkeypatch, restored_after_timeout
+):
+    from bgwcli import restore
+
+    class Clock:
+        now = 0.0
+
+        def monotonic(self):
+            return self.now
+
+        def sleep(self, seconds):
+            self.now += seconds
+
+    class UnconfirmedRouter(FakeRouter):
+        def post_cgi_page(self, page, fields):
+            self.posts.append((page, dict(fields)))
+            return HttpResponse(200, "OK", {}, "<p>Processing configuration</p>", f"https://router.local/{page}")
+
+        def get_cgi_page(self, page, **kwargs):
+            return HttpResponse(200, "OK", {}, "<p>Processing configuration</p>", f"https://router.local/{page}")
+
+    clock = Clock()
+    monkeypatch.setattr(restore, "monotonic", clock.monotonic)
+    monkeypatch.setattr(restore, "sleep", clock.sleep)
+    monkeypatch.setattr(restore, "SAVE_CONFIRMATION_TIMEOUT_SECONDS", 3.0)
+    monkeypatch.setattr(restore, "SAVE_CONFIRMATION_POLL_SECONDS", 1.0)
+    router = UnconfirmedRouter()
+    after = full_pages() if restored_after_timeout else reset_pages()
+    fetcher = Fetcher(reset_pages(), after)
+    between_pass_sleeps = []
+    logs = []
+
+    result = run_autorestore(
+        lambda: (router, False),
+        make_dump(),
+        AutorestoreOptions(commit=True, max_passes=3, wait_seconds=7, pages=("services",)),
+        fetch_pages=fetcher,
+        sleep=between_pass_sleeps.append,
+        log=logs.append,
+    )
+
+    # The Save was sent and its reply never carried "Changes saved": no answer, whatever the closing diff shows.
+    assert result.status == "error" and result.exit_code == 2 and result.write_unanswered is True
+    assert len(result.passes) == 1
+    assert result.passes[0]["failed"] == 1 and result.passes[0]["stoppedAt"] == 1
+    assert result.passes[0]["converged"] is False
+    assert len(router.posts) == 1  # The uncertain Add must never be automatically repeated.
+    assert between_pass_sleeps == []
+    assert len(fetcher.calls) == 2  # Detection read plus the final read-only verification.
+    assert result.final_diff is not None
+    assert result.final_diff.identical is restored_after_timeout
+    assert "Changes saved" in result.reason
+    assert any("Changes saved" in line for line in logs)
+
+
 def test_router_unreachable_at_login_is_quiet_and_exit_0():
     router = FakeRouter()
 
@@ -304,6 +377,22 @@ def test_router_unreachable_at_login_is_quiet_and_exit_0():
     assert result.status == "router-unreachable" and result.exit_code == 0
     assert result.reason == "connect EHOSTUNREACH" and router.posts == []
     assert logs == ["router-unreachable: connect EHOSTUNREACH"]
+
+
+def test_router_http_error_at_login_is_router_unreachable():
+    """An HTTP error status from the login handshake or a page fetch (gateway web UI half-up)
+    before any POST is the same quiet "router-unreachable" outcome as a refused connection."""
+    from bgwcli.client import RouterResponseError
+
+    router = FakeRouter()
+
+    def factory():
+        raise RouterResponseError("Router rejected https://gw/cgi-bin/login.ha with HTTP 500.", status_code=500)
+
+    logs: list[str] = []
+    result = run_autorestore(factory, make_dump(), AutorestoreOptions(commit=True), fetch_pages=Fetcher(), sleep=_no_sleep, log=logs.append)
+    assert result.status == "router-unreachable" and result.exit_code == 0 and router.posts == []
+    assert logs == ["router-unreachable: Router rejected https://gw/cgi-bin/login.ha with HTTP 500."]
 
 
 def test_page_fetch_failures_before_any_post_are_router_unreachable():
@@ -323,15 +412,55 @@ def test_page_fetch_failure_after_a_post_is_an_error():
     assert router.posts and sleeps == [] and "apphosting" in result.reason
 
 
-def test_used_fallback_code_alone_counts_as_a_reset_signal():
+def _drift_pages():
+    drift = full_pages()
+    drift["services"] = services_page(rows=[("custom_ssh", "2483-2483", "22", "TCP")])
+    return drift
+
+
+@pytest.mark.parametrize("pages", [full_pages, _drift_pages], ids=["matching", "ordinary-drift"])
+@pytest.mark.parametrize("commit", [False, True])
+def test_used_fallback_code_alone_never_turns_ordinary_drift_into_a_reset(pages, commit):
+    """The sticker code also works when someone simply set the access code back by hand: without a
+    reset-shaped diff (or an unfinished recovery) the run leaves the router alone and warns."""
     router = FakeRouter()
     logs: list[str] = []
     result = run_autorestore(
-        lambda: (router, True), make_dump(), AutorestoreOptions(commit=False), fetch_pages=Fetcher(full_pages()), sleep=_no_sleep, log=logs.append
+        lambda: (router, True), make_dump(), AutorestoreOptions(commit=commit), fetch_pages=Fetcher(pages()),
+        sleep=_no_sleep, log=logs.append,
     )
-    assert result.used_fallback_code is True and result.detected is True
-    assert result.status == "restore-needed" and result.exit_code == 1
+    assert result.used_fallback_code is True and result.detected is False
+    assert result.status == "no-reset" and result.exit_code == 0 and router.posts == []
+    assert len(result.warnings) == 1 and "BGW_ACCESS_CODE" in result.warnings[0]
+    assert result_output(result)["warnings"] == result.warnings
+    assert any(line.startswith("warning: ") for line in logs)
+
+
+def test_used_fallback_code_with_a_reset_shaped_diff_names_the_access_code_reversal():
+    router = FakeRouter()
+    logs: list[str] = []
+    result = run_autorestore(
+        lambda: (router, True), make_dump(), AutorestoreOptions(commit=False), fetch_pages=Fetcher(reset_pages()),
+        sleep=_no_sleep, log=logs.append,
+    )
+    assert result.detected is True and result.status == "restore-needed" and result.exit_code == 1
+    assert result.reason.startswith("access code reverted; factory reset suspected; ")
+    assert result.warnings == []
     assert "access code reverted; factory reset suspected" in logs
+
+
+def test_used_fallback_code_during_an_unfinished_recovery_resumes_it(tmp_path):
+    from bgwcli.recovery_state import RecoveryCheckpoint
+
+    store = RecoveryCheckpoint("router.local", make_dump(), None, root=tmp_path / "recovery")
+    store.begin()
+    router = FakeRouter()
+    result = run_autorestore(
+        lambda: (router, True), make_dump(), AutorestoreOptions(commit=False), fetch_pages=Fetcher(_drift_pages()),
+        sleep=_no_sleep, log=lambda _: None, checkpoint=store,
+    )
+    assert result.detected is True and result.status == "restore-needed"
+    assert "resuming unfinished recovery" in result.reason
 
 
 def test_on_any_diff_option_restores_ordinary_drift():
@@ -368,3 +497,349 @@ def test_result_output_shape_is_json_friendly():
     assert payload["diff"]["identical"] is True
     assert "finalDiff" not in payload and "plan" in payload
     assert replace(result, final_diff=None).final_diff is None
+
+
+def test_autorestore_pool_metadata_stays_paired_with_the_reported_failure():
+    from bgwcli.client import session_pool_full_error
+
+    class PoolRouter(FakeRouter):
+        def post_cgi_page(self, page, fields):
+            if self.posts:
+                raise session_pool_full_error(waited_ms=2300, retry_count=4)
+            return super().post_cgi_page(page, fields)
+
+    router = PoolRouter()
+    fetcher = Fetcher(reset_pages(), full_pages())
+    result = run_autorestore(
+        lambda: (router, False), make_dump(),
+        AutorestoreOptions(commit=True, max_passes=3, pages=("services",)),
+        fetch_pages=fetcher, sleep=_no_sleep, log=lambda _: None,
+    )
+    assert len(fetcher.calls) == 1, "no closing read (a second login) against a full pool"
+    # A write that may have gone out and met a full pool got no answer: exit 2 either way.
+    assert result.status == "error" and result.exit_code == 2
+    assert result.write_unanswered is True
+    assert len(result.passes) == 1 and result.passes[0]["applied"] == 1
+    assert result.session_pool_full is True
+    assert (result.waited_ms, result.retry_count) == (2300, 4)
+    failed = result.passes[0]["steps"][1]
+    assert failed["status"] == "failed" and failed["sessionPoolFull"] is True
+    assert (failed["waitedMs"], failed["retryCount"]) == (2300, 4)
+
+
+@pytest.mark.parametrize("fault", ["http", "timeout"])
+def test_allocation_preflight_read_failure_before_any_write_is_router_unreachable(fault):
+    from bgwcli.client import RouterResponseError
+
+    class Router(FakeRouter):
+        def get_cgi_page(self, page, *, auth=True):
+            if page == "devices":
+                if fault == "http":
+                    raise RouterResponseError(
+                        "Router rejected https://router.local/cgi-bin/devices.ha with HTTP 503.", status_code=503, url="x"
+                    )
+                raise RouterConnectionError("Timed out reading response from devices.ha")
+            return super().get_cgi_page(page, auth=auth)
+
+    router = Router()
+    result = run_autorestore(
+        lambda: (router, False), make_dump(), AutorestoreOptions(commit=True, max_passes=1),
+        fetch_pages=Fetcher(reset_pages()), sleep=lambda _: None, log=lambda _: None,
+    )
+    assert router.posts == []
+    assert result.status == "router-unreachable" and result.exit_code == 0
+    assert "allocation preflight failed" in (result.reason or "")
+
+
+# ---------------------------------------------------------------------------------------------
+# differences restore cannot act on never look like a reset
+
+
+def _live_only_select_pages():
+    pages = full_pages()
+    pages["dosprotect"] = dosprotect_page(
+        selects=[
+            select("flood_protect", [("on", "On", True), ("off", "Off")]),
+            select("newfw_opt", [("a", "A", True), ("b", "B")]),
+        ]
+    )
+    return pages
+
+
+def test_a_live_only_control_neither_votes_for_a_reset_nor_triggers_on_any_diff():
+    base = make_dump()
+    dump = replace(base, services=[], forwards=[], reservations=[], forms={"dosprotect": base.forms["dosprotect"]})
+    diff = diff_snapshots(dump, extract_snapshot(_live_only_select_pages(), ts="", router_host=""))
+    assert not diff.identical
+    assert ResetSignature.from_diff(diff, dump).missing["forms"] == 0
+    for on_any_diff in (False, True):
+        detected, reason = detect_factory_reset(diff, dump, on_any_diff=on_any_diff)
+        assert detected is False, reason
+        assert reason == "nothing restore can act on differs"
+
+
+def test_router_only_entries_do_not_trigger_on_any_diff():
+    # autorestore never prunes, so a router-only entry is nothing it can act on.
+    detected, reason = detect_factory_reset(a_diff(extra_services=[SSH]), dump_snapshot(), on_any_diff=True)
+    assert (detected, reason) == (False, "nothing restore can act on differs")
+
+
+def test_autorestore_with_only_a_live_only_control_is_no_reset_and_posts_nothing(tmp_path, monkeypatch):
+    from save_helpers import install_clock
+
+    from bgwcli.recovery_state import RecoveryCheckpoint
+
+    install_clock(monkeypatch)
+    base = make_dump()
+    dump = replace(base, services=[], forwards=[], reservations=[], forms={"dosprotect": base.forms["dosprotect"]})
+    checkpoint = RecoveryCheckpoint("http://router.local", dump, None, root=tmp_path / "state")
+    for commit, on_any_diff in ((False, False), (True, False), (True, True), (True, False)):
+        router = FakeRouter()
+        result = run_autorestore(
+            lambda router=router: (router, False),
+            dump,
+            AutorestoreOptions(commit=commit, max_passes=3, wait_seconds=1, on_any_diff=on_any_diff),
+            fetch_pages=Fetcher(_live_only_select_pages()),
+            sleep=lambda s: None,
+            log=lambda line: None,
+            checkpoint=checkpoint,
+        )
+        assert (result.status, result.exit_code, len(router.posts)) == ("no-reset", 0, 0)
+        assert not checkpoint.is_active()
+
+
+# ---------------------------------------------------------------------------------------------
+# an acknowledged write is never re-posted within one invocation
+
+
+def _posted_entries(router):
+    from collections import Counter
+
+    def entry(page, fields):
+        if page == "services":
+            return (page, fields.get("Service"))
+        if page == "apphosting":
+            return (page, fields.get("service"))
+        return (page, None)
+
+    return Counter(entry(page, fields) for page, fields in router.posts)
+
+
+def test_acknowledged_writes_that_never_take_effect_are_posted_once_across_all_passes():
+    """The gateway answers every Save with its saved-configuration page but the values never stick:
+    pass 1 posts each step once; passes 2 and 3 only re-verify (and retry nothing never posted)."""
+    fetcher = Fetcher(reset_pages())
+    result, router, sleeps, logs = harness(fetcher, AutorestoreOptions(commit=True, max_passes=3, wait_seconds=5))
+    assert result.status == "not-converged" and result.exit_code == 1
+    # Nothing is sent in pass 2, so there is nothing for the gateway to settle before pass 3.
+    assert len(result.passes) == 3 and sleeps == [5]
+    posted = _posted_entries(router)
+    assert posted and set(posted.values()) == {1}, posted
+    assert {page for page, _ in posted} == {"services", "apphosting", "dosprotect"}
+    assert [p["applied"] for p in result.passes] == [result.passes[0]["applied"], 0, 0]
+    assert result.passes[0]["applied"] >= 3
+    later = [step for p in result.passes[1:] for step in p["steps"] if step["page"] not in ("ipalloc", "packetfilter")]
+    assert later and all(step["status"] == "skipped" for step in later)
+    assert all("not re-posted" in step["description"] for step in later)
+    assert "the next timer run will retry" in result.reason
+
+
+def test_a_step_blocked_in_pass_one_is_retried_in_a_later_pass_but_applied_ones_are_not():
+    no_save = reset_pages()
+    no_save["dosprotect"] = dosprotect_page(
+        selects=[select("flood_protect", [("on", "On"), ("off", "Off", True)])], save_button=None
+    )
+    fetcher = Fetcher(no_save, reset_pages(), full_pages())
+    result, router, sleeps, _ = harness(fetcher, AutorestoreOptions(commit=True, max_passes=3, wait_seconds=5))
+    assert result.status == "converged" and len(result.passes) == 2
+    posted = _posted_entries(router)
+    assert set(posted.values()) == {1}, posted
+    assert ("dosprotect", None) in posted
+    pass_one = {s["page"]: s["status"] for s in result.passes[0]["steps"] if s["kind"] == "form"}
+    pass_two = {s["page"]: s["status"] for s in result.passes[1]["steps"] if s["kind"] == "form"}
+    assert pass_one["dosprotect"] == "blocked" and pass_two["dosprotect"] == "applied"
+
+
+# --- a configuration write with no answer is exit 2, even when the closing diff is readable ---------
+
+
+def _dosprotect_autorestore(tmp_env, monkeypatch, capsys, post_reply):
+    import json
+
+    from save_helpers import client_with, form, html
+
+    from bgwcli import autorestore, cli
+    from bgwcli.dumpfile import write_dump_file
+
+    dump = Snapshot(SnapshotMeta("", "", "router.local"), forms={"dosprotect": {"setting": "new"}})
+    path = tmp_env / "baseline.json"
+    write_dump_file(path, dump)
+    state = {"posted": False}
+
+    def handler(request, _number):
+        if request.method == "POST":
+            state["posted"] = True
+            return post_reply(html)
+        return html(form("dosprotect", "old", banner=state.pop("banner", "")))
+
+    client, wire = client_with(handler)
+    monkeypatch.setattr(cli, "_client_factory", lambda *a, **k: client)
+    monkeypatch.setattr(autorestore, "_sleep", lambda _: None)
+    code = cli.main(
+        ["autorestore", str(path), "--include", "dosprotect", "--commit", "--confirm", "RESTORE", "--json"]
+    )
+    output = json.loads(capsys.readouterr().out)
+    posts = sum(r.method == "POST" for r in wire.requests)
+    return code, output, posts
+
+
+def _raise(error):
+    def reply(_html):
+        raise error
+
+    return reply
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["timeout", "http-503", "login-redirect", "pool-full"],
+)
+def test_autorestore_unanswered_write_is_an_error_even_with_a_readable_closing_diff(
+    tmp_env, monkeypatch, capsys, clock, case
+):
+    replies = {
+        "timeout": _raise(TimeoutError("synthetic config timeout")),
+        "http-503": lambda html: html("busy", 503),
+        "login-redirect": lambda html: html("", 302, {"location": "/cgi-bin/login.ha"}),
+        "pool-full": lambda html: html("<title>Login</title><p>All web server sessions are in use</p>"),
+    }
+    code, output, posts = _dosprotect_autorestore(tmp_env, monkeypatch, capsys, replies[case])
+    assert code == 2 and output["exitCode"] == 2
+    assert output["status"] == "error"
+    assert output["writeUnanswered"] is True
+    assert "dosprotect" in output["reason"] and "no answer" in output["reason"]
+    assert posts == 1
+
+
+def test_autorestore_explicit_rejection_stays_not_converged_exit_1(tmp_env, monkeypatch, capsys, clock):
+    from save_helpers import ERROR
+
+    def rejected(html):
+        return html(ERROR + "<p>rejected</p>")
+
+    code, output, posts = _dosprotect_autorestore(tmp_env, monkeypatch, capsys, rejected)
+    assert code == 1 and output["status"] == "not-converged"
+    assert output["writeUnanswered"] is False
+    assert posts == 1
+
+
+def test_unanswered_write_step_classifies_step_outcomes():
+    from bgwcli.autorestore import unanswered_write_step
+    from bgwcli.restore import WRITE_REJECTED_PREFIX, RestoreStepResult
+
+    def step(**fields):
+        base = {"order": 1, "page": "dosprotect", "kind": "form", "description": "dosprotect", "status": "failed"}
+        return RestoreStepResult(**{**base, **fields})
+
+    timeout = step(write_attempted=True, write_response_received=False, error_type="RouterConnectionError")
+    verification_lost = step(write_attempted=True, write_response_received=True, error_type="RouterResponseError")
+    unknown = step(write_attempted=None, error_type="RouterConnectionError")
+    unexpected_status = step(write_attempted=True, write_response_received=True, status_code=500)
+    rejected = step(write_attempted=True, write_response_received=True, status_code=302,
+                    error=f"{WRITE_REJECTED_PREFIX}bad value")
+    no_change = step(write_attempted=True, write_response_received=True, write_performed=False, status_code=302)
+    saved_mismatch = step(write_attempted=True, write_response_received=True, write_performed=True,
+                          acknowledgement_observed=True, status_code=302)
+    never_sent = step(write_attempted=False, error_type="RouterConnectionError")
+    applied = step(status="applied", write_attempted=True, write_response_received=True)
+    for answered in (rejected, no_change, saved_mismatch, never_sent, applied):
+        assert unanswered_write_step([answered]) is None
+    for lost in (timeout, verification_lost, unknown, unexpected_status):
+        assert unanswered_write_step([applied, lost]) is lost
+
+
+def _canned_execution(monkeypatch, **step_fields):
+    from bgwcli import autorestore
+    from bgwcli.restore import RestoreExecution, RestoreStepResult
+
+    base = {"order": 1, "page": "dosprotect", "kind": "form", "description": "dosprotect", "status": "failed"}
+
+    def execute(client, steps, on_step=None):
+        return RestoreExecution(steps=[RestoreStepResult(**{**base, **step_fields})], stopped_at=1)
+
+    monkeypatch.setattr(autorestore, "execute_restore", execute)
+
+
+def test_an_unanswered_lan_move_write_counts_toward_the_limit(tmp_path, monkeypatch):
+    from bgwcli.recovery_state import RecoveryCheckpoint
+
+    _canned_execution(
+        monkeypatch, status="reconnect-required", write_attempted=True, write_response_received=False,
+        lan_address_changed=True, error="connection lost",
+    )
+    store = RecoveryCheckpoint("router.local", make_dump(), None, root=tmp_path / "recovery")
+    for expected in (1, 2):
+        result = run_autorestore(
+            lambda: (FakeRouter(), False), make_dump(), AutorestoreOptions(commit=True, max_passes=2),
+            fetch_pages=Fetcher(reset_pages()), sleep=_no_sleep, log=lambda _: None, checkpoint=store,
+        )
+        assert result.status == "error" and store.failure_count() == expected
+    stopped = run_autorestore(
+        lambda: (FakeRouter(), False), make_dump(), AutorestoreOptions(commit=True, max_passes=2),
+        fetch_pages=Fetcher(reset_pages()), sleep=_no_sleep, log=lambda _: None, checkpoint=store,
+    )
+    assert stopped.status == "error" and "consecutive runs" in stopped.reason and store.failure_count() == 3
+
+
+def test_an_acknowledged_lan_move_reconnect_never_counts_toward_the_limit(tmp_path, monkeypatch):
+    from bgwcli.recovery_state import RecoveryCheckpoint
+
+    _canned_execution(
+        monkeypatch, status="reconnect-required", write_attempted=True, write_response_received=True,
+        lan_address_changed=True, reconnect_address="192.168.2.254", error="reconnect",
+    )
+    store = RecoveryCheckpoint("router.local", make_dump(), None, root=tmp_path / "recovery")
+    for _ in range(4):
+        result = run_autorestore(
+            lambda: (FakeRouter(), False), make_dump(), AutorestoreOptions(commit=True, max_passes=2),
+            fetch_pages=Fetcher(reset_pages()), sleep=_no_sleep, log=lambda _: None, checkpoint=store,
+        )
+        assert result.status == "error" and "consecutive runs" not in result.reason
+        assert store.failure_count() == 0 and store.is_active(), "the intent is left, uncounted"
+
+
+def test_pool_full_before_any_write_is_not_an_unanswered_write(monkeypatch):
+    _canned_execution(monkeypatch, write_attempted=False, session_pool_full=True, error="all sessions in use")
+    result = run_autorestore(
+        lambda: (FakeRouter(), False), make_dump(), AutorestoreOptions(commit=True, max_passes=2),
+        fetch_pages=Fetcher(reset_pages()), sleep=_no_sleep, log=lambda _: None,
+    )
+    assert result.write_unanswered is False and result.session_pool_full is True
+    assert result.status == "error" and result.exit_code == 2
+    assert "before the dosprotect write was sent" in result.reason
+
+
+def test_a_pass_that_sent_nothing_does_not_wait_before_the_next_pass(monkeypatch):
+    _canned_execution(monkeypatch, status="blocked", write_attempted=False, error="needs the UI")
+    sleeps: list[int] = []
+    result = run_autorestore(
+        lambda: (FakeRouter(), False), make_dump(), AutorestoreOptions(commit=True, max_passes=3, wait_seconds=9),
+        fetch_pages=Fetcher(reset_pages()), sleep=sleeps.append, log=lambda _: None,
+    )
+    assert result.status == "not-converged" and sleeps == []
+
+
+@pytest.mark.parametrize("structural, status, code", [(True, "error", 2), (False, "router-unreachable", 0)])
+def test_structural_fetch_failures_are_errors_but_transport_failures_stay_unreachable(structural, status, code):
+    def fetch(client, pages):
+        parsed = {p: page for p, page in full_pages().items() if p in pages and p != "services"}
+        return parsed, [ParsedPageResult("services", False, error="no services table", structural=structural)]
+
+    router = FakeRouter()
+    logs: list[str] = []
+    result = run_autorestore(
+        lambda: (router, False), make_dump(), AutorestoreOptions(commit=True),
+        fetch_pages=fetch, sleep=_no_sleep, log=logs.append,
+    )
+    assert (result.status, result.exit_code) == (status, code) and router.posts == []
+    assert logs == [f"{status}: services: no services table"]

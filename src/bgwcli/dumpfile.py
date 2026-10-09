@@ -8,6 +8,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import stat
 import uuid
 from collections.abc import Mapping
 from datetime import datetime, timezone
@@ -39,11 +40,13 @@ def default_dump_path(now: datetime | None = None) -> Path:
 
 
 # --- JSON shape -----------------------------------------------------------------------------------
-# Key names and order are the TS object literal order; both CLIs must produce byte-identical files.
+# Key names and order are the TS object literal order, so both CLIs produce byte-identical files
+# for the same router, except that this CLI adds `formSecrets` when a form page has password-type
+# controls (the TS CLI ignores the key on read and never writes it).
 
 
 def snapshot_to_dict(snapshot: Snapshot) -> dict[str, Any]:
-    return {
+    value = {
         "meta": {
             "schema": snapshot.meta.schema,
             "firmware": snapshot.meta.firmware,
@@ -67,6 +70,18 @@ def snapshot_to_dict(snapshot: Snapshot) -> dict[str, Any]:
         "forms": {page: dict(form) for page, form in snapshot.forms.items()},
         "tables": {page: [dict(row) for row in rows] for page, rows in snapshot.tables.items()},
     }
+    # Only dumps of pages with password-type controls carry this key; every other dump keeps the
+    # original schema-2 shape. Older readers ignore it (the loader never rejected unknown keys).
+    secrets = {page: list(names) for page, names in snapshot.form_secrets.items() if names}
+    if secrets:
+        value["formSecrets"] = secrets
+    # Only pages with a text/select field whose real value is the string "<unchecked>" carry a
+    # record naming those fields; every other "<unchecked>" in a dump is an off checkbox/radio.
+    # Absent in every other dump, and a dump without it is read as it always was.
+    literal = {page: list(names) for page, names in snapshot.form_unchecked_text.items() if names}
+    if literal:
+        value["formUncheckedText"] = literal
+    return value
 
 
 def snapshot_from_dict(value: Mapping[str, Any]) -> Snapshot:
@@ -91,7 +106,14 @@ def snapshot_from_dict(value: Mapping[str, Any]) -> Snapshot:
         reservations=[SnapshotReservation(mac=r["mac"], ip=r["ip"]) for r in value["reservations"]],
         forms={page: dict(form) for page, form in value["forms"].items()},
         tables={page: [dict(row) for row in rows] for page, rows in value["tables"].items()},
+        form_secrets={page: list(names) for page, names in value.get("formSecrets", {}).items()},
+        form_unchecked_text={page: list(names) for page, names in value.get("formUncheckedText", {}).items()},
     )
+
+
+def snapshot_problem(snapshot: Snapshot) -> str | None:
+    """Why the loader would refuse this snapshot once written (None when it would read it back)."""
+    return _snapshot_problem(snapshot_to_dict(snapshot))
 
 
 def dump_json_text(snapshot: Snapshot) -> str:
@@ -112,30 +134,111 @@ def _missing_path_components(target: Path) -> list[Path]:
     return components
 
 
+def preflight_dump_target(path: str | os.PathLike[str]) -> None:
+    """Refuse a dump target the write could never complete, before anything is read or created.
+
+    Checked with lstat (the final component is never followed): an existing directory, a symlink, a
+    file owned by another user and any other non-regular entry are refused, as is a path whose nearest
+    existing ancestor is not a directory. A missing target under a creatable directory chain passes.
+    Nothing is created. The messages name the path as given."""
+    shown = str(path)
+    target = Path(path)
+    through_file = NotADirectoryError(
+        f"Output path runs through a file, not a directory; nothing was written: {shown}"
+    )
+    try:
+        info = os.lstat(target)
+    except FileNotFoundError:
+        missing = _missing_path_components(target.parent)
+        nearest = missing[0].parent if missing else target.parent
+        try:
+            ancestor_is_dir = stat.S_ISDIR(os.stat(nearest).st_mode)
+        except OSError:
+            return  # an unreadable ancestor: the write itself reports it
+        if not ancestor_is_dir:
+            raise through_file from None
+        _require_writable_directory(nearest, shown)
+        return
+    except NotADirectoryError:
+        raise through_file from None
+    mode = info.st_mode
+    if stat.S_ISDIR(mode):
+        raise IsADirectoryError(f"Output path is a directory, not a dump file; nothing was written: {shown}")
+    if stat.S_ISLNK(mode):
+        raise PermissionError(
+            f"Output path is a symlink; refusing to write through it; nothing was written: {shown}"
+        )
+    if not stat.S_ISREG(mode):
+        raise PermissionError(f"Output path is not a regular file; nothing was written: {shown}")
+    if info.st_uid != os.getuid():
+        raise PermissionError(f"Output file is owned by another user; nothing was written: {shown}")
+    _require_writable_directory(target.parent, shown)
+
+
+def _require_writable_directory(directory: Path, shown: str) -> None:
+    """The write creates and renames a file in `directory` (or, for a missing chain, the nearest
+    existing ancestor), so it must be writable and searchable."""
+    if not os.access(directory, os.W_OK | os.X_OK):
+        raise PermissionError(f"Output directory is not writable; nothing was written: {shown}")
+
+
+def _naming_target(exc: OSError, path: str | os.PathLike[str]) -> OSError:
+    """The same error class, naming the user's target instead of the internal temporary file."""
+    reason = exc.strerror or str(exc)
+    if exc.errno is None:
+        return type(exc)(f"{reason}: '{path}'")
+    return type(exc)(exc.errno, reason, str(path))
+
+
 def write_dump_file(path: str | os.PathLike[str], snapshot: Snapshot) -> None:
+    preflight_dump_target(path)
     target = Path(path)
     directory = target.parent
-    # Only directories this call creates are locked down to 0700; pre-existing ones keep their mode.
-    missing = _missing_path_components(directory)
-    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    for component in missing:
-        os.chmod(component, 0o700)
+    # Only directories this call itself creates are locked down to 0700 and cleaned up on failure.
+    # A component that appears between the scan and its mkdir was made by someone else: it is not
+    # ours, so it keeps its mode and is never removed.
+    created: list[Path] = []
     temporary = target.with_name(f"{target.name}.{os.getpid()}.{uuid.uuid4()}.tmp")
     fd: int | None = None
     try:
-        fd = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            fd = None  # now owned by the file object
-            handle.write(dump_json_text(snapshot))
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, target)
+        try:
+            for component in _missing_path_components(directory):
+                try:
+                    component.mkdir(mode=0o700)
+                except FileExistsError:
+                    continue
+                created.append(component)
+            for component in created:
+                os.chmod(component, 0o700)
+        except OSError as exc:
+            raise _naming_target(exc, path) from None
+        try:
+            fd = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except OSError as exc:
+            raise _naming_target(exc, path) from None
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                fd = None  # now owned by the file object
+                handle.write(dump_json_text(snapshot))
+                handle.flush()
+                os.fsync(handle.fileno())
+        except OSError as exc:
+            raise _naming_target(exc, path) from None
+        try:
+            os.replace(temporary, target)
+        except OSError as exc:
+            raise _naming_target(exc, path) from None
         os.chmod(target, 0o600)
     except BaseException:
         if fd is not None:
             os.close(fd)
         with contextlib.suppress(OSError):
             os.unlink(temporary)
+        # Leave no empty directory chain behind: remove only what this call created, deepest first.
+        # rmdir refuses a non-empty directory, so anything that appeared in the meantime is kept.
+        for component in reversed(created):
+            with contextlib.suppress(OSError):
+                component.rmdir()
         raise
 
 
@@ -227,6 +330,13 @@ def _snapshot_problem(value: Any) -> str | None:
     for entry in services:
         if not _is_service(entry):
             return f"invalid service entry ({_json_compact(entry)})"
+    seen_names: set[str] = set()
+    for entry in services:
+        name = entry["name"].strip().casefold()
+        if name in seen_names:
+            # The gateway keys services by name; restoring two of one name would add a second service.
+            return f"service name '{name}' appears more than once"
+        seen_names.add(name)
     forwards = value.get("forwards")
     if not isinstance(forwards, list):
         return "forwards must be an array"
@@ -247,6 +357,20 @@ def _snapshot_problem(value: Any) -> str | None:
     for page, rows in tables.items():
         if not isinstance(rows, list) or not all(_is_string_map(row) for row in rows):
             return f"tables.{page} must be an array of string-valued rows"
+    # Optional (absent in dumps without password-type controls); when present it decides what
+    # diff/restore redact, so a malformed one is refused rather than ignored.
+    secrets = value.get("formSecrets", {})
+    if not _is_record(secrets):
+        return "formSecrets must be an object"
+    for page, names in secrets.items():
+        if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
+            return f"formSecrets.{page} must be an array of field names"
+    literal = value.get("formUncheckedText", {})
+    if not _is_record(literal):
+        return "formUncheckedText must be an object"
+    for page, names in literal.items():
+        if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
+            return f"formUncheckedText.{page} must be an array of field names"
     return None
 
 

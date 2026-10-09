@@ -37,8 +37,9 @@ def test_restorable_pages_are_the_three_sections_plus_every_form_page():
 
 def test_resolve_include_for_diff_and_restore():
     assert resolve_include(None) is None
-    assert resolve_include("") is None
-    assert resolve_include([]) is None
+    for empty in ("", [], " , "):
+        with pytest.raises(UsageError):
+            resolve_include(empty)
     assert resolve_include("all") is None and resolve_include(["ALL"]) is None
     assert resolve_include("dhcpserver,services") == ("services", "dhcpserver")  # RESTORABLE_PAGES order
     assert resolve_include(["ipalloc", "wconfig", "ipalloc"]) == ("ipalloc", "wconfig")
@@ -214,3 +215,15 @@ def test_identical_reservations_keep_the_diff_identical():
     diff = diff_snapshots(snap(), snap())
     assert diff.reservations == ReservationDiff(missing=[], changed=[], extra=[])
     assert diff.identical is True
+
+
+def test_a_live_page_that_rendered_no_controls_never_counts_as_unrendered_fields():
+    from bgwcli.snapshot import LiveFormEvidence
+
+    dump = snap(forms={"wconfig": {"ssidname11": "Recovered"}})
+    live = snap(forms={"wconfig": {}})
+    live = replace(live, live_form_evidence={"wconfig": LiveFormEvidence()})
+    change = diff_snapshots(dump, live, pages=["wconfig"]).forms["wconfig"][0]
+    assert change.live_unrendered is False
+    live = replace(live, live_form_evidence={"wconfig": LiveFormEvidence(rendered_names=frozenset({"other"}))})
+    assert diff_snapshots(dump, live, pages=["wconfig"]).forms["wconfig"][0].live_unrendered is True
