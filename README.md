@@ -14,17 +14,43 @@ including a Raspberry Pi. The installer below installs [uv](https://docs.astral.
 gives `bgwcli` its own isolated environment on the system Python when it is 3.10 or newer; when it is
 older, uv fetches a Python (set `BGWCLI_PYTHON=3.12` to pick a version either way).
 
-**One line, any Mac or Linux box:**
+**Install (uv tool), any Mac or Linux box:**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vpushkar/bgwcli/main/install.sh | sh
 ```
 
-Re-run the same line to upgrade. It prints the PATH line to add if `~/.local/bin` is not on your PATH yet.
+**Upgrade** the uv-tool install, same line:
 
-**Single-file executable instead:** `curl -fsSL https://raw.githubusercontent.com/vpushkar/bgwcli/main/install.sh | sh -s binary` (or `sh install.sh binary` from a clone) builds `~/.local/bin/bgwcli` as one self-contained executable with [PyInstaller](https://pyinstaller.org/) on the machine it runs on, without uv and with nothing downloaded but PyInstaller: it uses a Python already on the machine (the default `python3` first, then the other installed `python3.x`; bgwcli needs 3.10 or newer, and pip checks PyInstaller's own supported-version metadata, so an interpreter too new for the current PyInstaller is skipped for the next one; `BGWCLI_PYTHON=3.12` names one), installs PyInstaller into a throwaway venv under a temporary directory, builds, and deletes the directory, so the executable, with its Python embedded, is the only thing that stays. When no installed Python works it stops and says what is missing (3.10+, PyInstaller support, `python -m venv`) instead of fetching anything. The file runs only on the OS and CPU it was built on (build once per machine type), is about 10 MB, and starts in roughly half a second because it unpacks itself on every run, so it suits a machine you copy one file to rather than scripted bursts or the autorestore timer. It removes a uv-tool install of bgwcli so only one `bgwcli` is on your PATH. Upgrading the executable is the same `sh -s binary` line again: it fetches the current `main`, rebuilds, and replaces the file in place (there is no in-place update; the executable never checks for a newer version itself). Switching back to the uv-tool install is the plain installer line, which replaces the executable with the tool's symlink. Everything else (session cache, dumps, config paths, exit codes) is identical between the two.
+```bash
+curl -fsSL https://raw.githubusercontent.com/vpushkar/bgwcli/main/install.sh | sh
+```
 
-Removing it: `curl -fsSL https://raw.githubusercontent.com/vpushkar/bgwcli/main/install.sh | sh -s uninstall` (or `sh install.sh uninstall` from a clone) runs `uv tool uninstall bgwcli` when `uv` is on your PATH (otherwise it names the pipx and pip equivalents), removes the single-file executable at `~/.local/bin/bgwcli` when that is what is installed, then prints the per-user state paths (session cache, state and dump directories, autorestore timer files, the baseline dump) marked present or absent, and deletes none of them. If you deployed the autorestore timer, remove it first as `deploy/README.md` ("Removing it") describes.
+It prints the PATH line to add if `~/.local/bin` is not on your PATH yet.
+
+**Install as a single-file executable instead** (built on this machine with [PyInstaller](https://pyinstaller.org/), no uv):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vpushkar/bgwcli/main/install.sh | sh -s binary
+```
+
+**Upgrade** the executable, same line (it fetches the current `main`, rebuilds, and replaces the file; the executable never checks for a newer version itself):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vpushkar/bgwcli/main/install.sh | sh -s binary
+```
+
+**Uninstall** either flavour:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vpushkar/bgwcli/main/install.sh | sh -s uninstall
+```
+
+From a clone the same three are `sh install.sh`, `sh install.sh binary` and `sh install.sh uninstall`.
+
+How the executable is built: the installer uses a Python already on the machine (the default `python3` first, then the other installed `python3.x`; bgwcli needs 3.10 or newer, and pip checks PyInstaller's own supported-version metadata, so an interpreter too new for the current PyInstaller is skipped for the next one; `BGWCLI_PYTHON=3.12` names one), installs PyInstaller into a throwaway venv under a temporary directory, builds, and deletes the directory, so the executable at `~/.local/bin/bgwcli`, with its Python embedded, is the only thing that stays. When no installed Python works it stops and says what is missing (3.10+, PyInstaller support, `python -m venv`) instead of fetching anything. The file runs only on the OS and CPU it was built on (build once per machine type), is about 10 MB, and starts in roughly half a second because it unpacks itself on every run, so it suits a machine you copy one file to rather than scripted bursts or the autorestore timer. The two flavours replace each other, so only one `bgwcli` is ever on your PATH: `binary` removes a uv-tool install first, and the plain installer replaces the executable with the tool's symlink. Everything else (session cache, dumps, config paths, exit codes) is identical between them.
+
+What uninstall does: runs `uv tool uninstall bgwcli` when `uv` is on your PATH (otherwise it names the pipx and pip equivalents), removes the single-file executable at `~/.local/bin/bgwcli` when that is what is installed, then prints the per-user state paths (session cache, state and dump directories, autorestore timer files, the baseline dump) marked present or absent, and deletes none of them. If you deployed the autorestore timer, remove it first as `deploy/README.md` ("Removing it") describes.
 
 **If you already have uv or pipx:**
 
