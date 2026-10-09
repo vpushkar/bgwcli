@@ -2,7 +2,8 @@
 """End-to-end validation of bgwcli against a live gateway.
 
 Usage: E2E_ACCESS_CODE=... .venv/bin/python scripts/e2e.py [--only substring] [--out DIR] [--skip-commits] [--quick]
-Writes <out>/report.md, <out>/report.json and one <out>/<nn>-<slug>.{out,err} per case (all mode 0600,
+Writes <out>/report.md, <out>/report.json (an object: `mode` and the per-case `cases` list) and one
+<out>/<nn>-<slug>.{out,err} per case (all mode 0600,
 created fresh: an existing file or a symlink at an output path is refused); dump files and sweep
 artifacts of the run also go under <out>. Without --out a new private directory is made with
 tempfile.mkdtemp; an --out directory must be new or empty. A case that exceeds its timeout fails.
@@ -537,7 +538,8 @@ def main(argv: list[str] | None = None) -> int:
     report_failed = False
     try:
         write_private(out_dir / "report.md", "\n".join(lines) + "\n")
-        write_private(out_dir / "report.json", json.dumps([{"case": r.case.name, "argv": r.case.argv, "rc": r.rc, "seconds": r.seconds, "problems": r.problems} for r in results], indent=1))
+        cases_json = [{"case": r.case.name, "argv": r.case.argv, "rc": r.rc, "seconds": r.seconds, "problems": r.problems} for r in results]
+        write_private(out_dir / "report.json", json.dumps({"mode": mode, "cases": cases_json}, indent=1))
     except OSError as exc:
         report_failed = True
         print(f"{ARTIFACT_PROBLEM}: report in {out_dir}: {exc}", file=sys.stderr)

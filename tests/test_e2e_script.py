@@ -225,6 +225,25 @@ def test_quick_mode_limits_the_traversals_drops_json_tab_twins_and_shortens_the_
     for name in untouched:
         assert name in by_name, name
     assert len(quick) < len(full)
+    # the pacing rule, pinned on the guarded pair: a pause of a second or less becomes QUICK_DELAY_S, a
+    # longer one is kept (the dosprotect cases pause 0.6 s in full and 0.2 s in quick; ping 2.0 and the
+    # speed test 5.0 stay)
+    full_by_name = {c.name: c for c in full}
+    for name in (e2e.TOGGLE_CASE, *e2e.RESTORE_CASES, "diag-ping-commit", "action-commit-speed-test"):
+        full_delay = full_by_name[name].delay
+        assert by_name[name].delay == (full_delay if full_delay > 1.0 else e2e.QUICK_DELAY_S), name
+    assert full_by_name[e2e.TOGGLE_CASE].delay == 0.6 and by_name[e2e.TOGGLE_CASE].delay == e2e.QUICK_DELAY_S
+
+
+def test_only_filters_before_quick_drops_the_json_tab_twins(e2e, tmp_path):
+    # main() applies --only first and quick second: the quick selection sees the filtered list, so a
+    # filter that matches a JSON tab twin still loses it, and the text tabs it matches survive
+    filtered = [c for c in e2e.build_cases(tmp_path) if "tab-" in c.name]
+    assert any(c.name.endswith("-json") for c in filtered)
+    quick = e2e.quick_cases(filtered)
+    names = [c.name for c in quick]
+    assert names and not any(name.endswith("-json") for name in names)
+    assert names == [c.name for c in filtered if not c.name.endswith("-json")]
 
 
 def test_quick_mode_leaves_the_full_case_list_alone(e2e, tmp_path):
@@ -269,6 +288,28 @@ def test_the_default_report_names_the_full_mode(e2e, tmp_path, monkeypatch, caps
     out = tmp_path / "run"
     e2e.main(["--skip-commits", "--only", "check", "--out", str(out)])
     assert "mode: full" in (out / "report.md").read_text()
+
+
+@pytest.mark.parametrize(("extra", "mode"), [([], "full"), (["--quick"], "quick")], ids=["full", "quick"])
+def test_the_json_report_names_its_mode_and_keeps_the_cases_under_a_key(e2e, tmp_path, monkeypatch, extra, mode):
+    """A retained report.json must say which mode produced it: a bare list could not be told quick from full."""
+    import json
+    import subprocess
+    import sys
+
+    monkeypatch.setattr(
+        e2e.subprocess, "run", lambda argv, **k: subprocess.CompletedProcess(argv, 0, stdout="Reachable\n", stderr="")
+    )
+    monkeypatch.setattr(e2e.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(e2e, "BGW", sys.executable)
+    monkeypatch.setenv("E2E_ACCESS_CODE", "x")
+    out = tmp_path / "run"
+    e2e.main([*extra, "--skip-commits", "--only", "check", "--out", str(out)])
+    report = json.loads((out / "report.json").read_text())
+    assert report["mode"] == mode
+    assert isinstance(report["cases"], list) and report["cases"]
+    assert all(set(case) == {"case", "argv", "rc", "seconds", "problems"} for case in report["cases"])
+    assert report["cases"][0]["case"] == "check"
 
 
 def test_docstring_describes_quick_mode(e2e):

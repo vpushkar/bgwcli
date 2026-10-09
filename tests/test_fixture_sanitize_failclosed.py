@@ -166,6 +166,34 @@ def test_the_literal_pass_lets_a_gateway_placeholder_quoted_by_the_help_text_thr
         _assert_fixture_safe("voice", leaky, parse_page("voice", leaky), secrets=real_secrets)
 
 
+@pytest.mark.parametrize("first_column", ["Line", "Section"])
+def test_a_secret_value_in_a_wide_table_whose_first_column_names_the_row_is_still_residue(first_column):
+    """A record whose first key is a row-naming key other than Metric (``Line``, ``Section``) gets an
+    empty row label, so its values are not judged by the row's name; a secret header over one of its
+    columns still names that value as residue through the (key, value) pairs. (The voice page itself
+    parses positionally into Metric/Line 1/Line 2 and cannot produce this layout; the generic wide-table
+    parse can, and that is the path the row-label rule runs on.)"""
+    from bgwcli.audit import FixtureSafetyError, _assert_fixture_safe
+    from bgwcli.fixture_sanitize import fixture_secret_values
+
+    raw = (
+        f"<table><thead><tr><th>{first_column}</th><th>Phone Number</th><th>Status</th></tr></thead><tbody>"
+        "<tr><td>1</td><td>555-0100</td><td>Registered</td></tr>"
+        "<tr><td>2</td><td>Not Subscribed</td><td>Idle</td></tr></tbody></table>"
+    )
+    parsed = parse_page("x", raw, include_secrets=True)
+    assert parsed.tables and next(iter(parsed.tables[0])) == first_column, parsed.tables
+    assert sensitive_control_residue(parsed) == ["Phone Number"]
+    secrets = fixture_secret_values(raw)
+    assert "555-0100" in secrets
+    with pytest.raises(FixtureSafetyError):
+        _assert_fixture_safe("x", raw, parse_page("x", raw), secrets=secrets)
+    sanitized = sanitize_router_fixture(raw)
+    assert "555-0100" not in sanitized
+    assert sensitive_control_residue(parse_page("x", sanitized, include_secrets=True)) == []
+    _assert_fixture_safe("x", sanitized, parse_page("x", sanitized), secrets=secrets)
+
+
 def test_a_sensitive_button_in_a_secret_cell_is_sanitized():
     raw = (
         f'<table><tr><td>Password</td><td><button name="r" value="{SECRET}">{SECRET}B</button>'

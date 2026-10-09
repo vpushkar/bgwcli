@@ -1948,7 +1948,8 @@ def _run_restore(client: Any, command: Command) -> dict[str, Any] | None:
             **({"allocationPreflight": preflight_report} if preflight_report is not None else {}),
         }
     )
-    # The router was written to: a reader that went away must not turn the run's verdict into exit 2.
+    # The verdict is decided above from the execution and the closing diff; a reader that went away
+    # (`restore --commit | head -1`) must not turn it into exit 2, whether or not a write was sent.
     guard.write(lambda: (command.output(result_output, print_result), sys.stdout.flush()))
     return coordination
 

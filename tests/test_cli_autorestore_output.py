@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import io
 import json
+import sys
 
 import pytest
 from save_helpers import SAVED_RED, client_with, form, html
@@ -47,6 +48,19 @@ class ClosedPipe(io.StringIO):
         super().flush()
 
 
+def _run_with_stdout(monkeypatch, stdout, argv):
+    """`cli.main(argv)` with `stdout` as sys.stdout. When the closed-output guard tripped it swapped
+    sys.stdout for an os.devnull handle meant to live to the end of the process; a test is not a
+    process, so that handle is closed here (monkeypatch restores the original stream at teardown)."""
+    if stdout is not None:
+        monkeypatch.setattr("sys.stdout", stdout)
+    try:
+        return cli.main(argv)
+    finally:
+        if stdout is not None and sys.stdout is not stdout:
+            sys.stdout.close()
+
+
 def _scenario(tmp_env, monkeypatch, label, stdout=None):
     """One committed run whose write POST gets no answer (exit 2, failure counted, intent kept)."""
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_env / f"state-{label}"))
@@ -63,20 +77,18 @@ def _scenario(tmp_env, monkeypatch, label, stdout=None):
 
     client, wire = client_with(handler)
     monkeypatch.setattr(cli, "_client_factory", lambda *a, **kw: client)
-    if stdout is not None:
-        monkeypatch.setattr("sys.stdout", stdout)
-    code = cli.main([
+    code = _run_with_stdout(monkeypatch, stdout, [
         "autorestore", str(path), "--include", PAGE, "--host", "router.local",
         "--commit", "--confirm", "RESTORE", "--max-passes", "1",
     ])
-    checkpoint = RecoveryCheckpoint("router.local", dump, (PAGE,))
+    checkpoint =RecoveryCheckpoint("router.local", dump, (PAGE,))
     record = json.loads(checkpoint.path.read_text()) if checkpoint.path.exists() else None
     posts = sum(r.method == "POST" and "/login.ha" not in r.url for r in wire.requests)
     return code, record, posts
 
 
 @pytest.mark.parametrize("fail_on", ["write", "flush"])
-def test_closed_stdout_leaves_result_and_bookkeeping_unchanged(clock, tmp_env, monkeypatch, capsys, fail_on):
+def test_closed_stdout_leaves_result_and_bookkeeping_unchanged(clock, tmp_env, monkeypatch, fail_on):
     normal = io.StringIO()
     baseline = _scenario(tmp_env, monkeypatch, "open", normal)
     assert baseline[0] == 2 and baseline[1]["failures"]["count"] == 1 and baseline[2] == 1
@@ -102,8 +114,7 @@ def test_a_closed_stdout_in_json_mode_still_reports_the_run_exit_code(clock, tmp
     )
     monkeypatch.setattr(cli, "_client_factory", lambda *a, **kw: client)
     pipe = ClosedPipe("write", good=0)
-    monkeypatch.setattr("sys.stdout", pipe)
-    code = cli.main([
+    code = _run_with_stdout(monkeypatch, pipe, [
         "autorestore", str(path), "--include", PAGE, "--host", "router.local",
         "--commit", "--confirm", "RESTORE", "--max-passes", "1", "--json",
     ])
@@ -145,12 +156,11 @@ def _late_close_run(tmp_env, monkeypatch, label, json_mode, stdout):
             stdout.armed = True  # everything after the final write is the interpreter's exit flush
 
     monkeypatch.setattr(cli.Command, "output", output)
-    monkeypatch.setattr("sys.stdout", stdout)
     argv = [
         "autorestore", str(path), "--include", PAGE, "--host", "router.local",
         "--commit", "--confirm", "RESTORE", "--max-passes", "1",
     ]
-    return cli.main(argv + (["--json"] if json_mode else []))
+    return _run_with_stdout(monkeypatch, stdout, argv + (["--json"] if json_mode else []))
 
 
 @pytest.mark.parametrize("json_mode", [False, True])
@@ -179,9 +189,8 @@ def _restore_scenario(tmp_env, monkeypatch, label, stdout, json_mode=False):
 
     client, _wire = client_with(handler)
     monkeypatch.setattr(cli, "_client_factory", lambda *a, **kw: client)
-    monkeypatch.setattr("sys.stdout", stdout)
     argv = ["restore", str(path), "--include", PAGE, "--host", "router.local", "--commit", "--confirm", "RESTORE"]
-    return cli.main(argv + (["--json"] if json_mode else []))
+    return _run_with_stdout(monkeypatch, stdout, argv + (["--json"] if json_mode else []))
 
 
 @pytest.mark.parametrize("json_mode", [False, True])

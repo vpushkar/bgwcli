@@ -10,7 +10,7 @@ from save_helpers import client_with, form, html
 
 from bgwcli import cli
 from bgwcli import parser as parser_module
-from bgwcli.dumpfile import write_dump_file
+from bgwcli.dumpfile import read_dump_file, write_dump_file
 from bgwcli.errors import SnapshotExtractionError
 from bgwcli.parser import parse_page
 from bgwcli.snapshot import Snapshot, SnapshotMeta, extract_snapshot
@@ -89,6 +89,32 @@ def test_dump_keeps_going_without_a_truncated_documentary_page(tmp_env, clock, m
     assert "partly read" in captured.err
     written = json.loads(path.read_text())
     assert "packetfilter" not in written["tables"]
+    assert not [r for r in wire.requests if r.method == "POST" and not r.url.endswith("login.ha")]
+
+
+def test_a_dump_written_without_the_documentary_page_loads_and_diffs_identical(tmp_env, clock, monkeypatch, capsys):
+    # The file the dump leaves behind without packetfilter is a dump the CLI's own loader accepts, and a
+    # diff against the same gateway (packetfilter still unreadable) is identical: the absent documentary
+    # page is neither a load failure nor a reported difference, and the diff posts nothing.
+    def handler(request, n):
+        if urlsplit(request.url).path.endswith("packetfilter.ha"):
+            return html(BIG_PACKETFILTER)
+        return html(form("wconfig", "old") + EMPTY_SECTION_TABLES)
+
+    client, wire = client_with(handler)
+    monkeypatch.setattr(cli, "_client_factory", lambda *a, **k: client)
+    path = tmp_env / "backup.json"
+    assert cli.main(["dump", "--out", str(path)]) == 0
+    capsys.readouterr()
+    snapshot = read_dump_file(path)
+    assert "packetfilter" not in snapshot.tables
+    assert "wconfig" in snapshot.forms
+
+    code = cli.main(["diff", str(path)])
+    captured = capsys.readouterr()
+    assert code == 0, captured.out + captured.err
+    assert "No differences." in captured.out
+    assert "packetfilter" not in captured.out
     assert not [r for r in wire.requests if r.method == "POST" and not r.url.endswith("login.ha")]
 
 
