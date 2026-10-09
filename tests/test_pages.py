@@ -94,3 +94,17 @@ def test_router_tab_json_omits_dangerous_unless_true():
     restart = next(tab for tab in ROUTER_TABS if tab.page == "restart")
     assert not sysinfo.dangerous
     assert restart.dangerous
+
+
+def test_form_target_is_one_rule_shared_by_the_nonce_selection_and_the_owning_form_check():
+    """The write-nonce selection (client) and the owning-form check (mutations) must agree on what a
+    form action posts to, so the rule lives once in pages and both import that same function."""
+    from bgwcli import client, mutations
+    from bgwcli.pages import form_target
+
+    assert client.form_target is form_target and mutations.form_target is form_target
+    assert form_target("/cgi-bin/wrestart.ha?1") == "wrestart.ha?1"
+    assert form_target(" /cgi-bin/dhcpserver.ha ") == "dhcpserver.ha"
+    assert form_target("https://192.168.1.254/cgi-bin/ipalloc.ha") == "ipalloc.ha"
+    assert form_target(" dhcpserver.ha ") == "dhcpserver.ha"
+    assert form_target("") == ""

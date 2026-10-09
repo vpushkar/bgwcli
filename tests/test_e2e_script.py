@@ -192,6 +192,89 @@ def test_run_checks_empty_stdout_and_expected_stderr(e2e, tmp_path, monkeypatch)
     assert any("stderr is missing" in p for p in result.problems)
 
 
+# --- quick mode: the same run minus what the gateway makes slow -------------------------------------
+
+
+def test_quick_mode_limits_the_traversals_drops_json_tab_twins_and_shortens_the_pacing(e2e, tmp_path):
+    full = e2e.build_cases(tmp_path)
+    quick = e2e.quick_cases(full)
+    by_name = {c.name: c for c in quick}
+    # the four full-site traversals still run, over a few pages instead of all 37
+    for name in ("sweep-json", "scan-json", "audit-json", "audit-text"):
+        argv = by_name[name].argv
+        assert argv[argv.index("--pages") + 1] == e2e.QUICK_TRAVERSAL_PAGES, name
+        assert by_name[name].delay == e2e.QUICK_DELAY_S
+    # a traversal that already names its pages keeps them
+    assert by_name["schema-json-2pages"].argv.count("--pages") == 1
+    assert by_name["sweep-out"].argv[by_name["sweep-out"].argv.index("--pages") + 1] == "sysinfo,diag"
+    # every section tab keeps its text case; the JSON twin of each is dropped, as is device-status-json
+    tab_text = [c for c in full if c.name.startswith("tab-") and not c.name.endswith("-json")]
+    assert tab_text and all(c.name in by_name for c in tab_text)
+    assert not any(c.name.startswith("tab-") and c.name.endswith("-json") for c in quick)
+    assert "device-status" in by_name and "device-status-json" not in by_name
+    # the per-CGI-id page reads are the only coverage of each page id: all kept
+    page_json = [c.name for c in full if c.name.startswith("page-") and c.name.endswith("-json")]
+    assert page_json and all(name in by_name for name in page_json)
+    # the default pacing shrinks; the long pauses the gateway needs after diagnostics and the speed test stay
+    assert by_name["check"].delay == e2e.QUICK_DELAY_S
+    assert by_name["diag-ping-commit"].delay == 2.0 and by_name["action-commit-speed-test"].delay == 5.0
+    # the guarded dosprotect pair and the refusals are untouched
+    untouched = (
+        e2e.TOGGLE_CASE, *e2e.RESTORE_CASES, "submit-refuse-owning-form-broadband", "dump-refuse-out-directory",
+    )
+    for name in untouched:
+        assert name in by_name, name
+    assert len(quick) < len(full)
+
+
+def test_quick_mode_leaves_the_full_case_list_alone(e2e, tmp_path):
+    full = e2e.build_cases(tmp_path)
+    before = [(c.name, list(c.argv), c.delay) for c in full]
+    e2e.quick_cases(full)
+    assert [(c.name, list(c.argv), c.delay) for c in full] == before
+
+
+def test_quick_mode_composes_with_skip_commits_and_names_itself_in_the_report(e2e, tmp_path, monkeypatch, capsys):
+    import subprocess
+    import sys
+
+    seen = []
+
+    def fake(argv, **kwargs):
+        seen.append(argv[1:])
+        return subprocess.CompletedProcess(argv, 0, stdout="Reachable\n", stderr="")
+
+    monkeypatch.setattr(e2e.subprocess, "run", fake)
+    monkeypatch.setattr(e2e.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(e2e, "BGW", sys.executable)
+    monkeypatch.setenv("E2E_ACCESS_CODE", "x")
+    out = tmp_path / "run"
+    e2e.main(["--quick", "--skip-commits", "--only", "check", "--out", str(out)])
+    assert seen and all("--commit" not in argv for argv in seen)
+    report = (out / "report.md").read_text()
+    assert "mode: quick" in report
+    assert "mode: quick" in capsys.readouterr().out
+
+
+def test_the_default_report_names_the_full_mode(e2e, tmp_path, monkeypatch, capsys):
+    import subprocess
+    import sys
+
+    monkeypatch.setattr(
+        e2e.subprocess, "run", lambda argv, **k: subprocess.CompletedProcess(argv, 0, stdout="Reachable\n", stderr="")
+    )
+    monkeypatch.setattr(e2e.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(e2e, "BGW", sys.executable)
+    monkeypatch.setenv("E2E_ACCESS_CODE", "x")
+    out = tmp_path / "run"
+    e2e.main(["--skip-commits", "--only", "check", "--out", str(out)])
+    assert "mode: full" in (out / "report.md").read_text()
+
+
+def test_docstring_describes_quick_mode(e2e):
+    assert "--quick" in e2e.__doc__
+
+
 # --- the dosprotect toggle and its restore are one guarded operation --------------------------------
 
 

@@ -139,8 +139,9 @@ def preflight_dump_target(path: str | os.PathLike[str]) -> None:
 
     Checked with lstat (the final component is never followed): an existing directory, a symlink, a
     file owned by another user and any other non-regular entry are refused, as is a path whose nearest
-    existing ancestor is not a directory. A missing target under a creatable directory chain passes.
-    Nothing is created. The messages name the path as given."""
+    existing ancestor is not a directory or whose first missing component is a dangling symlink (the
+    chain could never be created through it). A missing target under a creatable directory chain
+    passes. Nothing is created. The messages name the path as given."""
     shown = str(path)
     target = Path(path)
     through_file = NotADirectoryError(
@@ -150,6 +151,10 @@ def preflight_dump_target(path: str | os.PathLike[str]) -> None:
         info = os.lstat(target)
     except FileNotFoundError:
         missing = _missing_path_components(target.parent)
+        if missing and os.path.islink(missing[0]):
+            raise NotADirectoryError(
+                f"Output path runs through a dangling symlink; nothing was written: {shown}"
+            ) from None
         nearest = missing[0].parent if missing else target.parent
         try:
             ancestor_is_dir = stat.S_ISDIR(os.stat(nearest).st_mode)

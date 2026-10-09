@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """End-to-end validation of bgwcli against a live gateway.
 
-Usage: E2E_ACCESS_CODE=... .venv/bin/python scripts/e2e.py [--only substring] [--out DIR] [--skip-commits]
+Usage: E2E_ACCESS_CODE=... .venv/bin/python scripts/e2e.py [--only substring] [--out DIR] [--skip-commits] [--quick]
 Writes <out>/report.md, <out>/report.json and one <out>/<nn>-<slug>.{out,err} per case (all mode 0600,
 created fresh: an existing file or a symlink at an output path is refused); dump files and sweep
 artifacts of the run also go under <out>. Without --out a new private directory is made with
@@ -26,6 +26,16 @@ DOSPROTECT`.
 
 Everything else is a read, a dry-run or a refused commit. Never runs restart/reset/update/access-code/
 clear-device-list actions or dangerous submits.
+
+Modes (named in the report and on the last line): the default is `full`, the run a wave closes on. `--quick`
+is for iterating: the same cases minus what the gateway makes slow - the four full-site traversals (sweep,
+scan, audit text and JSON; about 87 s each on the Pi) run over QUICK_TRAVERSAL_PAGES instead of all 37
+pages, the JSON twin of every section-tab case and of `device status` is dropped (the text case and the
+per-page-id `page <id> --json` reads keep the coverage), and the pause between cases shrinks to
+QUICK_DELAY_S except after the diagnostics commits and the speed test, which keep their longer pauses.
+Measured 2026-10-08 on the Pi (read-only, --skip-commits): full 195 cases in 14.7 minutes, quick 161 cases
+in 5.4 minutes, both clean. A quick run proves less (no full
+traversal, no JSON view of the slow LAN pages); it never replaces the full run before a merge.
 """
 
 from __future__ import annotations
@@ -38,7 +48,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,6 +66,11 @@ TOGGLE_CASE = "set-commit-dosprotect-toggle"
 RESTORE_CASES = ("set-commit-dosprotect-restore", "verify-dosprotect-restored")
 ARTIFACT_PROBLEM = "artifact write failed"
 EXIT_RESTORE_UNVERIFIED = 3
+# --quick: the traversals walk these pages only (a form page, a status page, a documentary page), the
+# pause between cases is this short, and the slow JSON twins below are dropped.
+QUICK_TRAVERSAL_PAGES = "diag,sysinfo,dosprotect"
+QUICK_DELAY_S = 0.2
+TRAVERSAL_CASES = ("sweep-json", "scan-json", "audit-json", "audit-text")
 
 
 @dataclass
@@ -321,6 +336,22 @@ def skip_commit_cases(cases: list[Case]) -> list[Case]:
     return [c for c in cases if not c.needs_commits and ("commit" not in c.name or "refuse" in c.name)]
 
 
+def quick_cases(cases: list[Case]) -> list[Case]:
+    """The `--quick` selection (see the module docstring): copies of the cases, so the full list is
+    untouched. Dropped: the JSON twin of every `tab-*` case and `device-status-json`. Rewritten: the four
+    traversals get `--pages QUICK_TRAVERSAL_PAGES` (one that already names pages keeps its own); every
+    pause of a second or less becomes QUICK_DELAY_S, longer pauses (diagnostics commits, speed test) stay."""
+    quick: list[Case] = []
+    for case in cases:
+        if (case.name.startswith("tab-") and case.name.endswith("-json")) or case.name == "device-status-json":
+            continue
+        argv = list(case.argv)
+        if case.name in TRAVERSAL_CASES and "--pages" not in argv:
+            argv += ["--pages", QUICK_TRAVERSAL_PAGES]
+        quick.append(replace(case, argv=argv, delay=QUICK_DELAY_S if case.delay <= 1.0 else case.delay))
+    return quick
+
+
 def _text(value: str | bytes | None) -> str:
     if value is None:
         return ""
@@ -473,7 +504,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--only", default=None)
     parser.add_argument("--out", default=None, help="new or empty output directory (default: a fresh temp dir)")
     parser.add_argument("--skip-commits", action="store_true")
+    parser.add_argument("--quick", action="store_true",
+                        help="iterating mode: traversals over a few pages, no JSON tab twins, short pauses (see the docstring)")
     args = parser.parse_args(argv)
+    mode = "quick" if args.quick else "full"
     code = os.environ.get("E2E_ACCESS_CODE")
     if not code:
         print("E2E_ACCESS_CODE is required", file=sys.stderr)
@@ -489,9 +523,12 @@ def main(argv: list[str] | None = None) -> int:
         cases = [c for c in cases if args.only in c.name]
     if args.skip_commits:
         cases = skip_commit_cases(cases)
+    if args.quick:
+        cases = quick_cases(cases)
+        all_cases = quick_cases(all_cases)  # the guarded restore pair runs with the quick pacing too
     results, restore_note, interrupted = execute_cases(cases, all_cases, env, out_dir)
     failed = [r for r in results if r.problems]
-    lines = ["# bgwcli e2e report", "", f"{len(results)} cases, {len(failed)} failed", ""]
+    lines = ["# bgwcli e2e report", "", f"mode: {mode}", "", f"{len(results)} cases, {len(failed)} failed", ""]
     if restore_note:
         lines += [restore_note, ""]
     lines += ["| # | case | argv | exit | s | problems |", "|---|---|---|---|---|---|"]
@@ -504,7 +541,7 @@ def main(argv: list[str] | None = None) -> int:
     except OSError as exc:
         report_failed = True
         print(f"{ARTIFACT_PROBLEM}: report in {out_dir}: {exc}", file=sys.stderr)
-    print(f"\n{len(results)} cases, {len(failed)} failed -> {out_dir}/report.md")
+    print(f"\n{len(results)} cases, {len(failed)} failed, mode: {mode} -> {out_dir}/report.md")
     if restore_note:
         print(restore_note, file=sys.stderr if restore_note.startswith("dosprotect restore not verified") else sys.stdout)
     if restore_note and restore_note.startswith("dosprotect restore not verified"):

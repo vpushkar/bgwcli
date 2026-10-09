@@ -79,6 +79,12 @@ _REDACTED = "[redacted]"
 # A secret shorter than this is not searched for literally in the sanitized page: it would match
 # ordinary words and numbers.
 _MIN_LITERAL_SECRET = 6
+# The words the gateway prints for an absent value (an unsubscribed line's Phone Number reads
+# "Not Subscribed"). A placeholder is not a secret even when a governed cell shows it, and the page's
+# own help text quotes it by name, so searching for it literally would refuse every such page.
+_GATEWAY_PLACEHOLDERS = frozenset(
+    text.casefold() for text in ("Not Subscribed", "Not Available", "N/A", "Unknown", "Not Set")
+)
 
 _MAC = re.compile(r"\b(?:[0-9a-f]{2}:){5}[0-9a-f]{2}\b", re.IGNORECASE)
 _IPV4 = re.compile(r"\b(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\b")
@@ -540,8 +546,10 @@ def _redact_option_part(match: re.Match[str]) -> str:
     return _REDACTED if text.strip() else text
 
 
-# Record keys that name a row or its grouping rather than hold one of its values.
-_ROW_LABEL_KEYS = frozenset({"Metric", "Section", "Line"})
+# Record keys that name a row or its grouping rather than hold one of its values. ``Page`` is the
+# sitemap's page id (``routerpasswd``, ``ippass``): an identifier that names a row, never the label
+# of a secret value, although its spelling can satisfy the sensitive-name rule.
+_ROW_LABEL_KEYS = frozenset({"Metric", "Section", "Line", "Page"})
 
 
 def sensitive_control_residue(parsed: ParsedPage) -> list[str]:
@@ -570,13 +578,14 @@ def sensitive_control_residue(parsed: ParsedPage) -> list[str]:
     residue += ["form action" for form in parsed.forms if redact_href(form.action) != form.action]
     # Labelled table values (value entries and wide-table records) the parser redacts by label,
     # the default a secret label carries, and every value of a record whose row label (its Metric,
-    # else its first cell) names a secret, such as the second line's Phone Number.
+    # else its first cell) names a secret, such as the second line's Phone Number. A first cell that
+    # is itself a row-naming key other than Metric (the sitemap's Page id) is not a secret label.
     labelled = [(entry.label, entry.value) for entry in parsed.value_entries or []]
     labelled += [(entry.label, entry.default_value or "") for entry in parsed.value_entries or []]
     labelled += [(key, value) for record in parsed.tables for key, value in record.items()]
     for record in parsed.tables:
         label_key = "Metric" if "Metric" in record else next(iter(record), "")
-        row_label = record.get(label_key, "")
+        row_label = "" if label_key != "Metric" and label_key in _ROW_LABEL_KEYS else record.get(label_key, "")
         labelled += [
             (row_label, value) for key, value in record.items() if key != label_key and key not in _ROW_LABEL_KEYS
         ]
@@ -673,6 +682,8 @@ def fixture_secret_values(source: str) -> list[str]:
             found += _decoded_pieces(source[control.end : control.content_end])
     variants: dict[str, None] = {}
     for secret in found:
+        if secret.strip().casefold() in _GATEWAY_PLACEHOLDERS:
+            continue
         if len(secret) >= _MIN_LITERAL_SECRET and secret != _REDACTED:
             variants[secret] = None
             variants[html_module.escape(secret, quote=False)] = None

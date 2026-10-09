@@ -64,6 +64,34 @@ def test_set_and_submit_refuse_a_truncated_form_before_any_post(tmp_env, clock, 
     assert out["ok"] is False and "partly read" in out["error"]
 
 
+BIG_PACKETFILTER = (
+    '<html><body><form action="/cgi-bin/packetfilter.ha"><input name="nonce" value="n">'
+    "<table><tr><th>Rule</th><th>Action</th></tr><tr><td>allow all</td><td>Drop</td></tr>"
+    f"{FILLER}</table><input type=\"submit\" name=\"AddDropRule\" value=\"Add a 'Drop' Rule\"></form></body></html>"
+)
+
+
+def test_dump_keeps_going_without_a_truncated_documentary_page(tmp_env, clock, monkeypatch, capsys):
+    # packetfilter is documentary (recorded as text, never restored) and best effort by contract: a page
+    # that cannot be read, a parser-cut one included, is a stderr warning and the dump continues without it.
+    def handler(request, n):
+        if urlsplit(request.url).path.endswith("packetfilter.ha"):
+            return html(BIG_PACKETFILTER)
+        return html(form("wconfig", "old") + EMPTY_SECTION_TABLES)
+
+    client, wire = client_with(handler)
+    monkeypatch.setattr(cli, "_client_factory", lambda *a, **k: client)
+    path = tmp_env / "backup.json"
+    code = cli.main(["dump", "--out", str(path)])
+    captured = capsys.readouterr()
+    assert code == 0, captured.out + captured.err
+    assert "warning: documentary page 'packetfilter' could not be read" in captured.err
+    assert "partly read" in captured.err
+    written = json.loads(path.read_text())
+    assert "packetfilter" not in written["tables"]
+    assert not [r for r in wire.requests if r.method == "POST" and not r.url.endswith("login.ha")]
+
+
 def test_dump_writes_nothing_for_a_truncated_page(tmp_env, clock, monkeypatch, capsys):
     def handler(request, n):
         if urlsplit(request.url).path.endswith("dosprotect.ha"):
@@ -101,10 +129,11 @@ def test_extract_snapshot_refuses_a_truncated_page():
         extract_snapshot({"dosprotect": parsed}, ts="", router_host="")
 
 
-def test_page_still_shows_a_truncated_page_and_says_so(tmp_env, clock, monkeypatch, capsys):
+@pytest.mark.parametrize("argv", [["page", "dosprotect"], ["firewall", "dosprotect"]], ids=["page", "section command"])
+def test_page_still_shows_a_truncated_page_and_says_so(tmp_env, clock, monkeypatch, capsys, argv):
     client, _wire = client_with(lambda r, n: html(BIG_FORM))
     monkeypatch.setattr(cli, "_client_factory", lambda *a, **k: client)
-    code = cli.main(["page", "dosprotect", "--json"])
+    code = cli.main([*argv, "--json"])
     captured = capsys.readouterr()
     assert code == 0
     assert json.loads(captured.out)["truncated"] is True

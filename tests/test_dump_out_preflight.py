@@ -136,6 +136,31 @@ def test_failed_fsync_names_the_target_and_cleans_up(tmp_path, monkeypatch):
     assert list(tmp_path.iterdir()) == []
 
 
+def test_failed_data_write_names_the_target_and_cleans_up(tmp_path, monkeypatch):
+    # The buffered write does not go through os.write, so the fault is raised by the file object.
+    target = tmp_path / "new" / "deep" / "dump.json"
+
+    class _FullDisk:
+        def __init__(self, fd):
+            self._fd = fd
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            os.close(self._fd)
+
+        def write(self, text):
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(os, "fdopen", lambda fd, *a, **k: _FullDisk(fd))
+    with pytest.raises(OSError) as caught:
+        write_dump_file(target, _SNAPSHOT)
+    assert caught.value.errno == errno.ENOSPC and str(target) in str(caught.value) and ".tmp" not in str(caught.value)
+    assert not (tmp_path / "new").exists()
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_failed_replace_removes_the_temporary_and_the_created_directories(tmp_path, monkeypatch):
     target = tmp_path / "new" / "deep" / "dump.json"
     real_replace = os.replace
@@ -292,6 +317,29 @@ def test_preflight_refuses_a_dangling_symlink(tmp_path):
     link.symlink_to(tmp_path / "missing.json")
     with pytest.raises(PermissionError):
         preflight_dump_target(link)
+
+
+def test_preflight_refuses_a_path_through_a_dangling_symlink(tmp_path):
+    # A stale link (an unmounted backup disk, a removed directory) is a realistic parent: the write
+    # could never complete there, so it is refused before any page is read, like a file in the way.
+    link = tmp_path / "backups"
+    link.symlink_to(tmp_path / "unmounted")
+    for target in (link / "dump.json", link / "a" / "b" / "dump.json"):
+        with pytest.raises(NotADirectoryError) as caught:
+            preflight_dump_target(target)
+        assert str(target) in str(caught.value) and "nothing was written" in str(caught.value)
+    assert link.is_symlink() and not link.exists() and [p.name for p in tmp_path.iterdir()] == ["backups"]
+
+
+def test_dump_out_through_a_dangling_symlink_is_refused_early(tmp_env, tmp_path, clock, monkeypatch, capsys):
+    work = tmp_path / "work"
+    work.mkdir()
+    link = work / "backups"
+    link.symlink_to(work / "unmounted")
+    target = link / "dump.json"
+    code, captured, wire = _dump(monkeypatch, capsys, target)
+    _refused(code, captured, wire, str(target))
+    assert link.is_symlink() and [p.name for p in work.iterdir()] == ["backups"]
 
 
 def test_preflight_refuses_a_path_through_a_regular_file(tmp_path):

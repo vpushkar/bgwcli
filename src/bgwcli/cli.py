@@ -1857,8 +1857,8 @@ def _run_restore(client: Any, command: Command) -> dict[str, Any] | None:
         )
         return
 
-    on_step = None if command.options.json else fmt.print_restore_step_result
-    execution = execute_restore(client, steps, on_step)
+    guard = _ClosedOutputGuard()
+    execution = execute_restore(client, steps, None if command.options.json else guard.print_step)
     result = restore_committed(execution)
     after_diff = None
     after_failures = []
@@ -1931,7 +1931,7 @@ def _run_restore(client: Any, command: Command) -> dict[str, Any] | None:
         for failure in after_failures:
             fmt.print_page_fetch_error(failure)
 
-    command.output(
+    result_output = (
         {
             "execution": fmt.execution_output(execution),
             "diff": fmt.display_diff(after_diff, include_secrets) if after_diff is not None else None,
@@ -1946,9 +1946,10 @@ def _run_restore(client: Any, command: Command) -> dict[str, Any] | None:
             "operation": fmt.operation_output(result),
             "missingPages": missing,
             **({"allocationPreflight": preflight_report} if preflight_report is not None else {}),
-        },
-        print_result,
+        }
     )
+    # The router was written to: a reader that went away must not turn the run's verdict into exit 2.
+    guard.write(lambda: (command.output(result_output, print_result), sys.stdout.flush()))
     return coordination
 
 
@@ -2017,20 +2018,8 @@ def _run_autorestore(client: Any, command: Command) -> dict[str, Any] | None:
 
     # A closed stdout (`autorestore --commit | head -1`) must never end the run before its intent and
     # failure bookkeeping: the first BrokenPipeError (and only that) silences every later write.
-    output_closed: list[bool] = []
-
-    def close_output() -> None:
-        output_closed.append(True)
-        # What is still buffered would fail again when the interpreter flushes at exit (status 120).
-        sys.stdout = open(os.devnull, "w")  # noqa: SIM115 - lives to the end of the process
-
-    def guarded_write(write: Callable[[], Any]) -> None:
-        if output_closed:
-            return
-        try:
-            write()
-        except BrokenPipeError:
-            close_output()
+    guard = _ClosedOutputGuard()
+    guarded_write = guard.write
 
     def log(line: str) -> None:
         def write() -> None:
@@ -2041,10 +2030,6 @@ def _run_autorestore(client: Any, command: Command) -> dict[str, Any] | None:
 
         if not json_mode:
             guarded_write(write)
-
-    def on_step(step: Any) -> None:
-        if not output_closed and not fmt.print_restore_step_result(step):
-            close_output()
 
     try:
         result = run_autorestore(
@@ -2060,7 +2045,7 @@ def _run_autorestore(client: Any, command: Command) -> dict[str, Any] | None:
             fetch_pages=_fetch_snapshot_pages,
             checkpoint=RecoveryCheckpoint(command.options.host, dump, pages),
             log=log,
-            on_step=None if json_mode else on_step,
+            on_step=None if json_mode else guard.print_step,
             relogin=relogin_after_rejected_cache,
             **_snapshot_meta(command),
         )
@@ -2142,6 +2127,31 @@ def _run_fixture_capture(client: Any, command: Command) -> None:
 
 # ---------------------------------------------------------------------------------------------
 # shared helpers
+
+
+class _ClosedOutputGuard:
+    """A closed stdout (`restore --commit | head -1`) never ends a run or changes its exit code: the
+    first BrokenPipeError (and only that) silences every later write through this guard."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+        # What is still buffered would fail again when the interpreter flushes at exit (status 120).
+        sys.stdout = open(os.devnull, "w")  # noqa: SIM115 - lives to the end of the process
+
+    def write(self, write: Callable[[], Any]) -> None:
+        if self.closed:
+            return
+        try:
+            write()
+        except BrokenPipeError:
+            self.close()
+
+    def print_step(self, step: Any) -> None:
+        if not self.closed and not fmt.print_restore_step_result(step):
+            self.close()
 
 
 def _stdout_line(text: object) -> str:
@@ -2314,6 +2324,11 @@ def _fetch_snapshot_pages(
                 or missing_table_structure(page, result.parsed, reader.body)
                 or missing_form_controls(page, result.parsed)
             )
+        if unreadable is not None and page in BEST_EFFORT_PAGES:
+            # A documentary page is best effort whatever made it unreadable: a parser-cut body is a
+            # warning and the snapshot goes on without the page, exactly like a page that failed to load.
+            result = ParsedPageResult(page, False, result.status_code, error=unreadable, structural=True)
+            unreadable = None
         if unreadable is not None:
             # A table section without its header row or the gateway's empty-table cell, or a form page
             # without any control, is unreadable, never an empty section (see snapshot._TABLE_SECTIONS).

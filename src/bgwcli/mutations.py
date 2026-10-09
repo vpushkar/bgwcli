@@ -11,6 +11,7 @@ from dataclasses import dataclass, field, replace
 
 from .actions import is_opener_button
 from .errors import UsageError
+from .pages import form_target
 from .redact import page_sensitive_names, redact_value
 from .types import ParsedButton, ParsedPage
 
@@ -110,13 +111,8 @@ def build_submit_plan(
     return replace(plan, button=button)
 
 
-def _form_target(action: str) -> str:
-    """A form action reduced to what it posts to: the part after `/cgi-bin/`, query kept."""
-    return action.strip().rpartition("/cgi-bin/")[2] if "/cgi-bin/" in action else action.strip()
-
-
 def _is_own_form(page: str, action: str) -> bool:
-    target = _form_target(action)
+    target = form_target(action)
     if not target:
         return True
     path = target.split("?", 1)[0].split("#", 1)[0]
@@ -134,7 +130,7 @@ def _require_own_form(page: str, parsed: ParsedPage, button: ParsedButton) -> No
         return
     from .actions import ROUTER_ACTIONS
 
-    target = _form_target(owners[0].action)
+    target = form_target(owners[0].action)
     for action in ROUTER_ACTIONS:
         if action.page == page and action.post_path == target:
             raise UsageError(

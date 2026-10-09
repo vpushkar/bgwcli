@@ -1289,7 +1289,7 @@ _CONFIRMATION_PAGE = re.compile(r"/cgi-bin/wifiwarn[a-z_]*\.ha", re.IGNORECASE)
 _CGI_PAGE = re.compile(r"/cgi-bin/([a-z0-9_]+)\.ha", re.IGNORECASE)
 
 
-# The only Continue form actions that resolve: the client's `_form_target` rule (the part after
+# The only Continue form actions that resolve: the `pages.form_target` rule (the part after
 # `/cgi-bin/`) kept to a rooted `/cgi-bin/<page>.ha` or a relative `<page>.ha`, with no query.
 _CONTINUE_TARGET = re.compile(r"(?:/cgi-bin/)?([a-z0-9_]+)\.ha")
 

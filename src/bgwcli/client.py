@@ -30,7 +30,7 @@ from urllib.parse import urlencode, urljoin, urlsplit
 from . import __version__
 from .config import GlobalOptions
 from .errors import BgwError, RouterAuthError, RouterConnectionError, RouterSessionPoolFullError, UsageError
-from .pages import canonical_cgi_page
+from .pages import canonical_cgi_page, form_target
 from .types import HttpMethod, HttpResponse, RouterSessionSnapshot
 
 MAX_REDIRECTS = 5
@@ -1178,12 +1178,6 @@ def form_nonces(html: str, action_path: str) -> list[str]:
     return []
 
 
-def _form_target(action: str) -> str:
-    """A form action reduced to what it posts to: the part after ``/cgi-bin/``, query kept."""
-    action = action.strip()
-    return action.rpartition("/cgi-bin/")[2] if "/cgi-bin/" in action else action
-
-
 def _select_write_nonces(html: str, nonce_page: str, post_path: str, fields: Mapping[str, str]) -> list[str]:
     """The nonces a write to ``post_path`` carries, read from ``html`` (the page it was served on).
 
@@ -1197,8 +1191,8 @@ def _select_write_nonces(html: str, nonce_page: str, post_path: str, fields: Map
       otherwise the page's forms post elsewhere and the page is refused.
     """
     forms = _scan_forms(html)
-    target = _form_target(post_path)
-    matching = [form for form in forms if _form_target(form[0]) == target]
+    target = form_target(post_path)
+    matching = [form for form in forms if form_target(form[0]) == target]
     page_nonce = extract_nonce(html)
     no_nonce = f"{nonce_page}: no write nonce found for {post_path}; nothing was sent"
 

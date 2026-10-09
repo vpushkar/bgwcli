@@ -8,7 +8,7 @@ import io
 import json
 
 import pytest
-from save_helpers import client_with, form, html
+from save_helpers import SAVED_RED, client_with, form, html
 
 from bgwcli import autorestore, cli
 from bgwcli import format as fmt
@@ -161,6 +161,38 @@ def test_a_pipe_closed_after_the_last_progress_line_keeps_the_run_exit_code(cloc
     code = _late_close_run(tmp_env, monkeypatch, "late", json_mode, pipe)
     assert pipe.failed, "the final output is flushed inside the guard, where the closed pipe is caught"
     assert code == baseline
+
+
+def _restore_scenario(tmp_env, monkeypatch, label, stdout, json_mode=False):
+    """One committed `restore` whose single form save is acknowledged and read back (exit 0)."""
+    monkeypatch.setenv("BGW_SESSION_CACHE_DIR", str(tmp_env / f"cache-{label}"))
+    dump = Snapshot(SnapshotMeta("", "", "router.local"), forms={PAGE: {"setting": "new"}})
+    path = tmp_env / f"baseline-{label}.json"
+    write_dump_file(path, dump)
+    posted = []
+
+    def handler(request, _number):
+        if request.method == "POST":
+            posted.append(request)
+            return html("", 302, {"location": f"/cgi-bin/{PAGE}.ha"})
+        return html(form(PAGE, "new", banner=SAVED_RED) if posted else form(PAGE, "old"))
+
+    client, _wire = client_with(handler)
+    monkeypatch.setattr(cli, "_client_factory", lambda *a, **kw: client)
+    monkeypatch.setattr("sys.stdout", stdout)
+    argv = ["restore", str(path), "--include", PAGE, "--host", "router.local", "--commit", "--confirm", "RESTORE"]
+    return cli.main(argv + (["--json"] if json_mode else []))
+
+
+@pytest.mark.parametrize("json_mode", [False, True])
+def test_a_closed_stdout_leaves_the_restore_exit_code_unchanged(clock, tmp_env, monkeypatch, json_mode):
+    baseline = _restore_scenario(tmp_env, monkeypatch, "open", io.StringIO(), json_mode)
+    assert baseline == 0
+    pipe = ClosedPipe("write", good=0)
+    code = _restore_scenario(tmp_env, monkeypatch, "closed", pipe, json_mode)
+    assert pipe.failed, "the pipe closed during the run"
+    assert code == baseline
+    assert pipe.calls_after_failure == 0, "nothing is written after the first BrokenPipeError"
 
 
 def test_print_restore_step_result_survives_a_closed_stream():

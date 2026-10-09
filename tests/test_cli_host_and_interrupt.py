@@ -97,8 +97,9 @@ def test_a_valid_bgw_host_never_consults_an_empty_router_ip(capsys, factory, mon
     monkeypatch.setenv("ROUTER_IP", "")
     client, _ = client_with(lambda r, n: html("<title>Ok</title>"))
     factory["install"](client)
-    cli.main(["check", "--json"])
+    code = cli.main(["check", "--json"])
     capsys.readouterr()
+    assert code == 0
     assert factory["o"].host == "192.0.2.9"
 
 

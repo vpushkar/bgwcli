@@ -138,6 +138,15 @@ def canonical_cgi_page(value: str) -> str:
     return page.removesuffix(".ha")
 
 
+def form_target(action: str) -> str:
+    """A form action reduced to what it posts to: the part after ``/cgi-bin/``, query kept.
+
+    One rule for the write-nonce selection (client) and the owning-form check (mutations): both
+    decide from the same reduction which form a POST belongs to."""
+    action = action.strip()
+    return action.rpartition("/cgi-bin/")[2] if "/cgi-bin/" in action else action
+
+
 def resolve_cgi_page(value: str) -> str:
     """Resolve known human aliases; reject URL syntax in raw page identifiers."""
     # Human tab paths (Home Network/Wi-Fi) are supported; arbitrary URL paths are not.
