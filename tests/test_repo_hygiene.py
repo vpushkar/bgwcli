@@ -73,11 +73,11 @@ def test_readme_states_the_unit_start_timeout_the_unit_carries():
     unit = (ROOT / "deploy" / "bgw-autorestore.service").read_text()
     match = re.search(r"^TimeoutStartSec=(\d+)$", unit, re.MULTILINE)
     assert match
-    assert f"allows {match.group(1)} s (`TimeoutStartSec`)" in (ROOT / "README.md").read_text()
+    assert f"allows {match.group(1)} s (`TimeoutStartSec`)" in (ROOT / "docs" / "REFERENCE.md").read_text()
 
 
 def test_readme_lists_the_client_radio_actions_with_the_actions_that_skip_the_answer_read():
-    readme = (ROOT / "README.md").read_text()
+    readme = (ROOT / "docs" / "REFERENCE.md").read_text()
     assert (
         "the actions that take down the client's own radio (`restart-wifi-2.4`, `restart-wifi-5` and "
         "`find-best-channel-5`)"
