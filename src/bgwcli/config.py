@@ -1,8 +1,8 @@
 """Global options: environment defaults and access-code resolution.
 
 Environment contract (the TypeScript CLI's names, with every duration in seconds instead of
-milliseconds): BGW_HOST / ROUTER_IP, BGW_ACCESS_CODE, BGW_TIMEOUT, BGW_INSECURE_TLS ("0" disables),
-BGW_WAIT_FOR_SESSION ("1" enables), BGW_SESSION_WAIT_TIMEOUT, BGW_SESSION_WAIT_INTERVAL,
+milliseconds): BGW_HOST / ROUTER_IP, BGW_ACCESS_CODE, BGW_TIMEOUT, BGW_INSECURE_TLS (false disables),
+BGW_WAIT_FOR_SESSION (true enables), BGW_SESSION_WAIT_TIMEOUT, BGW_SESSION_WAIT_INTERVAL,
 BGW_SESSION_CACHE_TTL, BGW_SESSION_POOL_COOLDOWN, BGW_SESSION_LOCK_TIMEOUT. The user-facing unit is
 seconds (fractions allowed); the code keeps milliseconds internally, converted once at the boundary.
 """
@@ -183,6 +183,25 @@ def env_number(name: str, fallback: int | float, minimum: int | float) -> int | 
     return int(value) if value.is_integer() else value
 
 
+_FLAG_TRUE = frozenset({"1", "true", "yes", "on"})
+_FLAG_FALSE = frozenset({"0", "false", "no", "off"})
+
+
+def env_flag(name: str, default: bool) -> bool:
+    """A boolean variable: `1`, `true`, `yes`, `on` or `0`, `false`, `no`, `off`, case-insensitive,
+    surrounding whitespace ignored. Unset or empty gives the default; any other value is a usage error
+    naming the variable and the accepted spellings, so a typo never falls through to a default."""
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    value = raw.strip().lower()
+    if value in _FLAG_TRUE:
+        return True
+    if value in _FLAG_FALSE:
+        return False
+    raise UsageError(f"{name} must be 1, true, yes, on or 0, false, no, off; got {raw.strip()!r}.")
+
+
 def seconds_to_ms(text: str) -> int:
     """Whole milliseconds for a decimal number of seconds, truncated exactly (`1.0019` -> 1001).
 
@@ -249,8 +268,8 @@ def env_default_options(*, host: str | None = None) -> GlobalOptions:
         host=env_host() if host is None else host,
         timeout_ms=env_timeout_ms(),
         timeout_explicit=bool(os.environ.get("BGW_TIMEOUT")),
-        insecure_tls=os.environ.get("BGW_INSECURE_TLS") != "0",
-        wait_for_session=os.environ.get("BGW_WAIT_FOR_SESSION") == "1",
+        insecure_tls=env_flag("BGW_INSECURE_TLS", True),
+        wait_for_session=env_flag("BGW_WAIT_FOR_SESSION", False),
         session_wait_timeout_ms=env_seconds_ms("BGW_SESSION_WAIT_TIMEOUT", 120, 0),
         session_wait_interval_ms=env_seconds_ms("BGW_SESSION_WAIT_INTERVAL", 10, TIMEOUT_MIN_SECONDS),
         session_cache_ttl_ms=env_seconds_ms("BGW_SESSION_CACHE_TTL", 120, 0),

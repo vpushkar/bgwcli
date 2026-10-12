@@ -45,6 +45,7 @@ from .config import (
     DEFAULT_HOST,
     GlobalOptions,
     env_default_options,
+    env_flag,
     env_number,
     env_seconds_ms,
     load_config_file,
@@ -242,7 +243,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     json_mode = "--json" in args
     try:
         command = parse_args(args)
-        json_mode = command.options.json  # BGW_JSON=1 (environment or configuration file) also selects JSON
+        json_mode = command.options.json  # BGW_JSON=true (environment or configuration file) also selects JSON
         if command.name == "help":
             sys.stdout.write(help_text())
             return 0
@@ -2654,7 +2655,7 @@ def parse_args(argv: list[str]) -> Command:
     options = env_default_options(host=explicit_host)
     if opt("access_code_stdin", False):
         options.access_code_stdin = True
-    if opt("json", False) or os.environ.get("BGW_JSON") == "1":
+    if opt("json", False) or env_flag("BGW_JSON", False):
         options.json = True
     if opt("include_secrets", False):
         options.include_secrets = True
@@ -2718,7 +2719,7 @@ def parse_args(argv: list[str]) -> Command:
         pages=pages,
         out_dir=opt("out_dir"),
         prune=opt("prune", False),
-        all_clients=opt("all_clients", False) or os.environ.get("BGW_DUMP_ALL_CLIENTS") == "1",
+        all_clients=opt("all_clients", False) or env_flag("BGW_DUMP_ALL_CLIENTS", False),
         include=include,
         max_passes=(
             _numeric(opt("max_passes"), "--max-passes", 1) if opt("max_passes") is not None
@@ -2728,7 +2729,7 @@ def parse_args(argv: list[str]) -> Command:
             _numeric(opt("wait"), "--wait", 0) if opt("wait") is not None
             else _env_int("BGW_AUTORESTORE_WAIT", 120, 0)
         ),
-        on_any_diff=opt("on_any_diff", False) or os.environ.get("BGW_AUTORESTORE_ON_ANY_DIFF") == "1",
+        on_any_diff=opt("on_any_diff", False) or env_flag("BGW_AUTORESTORE_ON_ANY_DIFF", False),
     )
 
 
@@ -2945,16 +2946,17 @@ Notes:
   Read commands only perform GET requests plus the login POST required by the router.
   The router web UI is flaky. Fallbacks are intentionally narrow so normal commands stay fast.
   Session-pool waiting is opt-in so basic commands do not appear hung. Env:
-  BGW_WAIT_FOR_SESSION=1, BGW_SESSION_WAIT_TIMEOUT, BGW_SESSION_WAIT_INTERVAL.
+  BGW_WAIT_FOR_SESSION=true, BGW_SESSION_WAIT_TIMEOUT, BGW_SESSION_WAIT_INTERVAL.
   Every duration variable and flag is in seconds, fractions allowed (BGW_TIMEOUT=1.5).
   An active local pool cooldown always fails fast, including with --wait-for-session.
   Agent bursts reuse a short-lived local router session cache under a per-host
   lock to avoid filling the web session pool. Env:
   BGW_SESSION_CACHE_TTL, BGW_SESSION_POOL_COOLDOWN, BGW_SESSION_LOCK_TIMEOUT,
   BGW_SESSION_LOCK_STALE.
-  Preferences with a flag and a variable: BGW_JSON=1, BGW_LIMIT, BGW_DELAY,
-  BGW_DUMP_ALL_CLIENTS=1, BGW_DUMP_INCLUDE, BGW_AUTORESTORE_MAX_PASSES,
-  BGW_AUTORESTORE_WAIT, BGW_AUTORESTORE_ON_ANY_DIFF=1.
+  Preferences with a flag and a variable: BGW_JSON=true, BGW_LIMIT, BGW_DELAY,
+  BGW_DUMP_ALL_CLIENTS=true, BGW_DUMP_INCLUDE, BGW_AUTORESTORE_MAX_PASSES,
+  BGW_AUTORESTORE_WAIT, BGW_AUTORESTORE_ON_ANY_DIFF=true. Booleans take
+  1/0, true/false, yes/no or on/off.
   JSON dry-runs include operation, dryRun, committed, page, guarded, dangerous,
   confirmation, commitCommand, payload, and changes/result fields where applicable.
 

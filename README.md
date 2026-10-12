@@ -384,7 +384,7 @@ The exact mapping per command and per answer: [reference, Exit codes](docs/REFER
 
 ## Environment variables
 
-Every variable can also live in the [configuration file](#configuration-file). Every duration is in seconds, fractions allowed (`BGW_TIMEOUT='1.5'`). The first group mirrors the TypeScript CLI's variables apart from that unit:
+Every variable can also live in the [configuration file](#configuration-file). Every duration is in seconds, fractions allowed (`BGW_TIMEOUT='1.5'`); every boolean takes `true`/`false` (or `1`/`0`, `yes`/`no`, `on`/`off`). The first group mirrors the TypeScript CLI's variables apart from that unit:
 
 | Variable | Meaning | Default |
 | --- | --- | --- |
@@ -392,8 +392,8 @@ Every variable can also live in the [configuration file](#configuration-file). E
 | `BGW_ACCESS_CODE` | Device access code (`--access-code-stdin` is the alternative) | unset |
 | `BGW_FALLBACK_ACCESS_CODE` | `autorestore` only: the sticker code a reset reverts to | unset |
 | `BGW_TIMEOUT` | Request timeout in seconds (`--timeout`), at most `3600` | `15` |
-| `BGW_INSECURE_TLS` | `0` enforces TLS validation (`--strict-tls`) | accept self-signed |
-| `BGW_WAIT_FOR_SESSION` | `1` waits when the web session pool is full | off |
+| `BGW_INSECURE_TLS` | `false` enforces TLS validation (`--strict-tls`) | `true` (accept self-signed) |
+| `BGW_WAIT_FOR_SESSION` | `true` waits when the web session pool is full | `false` |
 | `BGW_SESSION_WAIT_TIMEOUT` / `BGW_SESSION_WAIT_INTERVAL` | How long to wait for a free session and how often to retry, in seconds (`--session-wait-timeout`, `--session-wait-interval`) | `120` / `10` |
 | `BGW_SESSION_CACHE_DIR` / `XDG_CACHE_HOME` | Session cache location | `~/.cache/bgw` |
 | `BGW_DUMP_DIR` / `XDG_STATE_HOME` | Default `dump` output directory | `~/.local/state/bgw/dumps` |
@@ -403,14 +403,16 @@ Standing preferences for flags, meant for the configuration file (a flag given o
 
 | Variable | Flag | Default |
 | --- | --- | --- |
-| `BGW_JSON` | `1` means `--json` everywhere | off |
+| `BGW_JSON` | `true` means `--json` everywhere | `false` |
 | `BGW_LIMIT` | `--limit` | `20` |
 | `BGW_DELAY` | `--delay`, in seconds | `1` |
-| `BGW_DUMP_ALL_CLIENTS` | `1` means `dump --all-clients` | off |
+| `BGW_DUMP_ALL_CLIENTS` | `true` means `dump --all-clients` | `false` |
 | `BGW_DUMP_INCLUDE` | `dump --include <csv\|all>` (`dump` only) | core pages |
 | `BGW_AUTORESTORE_MAX_PASSES` | `autorestore --max-passes` | `3` |
 | `BGW_AUTORESTORE_WAIT` | `autorestore --wait`, in seconds | `120` |
-| `BGW_AUTORESTORE_ON_ANY_DIFF` | `1` means `autorestore --on-any-diff` | off |
+| `BGW_AUTORESTORE_ON_ANY_DIFF` | `true` means `autorestore --on-any-diff` | `false` |
+
+Boolean variables take `1`, `true`, `yes`, `on` or `0`, `false`, `no`, `off` (any case); anything else is a usage error naming the variable.
 
 Timeouts, the session-wait and cache variables, and the session cache rules: [reference, Environment Variables](docs/REFERENCE.md#environment-variables).
 

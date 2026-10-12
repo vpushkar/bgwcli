@@ -460,7 +460,7 @@ Every user-facing duration is in seconds: `--timeout`, `--delay`, `--session-wai
 
 ## Environment Variables
 
-Every variable below may also be set in the [configuration file](#configuration-file). Every duration is given in seconds, fractions allowed; the first table mirrors the TypeScript CLI's variables apart from that unit:
+Every variable below may also be set in the [configuration file](#configuration-file). Every duration is given in seconds, fractions allowed, and every boolean takes `true`/`false` (see the note under the second table); the first table mirrors the TypeScript CLI's variables apart from that unit:
 
 | Variable | Meaning | Default |
 | --- | --- | --- |
@@ -468,8 +468,8 @@ Every variable below may also be set in the [configuration file](#configuration-
 | `BGW_ACCESS_CODE` | Device access code; the usual way to authenticate (`--access-code-stdin` is the alternative for scripts and wins when both are given) | unset |
 | `BGW_FALLBACK_ACCESS_CODE` | `autorestore` only: the sticker code a factory reset reverts to; tried once when the primary code is rejected (also after a cached primary session is refused); needing it corroborates a reset-shaped difference or an unfinished recovery, and on its own only warns | unset |
 | `BGW_TIMEOUT` | Request timeout in seconds (`--timeout`); minimum `0.001`, at most `3600` | `15` |
-| `BGW_INSECURE_TLS` | `0` enforces TLS validation (same as `--strict-tls`) | accept self-signed |
-| `BGW_WAIT_FOR_SESSION` | `1` waits when the web session pool is full (`--wait-for-session`) | off |
+| `BGW_INSECURE_TLS` | `false` enforces TLS validation (same as `--strict-tls`); `true` accepts the gateway's self-signed identity | `true` |
+| `BGW_WAIT_FOR_SESSION` | `true` waits when the web session pool is full (`--wait-for-session`) | `false` |
 | `BGW_SESSION_WAIT_TIMEOUT` | Session wait timeout in seconds (`--session-wait-timeout`; minimum 0) | `120` |
 | `BGW_SESSION_WAIT_INTERVAL` | Session wait poll interval in seconds (`--session-wait-interval`; minimum `0.001`) | `10` |
 | `BGW_SESSION_CACHE_TTL` | Local router session cache lifetime in seconds | `120` |
@@ -484,14 +484,16 @@ Standing preferences for per-command flags (Python CLI only). Each is read only 
 
 | Variable | Meaning | Default |
 | --- | --- | --- |
-| `BGW_JSON` | `1` selects `--json` for every command, including the structured error answer on failure; any other value leaves the terminal output | off |
+| `BGW_JSON` | `true` selects `--json` for every command, including the structured error answer on failure | `false` |
 | `BGW_LIMIT` | `--limit`: rows shown in page views (minimum 0) | `20` |
 | `BGW_DELAY` | `--delay`: pause between audit, scan and sweep requests in seconds (minimum 0) | `1` |
-| `BGW_DUMP_ALL_CLIENTS` | `1` selects `dump --all-clients` | off |
+| `BGW_DUMP_ALL_CLIENTS` | `true` selects `dump --all-clients` | `false` |
 | `BGW_DUMP_INCLUDE` | `dump --include <csv\|all>`: the optional pages every dump captures; applied to `dump` only, never to `diff` or `restore`, whose `--include` selects the pages to compare; a value naming no page is a usage error | core pages |
 | `BGW_AUTORESTORE_MAX_PASSES` | `autorestore --max-passes` (minimum 1) | `3` |
 | `BGW_AUTORESTORE_WAIT` | `autorestore --wait`, in seconds (minimum 0) | `120` |
-| `BGW_AUTORESTORE_ON_ANY_DIFF` | `1` selects `autorestore --on-any-diff` | off |
+| `BGW_AUTORESTORE_ON_ANY_DIFF` | `true` selects `autorestore --on-any-diff` | `false` |
+
+**Boolean variables** (`BGW_INSECURE_TLS`, `BGW_WAIT_FOR_SESSION`, `BGW_JSON`, `BGW_DUMP_ALL_CLIENTS`, `BGW_AUTORESTORE_ON_ANY_DIFF`) accept `1`, `true`, `yes`, `on` for true and `0`, `false`, `no`, `off` for false, in any case and with surrounding whitespace ignored. Unset or empty means the default. Any other value is a usage error (exit 1) naming the variable and the accepted spellings (`BGW_JSON must be 1, true, yes, on or 0, false, no, off; got 'maybe'.`), in the environment and in the configuration file alike, so a typo never falls through to a default.
 
 `--include-secrets` has no variable on purpose: redaction is a per-invocation decision, not a standing one.
 
