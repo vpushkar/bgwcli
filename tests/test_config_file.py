@@ -36,12 +36,12 @@ def test_parse_accepts_quoted_bare_and_commented_lines():
         "# gateway\n"
         "\n"
         "BGW_HOST='192.168.1.254'\n"
-        'BGW_TIMEOUT_MS="30000"\n'
+        'BGW_TIMEOUT="30"\n'
         "BGW_LIMIT=50\n"
         "  BGW_JSON = '1'  \n"
     )
     assert parse_config_text(text, "f") == {
-        "BGW_HOST": "192.168.1.254", "BGW_TIMEOUT_MS": "30000", "BGW_LIMIT": "50", "BGW_JSON": "1",
+        "BGW_HOST": "192.168.1.254", "BGW_TIMEOUT": "30", "BGW_LIMIT": "50", "BGW_JSON": "1",
     }
 
 
@@ -101,11 +101,11 @@ def test_missing_default_file_is_no_file_and_missing_named_file_is_a_usage_error
 
 
 def test_file_fills_only_unset_variables(tmp_path):
-    cfg = write(tmp_path / "cfg", "BGW_HOST='file.local'\nBGW_TIMEOUT_MS='30000'\nBGW_LIMIT='5'\n")
-    env = {"BGW_TIMEOUT_MS": "7000"}
+    cfg = write(tmp_path / "cfg", "BGW_HOST='file.local'\nBGW_TIMEOUT='30'\nBGW_LIMIT='5'\n")
+    env = {"BGW_TIMEOUT": "7"}
     applied = load_config_file(str(cfg), environ=env)
     assert applied == {"BGW_HOST": "file.local", "BGW_LIMIT": "5"}
-    assert env == {"BGW_TIMEOUT_MS": "7000", "BGW_HOST": "file.local", "BGW_LIMIT": "5"}
+    assert env == {"BGW_TIMEOUT": "7", "BGW_HOST": "file.local", "BGW_LIMIT": "5"}
 
 
 def test_explicit_path_wins_over_bgw_config_which_wins_over_the_default(tmp_path, monkeypatch):
@@ -166,10 +166,10 @@ def test_a_directory_or_undecodable_file_is_a_usage_error(tmp_path):
 
 
 def test_a_bad_value_in_the_file_gets_the_same_message_as_the_variable(tmp_path, monkeypatch, capsys, fake):  # noqa: F811
-    cfg = write(tmp_path / "cfg", "BGW_TIMEOUT_MS='soon'\n")
+    cfg = write(tmp_path / "cfg", "BGW_TIMEOUT='soon'\n")
     code, _, err = run(capsys, ["check", "--config", str(cfg)])
     assert code == 1
-    assert "BGW_TIMEOUT_MS must be a finite number greater than or equal to 1." in err
+    assert "BGW_TIMEOUT must be a finite number greater than or equal to 0.001." in err
 
 
 # ---------------------------------------------------------------------------------------------
@@ -179,15 +179,15 @@ def test_a_bad_value_in_the_file_gets_the_same_message_as_the_variable(tmp_path,
 def test_cli_precedence_is_flag_then_environment_then_file(tmp_path, monkeypatch, capsys, fake):  # noqa: F811
     cfg = write(
         tmp_path / "cfg",
-        "BGW_HOST='file.local'\nBGW_TIMEOUT_MS='30000'\nBGW_WAIT_FOR_SESSION='1'\nBGW_SESSION_WAIT_TIMEOUT_MS='5'\n",
+        "BGW_HOST='file.local'\nBGW_TIMEOUT='30'\nBGW_WAIT_FOR_SESSION='1'\nBGW_SESSION_WAIT_TIMEOUT='5'\n",
     )
-    monkeypatch.setenv("BGW_TIMEOUT_MS", "7000")
+    monkeypatch.setenv("BGW_TIMEOUT", "7")
     run(capsys, ["check", "--config", str(cfg), "--session-wait-timeout", "9"])
     opts = fake["options"]
     assert opts.host == "file.local"  # file: nothing else set it
     assert opts.timeout_ms == 7000 and opts.timeout_explicit is True  # environment beats file
     assert opts.wait_for_session is True
-    assert opts.session_wait_timeout_ms == 9  # flag beats file
+    assert opts.session_wait_timeout_ms == 9000  # flag beats file; seconds in, milliseconds kept
 
 
 def test_cli_reads_the_default_location_and_bgw_config(tmp_path, monkeypatch, capsys, fake):  # noqa: F811
@@ -265,7 +265,7 @@ def test_json_preference_selects_json_including_for_errors(tmp_path, monkeypatch
 def test_numeric_and_flag_preferences_fill_the_command_and_flags_still_win(tmp_path, monkeypatch, tmp_env):
     cfg = write(
         tmp_path / "cfg",
-        "BGW_LIMIT='7'\nBGW_DELAY_MS='10'\nBGW_DUMP_ALL_CLIENTS='1'\nBGW_DUMP_INCLUDE='firewall-advanced, lan'\n"
+        "BGW_LIMIT='7'\nBGW_DELAY='0.01'\nBGW_DUMP_ALL_CLIENTS='1'\nBGW_DUMP_INCLUDE='firewall-advanced, lan'\n"
         "BGW_AUTORESTORE_MAX_PASSES='5'\nBGW_AUTORESTORE_WAIT='1'\nBGW_AUTORESTORE_ON_ANY_DIFF='1'\n",
     )
     env: dict[str, str] = {}
@@ -279,7 +279,7 @@ def test_numeric_and_flag_preferences_fill_the_command_and_flags_still_win(tmp_p
     flagged = cli.parse_args(["dump", "--limit", "2", "--delay", "3", "--include", "lan", "--max-passes", "1",
                               "--wait", "0"])
     assert (flagged.limit, flagged.delay_ms, flagged.include, flagged.max_passes, flagged.wait_seconds) == (
-        2, 3, ["lan"], 1, 0,
+        2, 3000, ["lan"], 1, 0,
     )
 
 
@@ -295,7 +295,7 @@ def test_dump_include_preference_applies_to_dump_only(monkeypatch, tmp_env):
 
 @pytest.mark.parametrize(
     ("name", "value", "minimum"),
-    [("BGW_LIMIT", "-1", 0), ("BGW_DELAY_MS", "abc", 0), ("BGW_AUTORESTORE_MAX_PASSES", "0", 1),
+    [("BGW_LIMIT", "-1", 0), ("BGW_DELAY", "abc", 0), ("BGW_AUTORESTORE_MAX_PASSES", "0", 1),
      ("BGW_AUTORESTORE_WAIT", "inf", 0)],
 )
 def test_numeric_preferences_are_validated_like_the_other_variables(monkeypatch, tmp_env, name, value, minimum):

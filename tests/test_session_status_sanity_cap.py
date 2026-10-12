@@ -10,7 +10,7 @@ from bgwcli import cli, session
 
 
 def test_session_status_ignores_a_cooldown_stamped_beyond_the_configured_length(tmp_env, monkeypatch, capsys):
-    monkeypatch.setenv("BGW_SESSION_POOL_COOLDOWN_MS", "1000")
+    monkeypatch.setenv("BGW_SESSION_POOL_COOLDOWN", "1")
     host = "http://router.local"
     origin = cli.router_session_identity(host)
     paths = session.session_paths(origin)

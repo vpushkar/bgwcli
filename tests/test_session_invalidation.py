@@ -149,7 +149,7 @@ def test_record_pool_full_cooldown_never_replaces_the_pool_full_error_with_a_con
 ):
     from bgwcli.client import session_pool_full_error
 
-    monkeypatch.setenv("BGW_SESSION_LOCK_STALE_MS", "bogus")
+    monkeypatch.setenv("BGW_SESSION_LOCK_STALE", "bogus")
     client, _ = client_with(lambda *_: html(""))
     options = session.SessionCoordinatorOptions(120000, 300000, 1000, False)
     session.record_pool_full_cooldown(client, session_pool_full_error(), options)
@@ -168,7 +168,7 @@ def test_pool_full_on_a_local_command_survives_a_held_lock(tmp_env, monkeypatch,
     command still reports the pool-full outcome (exit 2, sessionPoolFull, wait evidence)."""
     import json
 
-    monkeypatch.setenv("BGW_SESSION_LOCK_TIMEOUT_MS", "200")
+    monkeypatch.setenv("BGW_SESSION_LOCK_TIMEOUT", "0.2")
     client, _ = client_with(lambda *_: html(POOL_FULL))
     monkeypatch.setattr(cli, "_client_factory", lambda *a, **kw: client)
     release = _hold_router_lock(client)

@@ -46,8 +46,10 @@ from .config import (
     GlobalOptions,
     env_default_options,
     env_number,
+    env_seconds_ms,
     load_config_file,
     resolve_access_code,
+    seconds_to_ms,
 )
 from .devices import fetch_device_list
 from .diagnostics import (
@@ -205,7 +207,7 @@ class Command:
     confirm: str | None = None
     access_code: str | None = None  # resolved once at client build; reused so stdin is never re-read
     protocol: str | None = None
-    delay_ms: int = 750
+    delay_ms: int = 1000  # --delay / BGW_DELAY are given in seconds (default 1); kept in milliseconds
     limit: int = 20
     include_parsed: bool = False
     pages: list[str] | None = None
@@ -2437,6 +2439,17 @@ def _numeric(value: str, name: str, minimum: int) -> int:
 _TIMEOUT_MAX_SECONDS = Decimal(3600)
 
 
+def _seconds_flag_ms(value: str, name: str, minimum: int | float) -> int:
+    """A duration flag given in seconds (fractions allowed), as whole milliseconds, truncated exactly."""
+    try:
+        parsed = float(value)
+    except ValueError:
+        parsed = float("nan")
+    if parsed != parsed or parsed in (float("inf"), float("-inf")) or parsed < minimum:
+        raise UsageError(f"{name} must be a finite number of seconds greater than or equal to {minimum}.")
+    return seconds_to_ms(value)
+
+
 def _timeout_milliseconds(value: str) -> int:
     """Convert CLI seconds once, retaining millisecond precision without float truncation."""
     try:
@@ -2481,8 +2494,8 @@ _GLOBAL_OPTIONS: tuple[tuple[tuple[str, ...], dict[str, Any]], ...] = (
     ),
     (("--strict-tls",), {"action": _FLAG, "help": "Enforce TLS validation"}),
     (("--wait-for-session",), {"action": _FLAG, "help": "Wait/retry when the router says all web sessions are in use"}),
-    (("--session-wait-timeout",), {"metavar": "<ms>", "help": "Wait timeout. Default: 120000"}),
-    (("--session-wait-interval",), {"metavar": "<ms>", "help": "Wait poll interval. Default: 10000"}),
+    (("--session-wait-timeout",), {"metavar": "<seconds>", "help": "Wait timeout in seconds. Default: 120"}),
+    (("--session-wait-interval",), {"metavar": "<seconds>", "help": "Wait poll interval in seconds. Default: 10"}),
 )
 _COMMAND_OPTIONS: tuple[tuple[tuple[str, ...], dict[str, Any]], ...] = (
     (("--raw",), {"action": _FLAG, "help": "Emit router HTML instead of parsed output"}),
@@ -2493,7 +2506,10 @@ _COMMAND_OPTIONS: tuple[tuple[tuple[str, ...], dict[str, Any]], ...] = (
     (("--confirm",), {"metavar": "<token>", "help": "Required token for every committed operation"}),
     (("--ipv4",), {"dest": "protocol", "action": "store_const", "const": "IPv4", "help": "diagnostics: prefer IPv4"}),
     (("--ipv6",), {"dest": "protocol", "action": "store_const", "const": "IPv6", "help": "diagnostics: prefer IPv6"}),
-    (("--delay",), {"metavar": "<ms>", "help": "Delay between audit/scan/sweep requests. Default: 750"}),
+    (
+        ("--delay",),
+        {"metavar": "<seconds>", "help": "Delay between audit/scan/sweep requests in seconds. Default: 1"},
+    ),
     (("--pages",), {"metavar": "<csv>", "help": "Limit sweep/scan/schema/audit traversal to selected pages"}),
     (("--include-parsed",), {"action": _FLAG, "help": "Include full parsed page data in sweep/schema JSON"}),
     (("--full",), {"action": _FLAG, "help": "Alias for --include-parsed"}),
@@ -2650,9 +2666,11 @@ def parse_args(argv: list[str]) -> Command:
     if opt("wait_for_session", False):
         options.wait_for_session = True
     if opt("session_wait_timeout") is not None:
-        options.session_wait_timeout_ms = _numeric(opt("session_wait_timeout"), "--session-wait-timeout", 0)
+        options.session_wait_timeout_ms = _seconds_flag_ms(opt("session_wait_timeout"), "--session-wait-timeout", 0)
     if opt("session_wait_interval") is not None:
-        options.session_wait_interval_ms = _numeric(opt("session_wait_interval"), "--session-wait-interval", 1)
+        options.session_wait_interval_ms = _seconds_flag_ms(
+            opt("session_wait_interval"), "--session-wait-interval", 0.001
+        )
 
     # A given selection naming no page is a usage error: an empty list must never widen to every page.
     pages = None
@@ -2691,7 +2709,10 @@ def parse_args(argv: list[str]) -> Command:
         full=opt("full", False),
         confirm=opt("confirm"),
         protocol=opt("protocol"),
-        delay_ms=_numeric(opt("delay"), "--delay", 0) if opt("delay") is not None else _env_int("BGW_DELAY_MS", 750, 0),
+        delay_ms=(
+            _seconds_flag_ms(opt("delay"), "--delay", 0) if opt("delay") is not None
+            else env_seconds_ms("BGW_DELAY", 1, 0)
+        ),
         limit=_numeric(opt("limit"), "--limit", 0) if opt("limit") is not None else _env_int("BGW_LIMIT", 20, 0),
         include_parsed=opt("include_parsed", False),
         pages=pages,
@@ -2799,7 +2820,7 @@ Generic inspection:
   bgwcli schema [--json]
     Sweep with parsed/form detail enabled.
 
-  bgwcli audit [--json] [--delay 750]
+  bgwcli audit [--json] [--delay 1]
     Sweep-backed health check across every mapped tab. Keeps going through hangs
     and reports failed/fallback/empty/useful pages. bgwcli readiness is an alias.
 
@@ -2911,11 +2932,11 @@ Global options:
   --wait <seconds>          autorestore: pause between passes. Default: 120
   --on-any-diff             autorestore: treat any restorable difference as a reset, not only total loss
   --timeout <seconds>       Request timeout in seconds, at most 3600. Default: 15 (home/lanstatistics: 45 unless set)
-  --delay <ms>              Delay between audit/scan/sweep requests. Default: 750
+  --delay <seconds>         Delay between audit/scan/sweep requests in seconds. Default: 1
   --limit <n>               Limit displayed rows. Default: 20
   --wait-for-session        Wait/retry when the router says all web sessions are in use
-  --session-wait-timeout <ms>   Wait timeout. Default: 120000
-  --session-wait-interval <ms>  Wait poll interval. Default: 10000
+  --session-wait-timeout <seconds>   Wait timeout in seconds. Default: 120
+  --session-wait-interval <seconds>  Wait poll interval in seconds. Default: 10
   --confirm <token>         Required token for every committed operation
   --strict-tls              Enforce TLS validation. Default router access does not verify its self-signed identity.
   Global options are accepted before or after the command name. <command> --help shows argparse usage.
@@ -2924,13 +2945,14 @@ Notes:
   Read commands only perform GET requests plus the login POST required by the router.
   The router web UI is flaky. Fallbacks are intentionally narrow so normal commands stay fast.
   Session-pool waiting is opt-in so basic commands do not appear hung. Env:
-  BGW_WAIT_FOR_SESSION=1, BGW_SESSION_WAIT_TIMEOUT_MS, BGW_SESSION_WAIT_INTERVAL_MS.
-  BGW_TIMEOUT_MS remains in milliseconds; --timeout uses seconds (e.g. 1.5).
+  BGW_WAIT_FOR_SESSION=1, BGW_SESSION_WAIT_TIMEOUT, BGW_SESSION_WAIT_INTERVAL.
+  Every duration variable and flag is in seconds, fractions allowed (BGW_TIMEOUT=1.5).
   An active local pool cooldown always fails fast, including with --wait-for-session.
   Agent bursts reuse a short-lived local router session cache under a per-host
   lock to avoid filling the web session pool. Env:
-  BGW_SESSION_CACHE_TTL_MS, BGW_SESSION_POOL_COOLDOWN_MS, BGW_SESSION_LOCK_TIMEOUT_MS.
-  Preferences with a flag and a variable: BGW_JSON=1, BGW_LIMIT, BGW_DELAY_MS,
+  BGW_SESSION_CACHE_TTL, BGW_SESSION_POOL_COOLDOWN, BGW_SESSION_LOCK_TIMEOUT,
+  BGW_SESSION_LOCK_STALE.
+  Preferences with a flag and a variable: BGW_JSON=1, BGW_LIMIT, BGW_DELAY,
   BGW_DUMP_ALL_CLIENTS=1, BGW_DUMP_INCLUDE, BGW_AUTORESTORE_MAX_PASSES,
   BGW_AUTORESTORE_WAIT, BGW_AUTORESTORE_ON_ANY_DIFF=1.
   JSON dry-runs include operation, dryRun, committed, page, guarded, dangerous,

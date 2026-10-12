@@ -343,7 +343,7 @@ def test_lock_contention_times_out_and_stale_lock_is_reclaimed(cache_dir, monkey
     assert 0.2 <= time.monotonic() - started < 3
     assert lock.exists()
 
-    monkeypatch.setenv("BGW_SESSION_LOCK_STALE_MS", "1")
+    monkeypatch.setenv("BGW_SESSION_LOCK_STALE", "0.001")
     # A live PID (including PID 1) must never be reclaimed solely because of its age.
     child = subprocess.Popen([sys.executable, "-c", "pass"])
     child.wait(timeout=5)

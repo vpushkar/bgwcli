@@ -240,7 +240,7 @@ def test_unknown_command_exits_1_with_message(capsys, fake):
 def test_invalid_numeric_options_fail_before_router_access(capsys, fake):
     code, _, err = run(capsys, ["sweep", "--delay", "-1"])
     assert code == 1
-    assert "--delay must be a finite number greater than or equal to 0." in err
+    assert "--delay must be a finite number of seconds greater than or equal to 0." in err
     assert "client" not in fake
 
     code, _, err = run(capsys, ["check", "--timeout", "abc"])
@@ -282,13 +282,13 @@ def test_global_options_accepted_before_and_after_subcommand(capsys, fake):
 
 def test_env_defaults_are_overridden_by_flags(capsys, fake, monkeypatch):
     monkeypatch.setenv("BGW_HOST", "http://env.local")
-    monkeypatch.setenv("BGW_TIMEOUT_MS", "5000")
+    monkeypatch.setenv("BGW_TIMEOUT", "5")
     run(capsys, ["check"])
     assert fake["options"].host == "http://env.local"
     assert fake["options"].timeout_ms == 5000
     assert fake["options"].insecure_tls is True
     run(capsys, ["check", "--host", "http://flag.local", "--timeout", "7", "--strict-tls", "--wait-for-session",
-                 "--session-wait-timeout", "1000", "--session-wait-interval", "100"])
+                 "--session-wait-timeout", "1", "--session-wait-interval", "0.1"])
     opts = fake["options"]
     assert (opts.host, opts.timeout_ms, opts.insecure_tls) == ("http://flag.local", 7000, False)
     assert (opts.wait_for_session, opts.session_wait_timeout_ms, opts.session_wait_interval_ms) == (True, 1000, 100)

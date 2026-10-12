@@ -461,7 +461,7 @@ class RouterClientOptions:
     host: str
     access_code: str | None = None
     timeout_ms: int = 15000
-    # True when the user set --timeout / BGW_TIMEOUT_MS; then SLOW_PAGE_TIMEOUT_MS floors do not apply.
+    # True when the user set --timeout / BGW_TIMEOUT; then SLOW_PAGE_TIMEOUT_MS floors do not apply.
     timeout_explicit: bool = False
     insecure_tls: bool = True
     user_agent: str = DEFAULT_USER_AGENT

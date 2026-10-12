@@ -1,4 +1,5 @@
-"""The request-timeout CLI uses seconds; environment and client APIs retain milliseconds."""
+"""The request timeout is given in seconds on the command line and in BGW_TIMEOUT; the client API keeps
+milliseconds."""
 
 from decimal import localcontext
 
@@ -49,12 +50,12 @@ def test_invalid_seconds_fail_as_usage_errors_before_client_creation(tmp_env, mo
         cli.parse_args(["check", f"--timeout={value}"])
 
 
-def test_timeout_default_and_millisecond_environment_stay_compatible(tmp_env, monkeypatch):
+def test_timeout_default_and_seconds_environment_agree_with_the_flag(tmp_env, monkeypatch):
     options = cli.parse_args(["check"]).options
     assert options.timeout_ms == 15000
     assert options.timeout_explicit is False
 
-    monkeypatch.setenv("BGW_TIMEOUT_MS", "1500")
+    monkeypatch.setenv("BGW_TIMEOUT", "1.5")
     options = cli.parse_args(["check"]).options
     assert options.timeout_ms == 1500
     assert options.timeout_explicit is True
@@ -65,19 +66,19 @@ def test_timeout_default_and_millisecond_environment_stay_compatible(tmp_env, mo
 
 
 @pytest.mark.parametrize(
-    ("argv", "environment_ms", "expected"),
+    ("argv", "environment_seconds", "expected"),
     [
         ([], None, [45000, 45000, 15000]),
         (["--timeout", "1.5"], None, [1500, 1500, 1500]),
-        ([], "1500.5", [1500.5, 1500.5, 1500.5]),
-        (["--timeout", "1.5"], "45000", [1500, 1500, 1500]),
+        ([], "1.5005", [1500, 1500, 1500]),
+        (["--timeout", "1.5"], "45", [1500, 1500, 1500]),
     ],
 )
 def test_cli_timeout_controls_request_deadlines_and_explicit_overrides_disable_floors(
-    tmp_env, monkeypatch, argv, environment_ms, expected
+    tmp_env, monkeypatch, argv, environment_seconds, expected
 ):
-    if environment_ms is not None:
-        monkeypatch.setenv("BGW_TIMEOUT_MS", environment_ms)
+    if environment_seconds is not None:
+        monkeypatch.setenv("BGW_TIMEOUT", environment_seconds)
     options = cli.parse_args(["check", *argv]).options
     seen = []
 

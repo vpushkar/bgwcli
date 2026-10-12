@@ -32,10 +32,10 @@ def test_env_defaults(tmp_env, monkeypatch):
     assert opts.host == "192.168.1.254" and opts.insecure_tls is True and opts.timeout_ms == 15000
     monkeypatch.setenv("ROUTER_IP", "10.0.0.1")
     monkeypatch.setenv("BGW_INSECURE_TLS", "0")
-    monkeypatch.setenv("BGW_TIMEOUT_MS", "2500")
+    monkeypatch.setenv("BGW_TIMEOUT", "2.5")
     opts = config.env_default_options()
     assert opts.host == "10.0.0.1" and opts.insecure_tls is False and opts.timeout_ms == 2500
-    monkeypatch.setenv("BGW_TIMEOUT_MS", "0")
+    monkeypatch.setenv("BGW_TIMEOUT", "0")
     with pytest.raises(UsageError):
         config.env_default_options()
 
@@ -55,19 +55,19 @@ def test_access_code_resolution(tmp_env, monkeypatch):
 
 
 def test_env_number_keeps_fractional_values_like_js_number(tmp_env, monkeypatch):
-    monkeypatch.setenv("BGW_TIMEOUT_MS", "1500.5")
-    assert config.env_number("BGW_TIMEOUT_MS", 15000, 1) == 1500.5
-    monkeypatch.setenv("BGW_TIMEOUT_MS", "1500")
-    value = config.env_number("BGW_TIMEOUT_MS", 15000, 1)
+    monkeypatch.setenv("BGW_LIMIT", "1500.5")
+    assert config.env_number("BGW_LIMIT", 15000, 1) == 1500.5
+    monkeypatch.setenv("BGW_LIMIT", "1500")
+    value = config.env_number("BGW_LIMIT", 15000, 1)
     assert value == 1500 and isinstance(value, int)
-    monkeypatch.setenv("BGW_TIMEOUT_MS", "1e3")
-    assert config.env_number("BGW_TIMEOUT_MS", 15000, 1) == 1000
-    monkeypatch.setenv("BGW_TIMEOUT_MS", " 250 ")
-    assert config.env_number("BGW_TIMEOUT_MS", 15000, 1) == 250
+    monkeypatch.setenv("BGW_LIMIT", "1e3")
+    assert config.env_number("BGW_LIMIT", 15000, 1) == 1000
+    monkeypatch.setenv("BGW_LIMIT", " 250 ")
+    assert config.env_number("BGW_LIMIT", 15000, 1) == 250
     for bad in ("0.5", "-1", "abc", "Infinity", "nan"):
-        monkeypatch.setenv("BGW_TIMEOUT_MS", bad)
-        with pytest.raises(UsageError, match="BGW_TIMEOUT_MS must be a finite number greater than or equal to 1."):
-            config.env_number("BGW_TIMEOUT_MS", 15000, 1)
+        monkeypatch.setenv("BGW_LIMIT", bad)
+        with pytest.raises(UsageError, match="BGW_LIMIT must be a finite number greater than or equal to 1."):
+            config.env_number("BGW_LIMIT", 15000, 1)
 
 
 def test_json_dict_camel_case_drops_none():
@@ -79,7 +79,7 @@ def test_json_dict_camel_case_drops_none():
 
 def test_timeout_is_explicit_only_when_the_user_set_it(tmp_env, monkeypatch):
     assert config.env_default_options().timeout_explicit is False
-    monkeypatch.setenv("BGW_TIMEOUT_MS", "20000")
+    monkeypatch.setenv("BGW_TIMEOUT", "20")
     assert config.env_default_options().timeout_explicit is True
 
 
@@ -109,12 +109,12 @@ def test_package_version_has_a_single_source():
         assert not literal.search(source), f"{module} carries its own version literal"
 
 
-def test_bgw_timeout_ms_is_capped_at_one_hour_like_the_timeout_flag(tmp_env, monkeypatch):
-    monkeypatch.setenv("BGW_TIMEOUT_MS", "3600000")
+def test_bgw_timeout_is_capped_at_one_hour_like_the_timeout_flag(tmp_env, monkeypatch):
+    monkeypatch.setenv("BGW_TIMEOUT", "3600")
     assert config.env_default_options().timeout_ms == 3600000
-    for too_large in ("3600001", "1e9", "1e16"):
-        monkeypatch.setenv("BGW_TIMEOUT_MS", too_large)
-        with pytest.raises(UsageError, match=r"BGW_TIMEOUT_MS is in milliseconds and must be at most 3600000"):
+    for too_large in ("3600.001", "1e9", "1e16"):
+        monkeypatch.setenv("BGW_TIMEOUT", too_large)
+        with pytest.raises(UsageError, match=r"BGW_TIMEOUT is in seconds and must be at most 3600"):
             config.env_default_options()
 
 

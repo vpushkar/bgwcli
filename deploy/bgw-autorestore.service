@@ -9,7 +9,7 @@ Documentation=https://github.com/vpushkar/bgwcli
 
 [Service]
 Type=oneshot
-# BGW_ACCESS_CODE, BGW_FALLBACK_ACCESS_CODE (sticker code), optional BGW_TIMEOUT_MS / BGW_HOST.
+# BGW_ACCESS_CODE, BGW_FALLBACK_ACCESS_CODE (sticker code), optional BGW_TIMEOUT (seconds) / BGW_HOST.
 EnvironmentFile=%h/.config/bgw/autorestore.env
 # stdout is a pipe to the journal: unbuffered, so a kill at TimeoutStartSec or a power loss loses at
 # most the progress line being written, not the whole run's output.

@@ -30,7 +30,7 @@ from typing import Any, TypeVar
 
 from . import filesystem
 from .client import BGW320Client, normalize_origin, pool_full_metadata, session_pool_full_error
-from .config import GlobalOptions, env_number
+from .config import GlobalOptions, env_seconds_ms
 from .errors import (
     BgwError,
     RouterAuthError,
@@ -613,8 +613,8 @@ def _wait_for_lock(
 
 
 def _lock_stale_ms() -> float:
-    """BGW_SESSION_LOCK_STALE_MS, validated like every other numeric setting (UsageError)."""
-    return float(env_number("BGW_SESSION_LOCK_STALE_MS", _DEFAULT_LOCK_STALE_MS, 0))
+    """BGW_SESSION_LOCK_STALE (seconds), validated like every other numeric setting (UsageError)."""
+    return float(env_seconds_ms("BGW_SESSION_LOCK_STALE", _DEFAULT_LOCK_STALE_MS // 1000, 0))
 
 
 def _remove_stale_lock(path: Path, stale_ms: float) -> PermissionError | None:

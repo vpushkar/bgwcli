@@ -141,7 +141,7 @@ failure (and every later run of that stopped recovery), a configuration write th
 a failed unit).
 
 `SuccessExitStatus=1` cannot tell exit 1 causes apart: a usage error (a mistyped option in the
-unit, a bad value in `autorestore.env` such as `BGW_TIMEOUT_MS` above one hour) and a timeout
+unit, a bad value in `autorestore.env` such as `BGW_TIMEOUT` above one hour) and a timeout
 waiting for the local session lock (another `bgwcli` command holding it) also exit 1, so they too
 leave the unit green. A mistyped or unreadable dump path is different: it is a dump file error and
 exits 2, so the unit shows as failed. Read the journal after editing the unit or the environment
@@ -153,14 +153,14 @@ limit (`RUN_DEADLINE_SECONDS`) + 90 s for the one step that may still be in flig
 15 s POST + 60 s acknowledgement window) + 555 s as an upper bound for the closing fetch (the 11 snapshot
 pages, 7 always plus up to 4 optional form pages, at the 15 s page timeout; the figure is kept
 generous and keeps the 2580 s arithmetic unchanged) + a 135 s margin. The wait for the local
-session lock (`BGW_SESSION_LOCK_TIMEOUT_MS`, default 300 s) happens before the run limit starts
+session lock (`BGW_SESSION_LOCK_TIMEOUT`, default 300 s) happens before the run limit starts
 counting and is not part of that sum, so a run that first waited up to 300 s for another `bgwcli`
 command can overrun 2580 s (1800 + 90 + 555 + 300 = 2745 s before the margin is counted). When
 `TimeoutStartSec` elapses systemd stops the run (SIGTERM, then SIGKILL after `TimeoutStopSec`, which
 the unit leaves at the systemd default) and marks the unit failed with result `timeout`; `bgwcli`
 installs no SIGTERM handler, so the process ends at once. A recovery intent already recorded stays on
 disk; the next timer tick re-reads the gateway and rebuilds its plan from that fresh state (it never
-replays saved POSTs). Raise `BGW_SESSION_LOCK_TIMEOUT_MS` only together with `TimeoutStartSec`.
+replays saved POSTs). Raise `BGW_SESSION_LOCK_TIMEOUT` only together with `TimeoutStartSec`.
 
 ## 5. Dry-run by hand
 

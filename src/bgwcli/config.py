@@ -1,9 +1,10 @@
 """Global options: environment defaults and access-code resolution.
 
-Environment contract (identical to the TypeScript CLI so both can share one setup):
-BGW_HOST / ROUTER_IP, BGW_ACCESS_CODE, BGW_TIMEOUT_MS, BGW_INSECURE_TLS ("0" disables),
-BGW_WAIT_FOR_SESSION ("1" enables), BGW_SESSION_WAIT_TIMEOUT_MS, BGW_SESSION_WAIT_INTERVAL_MS,
-BGW_SESSION_CACHE_TTL_MS, BGW_SESSION_POOL_COOLDOWN_MS, BGW_SESSION_LOCK_TIMEOUT_MS.
+Environment contract (the TypeScript CLI's names, with every duration in seconds instead of
+milliseconds): BGW_HOST / ROUTER_IP, BGW_ACCESS_CODE, BGW_TIMEOUT, BGW_INSECURE_TLS ("0" disables),
+BGW_WAIT_FOR_SESSION ("1" enables), BGW_SESSION_WAIT_TIMEOUT, BGW_SESSION_WAIT_INTERVAL,
+BGW_SESSION_CACHE_TTL, BGW_SESSION_POOL_COOLDOWN, BGW_SESSION_LOCK_TIMEOUT. The user-facing unit is
+seconds (fractions allowed); the code keeps milliseconds internally, converted once at the boundary.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import stat
 import sys
 from collections.abc import Callable, MutableMapping
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 
 from .errors import UsageError
 
@@ -30,14 +32,14 @@ DEFAULT_HOST = "192.168.1.254"
 
 CONFIG_PATH_ENV = "BGW_CONFIG"
 
-# Every variable the file may set. The first group is the environment contract above (shared with the
-# TypeScript CLI); the second group holds the per-command preferences that previously had a flag only.
+# Every variable the file may set. The first group is the environment contract above; the second group
+# holds the per-command preferences that previously had a flag only.
 CONFIG_KEYS: frozenset[str] = frozenset({
-    "BGW_HOST", "ROUTER_IP", "BGW_ACCESS_CODE", "BGW_FALLBACK_ACCESS_CODE", "BGW_TIMEOUT_MS",
-    "BGW_INSECURE_TLS", "BGW_WAIT_FOR_SESSION", "BGW_SESSION_WAIT_TIMEOUT_MS", "BGW_SESSION_WAIT_INTERVAL_MS",
-    "BGW_SESSION_CACHE_TTL_MS", "BGW_SESSION_POOL_COOLDOWN_MS", "BGW_SESSION_LOCK_TIMEOUT_MS",
-    "BGW_SESSION_LOCK_STALE_MS", "BGW_SESSION_CACHE_DIR", "BGW_DUMP_DIR",
-    "BGW_JSON", "BGW_LIMIT", "BGW_DELAY_MS", "BGW_DUMP_ALL_CLIENTS", "BGW_DUMP_INCLUDE",
+    "BGW_HOST", "ROUTER_IP", "BGW_ACCESS_CODE", "BGW_FALLBACK_ACCESS_CODE", "BGW_TIMEOUT",
+    "BGW_INSECURE_TLS", "BGW_WAIT_FOR_SESSION", "BGW_SESSION_WAIT_TIMEOUT", "BGW_SESSION_WAIT_INTERVAL",
+    "BGW_SESSION_CACHE_TTL", "BGW_SESSION_POOL_COOLDOWN", "BGW_SESSION_LOCK_TIMEOUT",
+    "BGW_SESSION_LOCK_STALE", "BGW_SESSION_CACHE_DIR", "BGW_DUMP_DIR",
+    "BGW_JSON", "BGW_LIMIT", "BGW_DELAY", "BGW_DUMP_ALL_CLIENTS", "BGW_DUMP_INCLUDE",
     "BGW_AUTORESTORE_MAX_PASSES", "BGW_AUTORESTORE_WAIT", "BGW_AUTORESTORE_ON_ANY_DIFF",
 })
 # Credentials: honoured from the file only when nobody but the owner can read it.
@@ -149,7 +151,7 @@ class GlobalOptions:
     json: bool = False
     include_secrets: bool = False
     timeout_ms: int = 15000
-    timeout_explicit: bool = False  # set by --timeout or BGW_TIMEOUT_MS; disables slow-page floors
+    timeout_explicit: bool = False  # set by --timeout or BGW_TIMEOUT; disables slow-page floors
     insecure_tls: bool = True
     wait_for_session: bool = False
     session_wait_timeout_ms: int = 120000
@@ -159,7 +161,7 @@ class GlobalOptions:
     session_lock_timeout_ms: int = 300000
 
 
-def env_number(name: str, fallback: int, minimum: int) -> int | float:
+def env_number(name: str, fallback: int | float, minimum: int | float) -> int | float:
     """Numeric env var with JS `Number()` semantics for the documented cases.
 
     Accepted like TS: decimal integers, fractional values (kept as a float, e.g. `1500.5`),
@@ -181,17 +183,44 @@ def env_number(name: str, fallback: int, minimum: int) -> int | float:
     return int(value) if value.is_integer() else value
 
 
+def seconds_to_ms(text: str) -> int:
+    """Whole milliseconds for a decimal number of seconds, truncated exactly (`1.0019` -> 1001).
+
+    The decimal exponent is shifted rather than multiplied so no context rounding applies; the caller
+    has already validated the text as a finite number at or above its minimum."""
+    try:
+        seconds = Decimal(text.strip().replace("_", ""))
+    except InvalidOperation:
+        seconds = Decimal(float(text))
+    sign, digits, exponent = seconds.as_tuple()
+    return int(Decimal((sign, digits, exponent + 3)))
+
+
+def env_seconds_ms(name: str, fallback_seconds: int | float, minimum_seconds: int | float) -> int:
+    """A duration variable given in seconds (fractions allowed), returned as whole milliseconds.
+
+    Validated like every other numeric variable (same message, naming the variable and the minimum in
+    seconds); an unset or empty variable gives the fallback."""
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return seconds_to_ms(repr(fallback_seconds))
+    env_number(name, fallback_seconds, minimum_seconds)  # validation and message only
+    return seconds_to_ms(raw)
+
+
 # Same ceiling as --timeout (3600 s): a larger request deadline would hang for hours against a dead
 # gateway, and a huge one overflows the platform timer.
-TIMEOUT_MAX_MS = 3600 * 1000
+TIMEOUT_MAX_SECONDS = 3600
+TIMEOUT_MAX_MS = TIMEOUT_MAX_SECONDS * 1000
+TIMEOUT_MIN_SECONDS = 0.001
 
 
-def env_timeout_ms() -> int | float:
-    value = env_number("BGW_TIMEOUT_MS", 15000, 1)
+def env_timeout_ms() -> int:
+    value = env_seconds_ms("BGW_TIMEOUT", 15, TIMEOUT_MIN_SECONDS)
     if value > TIMEOUT_MAX_MS:
         raise UsageError(
-            f"BGW_TIMEOUT_MS is in milliseconds and must be at most {TIMEOUT_MAX_MS}; "
-            f"got {os.environ.get('BGW_TIMEOUT_MS', '').strip()}."
+            f"BGW_TIMEOUT is in seconds and must be at most {TIMEOUT_MAX_SECONDS}; "
+            f"got {os.environ.get('BGW_TIMEOUT', '').strip()}."
         )
     return value
 
@@ -214,18 +243,19 @@ def env_host() -> str:
 
 def env_default_options(*, host: str | None = None) -> GlobalOptions:
     """Defaults from the environment. The host variables are consulted only when no host is given: an
-    explicit host (or the fixed one a help command carries) never reads BGW_HOST or ROUTER_IP."""
+    explicit host (or the fixed one a help command carries) never reads BGW_HOST or ROUTER_IP.
+    Every duration is given in seconds and kept in milliseconds."""
     return GlobalOptions(
         host=env_host() if host is None else host,
         timeout_ms=env_timeout_ms(),
-        timeout_explicit=bool(os.environ.get("BGW_TIMEOUT_MS")),
+        timeout_explicit=bool(os.environ.get("BGW_TIMEOUT")),
         insecure_tls=os.environ.get("BGW_INSECURE_TLS") != "0",
         wait_for_session=os.environ.get("BGW_WAIT_FOR_SESSION") == "1",
-        session_wait_timeout_ms=env_number("BGW_SESSION_WAIT_TIMEOUT_MS", 120000, 0),
-        session_wait_interval_ms=env_number("BGW_SESSION_WAIT_INTERVAL_MS", 10000, 1),
-        session_cache_ttl_ms=env_number("BGW_SESSION_CACHE_TTL_MS", 120000, 0),
-        session_pool_cooldown_ms=env_number("BGW_SESSION_POOL_COOLDOWN_MS", 300000, 0),
-        session_lock_timeout_ms=env_number("BGW_SESSION_LOCK_TIMEOUT_MS", 300000, 1),
+        session_wait_timeout_ms=env_seconds_ms("BGW_SESSION_WAIT_TIMEOUT", 120, 0),
+        session_wait_interval_ms=env_seconds_ms("BGW_SESSION_WAIT_INTERVAL", 10, TIMEOUT_MIN_SECONDS),
+        session_cache_ttl_ms=env_seconds_ms("BGW_SESSION_CACHE_TTL", 120, 0),
+        session_pool_cooldown_ms=env_seconds_ms("BGW_SESSION_POOL_COOLDOWN", 300, 0),
+        session_lock_timeout_ms=env_seconds_ms("BGW_SESSION_LOCK_TIMEOUT", 300, TIMEOUT_MIN_SECONDS),
     )
 
 

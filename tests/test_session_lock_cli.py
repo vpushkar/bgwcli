@@ -113,7 +113,7 @@ def test_public_cli_lock_infrastructure_fault_is_exit_two(
 @pytest.mark.parametrize("command", [["session", "clear-cache"], ["status"]])
 @pytest.mark.parametrize("site", ["guard", "marker"])
 def test_public_cli_held_lock_timeout_stays_exit_one(offline_client, monkeypatch, capsys, command, site):
-    monkeypatch.setenv("BGW_SESSION_LOCK_TIMEOUT_MS", "1")
+    monkeypatch.setenv("BGW_SESSION_LOCK_TIMEOUT", "0.001")
     paths = session.session_paths(ORIGIN)
     paths.lock.parent.mkdir()
     held_path = paths.lock.with_name(paths.lock.name + ".guard") if site == "guard" else paths.lock

@@ -181,8 +181,8 @@ def test_env_default_options_still_validates_other_variables_with_a_host(monkeyp
     from bgwcli.config import env_default_options
     from bgwcli.errors import UsageError
 
-    monkeypatch.setenv("BGW_TIMEOUT_MS", "0")
-    with pytest.raises(UsageError, match="BGW_TIMEOUT_MS"):
+    monkeypatch.setenv("BGW_TIMEOUT", "0")
+    with pytest.raises(UsageError, match="BGW_TIMEOUT"):
         env_default_options(host="127.0.0.1")
 
 

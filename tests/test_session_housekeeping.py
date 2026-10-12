@@ -118,15 +118,15 @@ def test_a_foreign_owned_leftover_is_preserved(tmp_env, monkeypatch):
 
 @pytest.mark.parametrize("value", ["garbage", "NaN", "Infinity", "-1"])
 def test_an_invalid_stale_lock_setting_is_a_usage_error(tmp_env, monkeypatch, capsys, value):
-    monkeypatch.setenv("BGW_SESSION_LOCK_STALE_MS", value)
-    with pytest.raises(UsageError, match="BGW_SESSION_LOCK_STALE_MS"):
+    monkeypatch.setenv("BGW_SESSION_LOCK_STALE", value)
+    with pytest.raises(UsageError, match="BGW_SESSION_LOCK_STALE"):
         session._lock_stale_ms()
     assert cli.main(["session", "clear-cache", "--host", ORIGIN, "--json"]) == 1
     capsys.readouterr()
 
 
 def test_a_valid_stale_lock_setting_is_used(tmp_env, monkeypatch):
-    monkeypatch.setenv("BGW_SESSION_LOCK_STALE_MS", "1500.5")
-    assert session._lock_stale_ms() == 1500.5
-    monkeypatch.delenv("BGW_SESSION_LOCK_STALE_MS")
+    monkeypatch.setenv("BGW_SESSION_LOCK_STALE", "1.5")
+    assert session._lock_stale_ms() == 1500.0
+    monkeypatch.delenv("BGW_SESSION_LOCK_STALE")
     assert session._lock_stale_ms() == session._DEFAULT_LOCK_STALE_MS

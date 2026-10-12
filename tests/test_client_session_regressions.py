@@ -97,7 +97,7 @@ def test_live_lock_owner_cannot_be_displaced_by_age(tmp_path, monkeypatch):
     release = session._acquire_lock(path, 1000)
     old = time.time() - 901
     os.utime(path, (old, old))
-    monkeypatch.setenv("BGW_SESSION_LOCK_STALE_MS", "1")
+    monkeypatch.setenv("BGW_SESSION_LOCK_STALE", "0.001")
     try:
         with pytest.raises(session.SessionLockTimeoutError):
             session._acquire_lock(path, 0)
