@@ -111,6 +111,12 @@ what is between them literally, so the unit and a shell see the same code; an un
 spaces, `#`, `;`, `$`, quotes or backslashes may be read differently by the two. A code containing
 `'` cannot be written this way; change it on the gateway.
 
+The CLI itself reads the same format from `~/.config/bgw/config` (see the README, Configuration file). To
+keep one file, point the unit at it instead: edit `EnvironmentFile=` in the service to
+`%h/.config/bgw/config`, or symlink `autorestore.env` to it. The CLI accepts a few more keys there
+(`BGW_AUTORESTORE_MAX_PASSES`, `BGW_AUTORESTORE_WAIT`, `BGW_AUTORESTORE_ON_ANY_DIFF` set the
+timer's `--max-passes`, `--wait` and `--on-any-diff` defaults); systemd passes them through unchanged.
+
 ## 4. Check it works
 
 ```

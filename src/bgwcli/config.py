@@ -9,12 +9,136 @@ BGW_SESSION_CACHE_TTL_MS, BGW_SESSION_POOL_COOLDOWN_MS, BGW_SESSION_LOCK_TIMEOUT
 from __future__ import annotations
 
 import os
+import re
+import stat
 import sys
+from collections.abc import Callable, MutableMapping
 from dataclasses import dataclass
 
 from .errors import UsageError
 
 DEFAULT_HOST = "192.168.1.254"
+
+# ---------------------------------------------------------------------------------------------
+# configuration file
+#
+# The file holds the same BGW_* variables as the environment, one `KEY='value'` per line: the format
+# systemd's EnvironmentFile= and `sh` (`set -a; . file`) read, so one file can serve the CLI, the
+# autorestore unit and a shell. It is a third source of defaults: a CLI flag wins over an environment
+# variable, an environment variable wins over the file, the file wins over the built-in default. The
+# loader therefore only fills environment variables that are not already set.
+
+CONFIG_PATH_ENV = "BGW_CONFIG"
+
+# Every variable the file may set. The first group is the environment contract above (shared with the
+# TypeScript CLI); the second group holds the per-command preferences that previously had a flag only.
+CONFIG_KEYS: frozenset[str] = frozenset({
+    "BGW_HOST", "ROUTER_IP", "BGW_ACCESS_CODE", "BGW_FALLBACK_ACCESS_CODE", "BGW_TIMEOUT_MS",
+    "BGW_INSECURE_TLS", "BGW_WAIT_FOR_SESSION", "BGW_SESSION_WAIT_TIMEOUT_MS", "BGW_SESSION_WAIT_INTERVAL_MS",
+    "BGW_SESSION_CACHE_TTL_MS", "BGW_SESSION_POOL_COOLDOWN_MS", "BGW_SESSION_LOCK_TIMEOUT_MS",
+    "BGW_SESSION_LOCK_STALE_MS", "BGW_SESSION_CACHE_DIR", "BGW_DUMP_DIR",
+    "BGW_JSON", "BGW_LIMIT", "BGW_DELAY_MS", "BGW_DUMP_ALL_CLIENTS", "BGW_DUMP_INCLUDE",
+    "BGW_AUTORESTORE_MAX_PASSES", "BGW_AUTORESTORE_WAIT", "BGW_AUTORESTORE_ON_ANY_DIFF",
+})
+# Credentials: honoured from the file only when nobody but the owner can read it.
+SECRET_KEYS: frozenset[str] = frozenset({"BGW_ACCESS_CODE", "BGW_FALLBACK_ACCESS_CODE"})
+
+_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+# Characters an unquoted value may not contain: a shell and systemd read them differently
+# (word splitting, comments, expansion, quoting), so the file would mean two things.
+_UNQUOTED_UNSAFE = set(" \t#;$'\"\\`")
+
+
+def default_config_path() -> str:
+    """$XDG_CONFIG_HOME/bgw/config, else ~/.config/bgw/config."""
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "bgw", "config")
+
+
+def parse_config_text(text: str, source: str) -> dict[str, str]:
+    """`KEY='value'` lines (also `KEY="value"` and bare `KEY=value`), `#` comments and blank lines.
+
+    Quotes are stripped and the text between them kept literally (no escapes), as EnvironmentFile=
+    and `sh` do for single quotes. A bare value may not contain whitespace, `#`, `;`, `$`, quotes,
+    a backslash or a backquote: quote it. An unknown key is a usage error naming it, so a typo never
+    falls through to a default. A later line for the same key replaces an earlier one, as in `sh`."""
+    values: dict[str, str] = {}
+    for number, raw_line in enumerate(text.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        where = f"{source}:{number}"
+        key, separator, rest = line.partition("=")
+        key = key.strip()
+        if not separator or not _KEY_RE.fullmatch(key):
+            raise UsageError(f"{where}: expected KEY='value', got {line!r}")
+        if key not in CONFIG_KEYS:
+            raise UsageError(
+                f"{where}: unknown setting {key}; the file accepts the BGW_* variables listed in the README"
+            )
+        value = rest.strip()
+        if value[:1] in ("'", '"'):
+            quote = value[0]
+            if len(value) < 2 or value[-1] != quote or quote in value[1:-1]:
+                raise UsageError(f"{where}: {key} has an unterminated or doubly quoted value; write {key}='text'")
+            value = value[1:-1]
+        elif _UNQUOTED_UNSAFE & set(value):
+            raise UsageError(
+                f"{where}: {key} needs quotes around a value with spaces or shell characters; write {key}='text'"
+            )
+        values[key] = value
+    return values
+
+
+def _private_to_owner(info: os.stat_result) -> bool:
+    uid_ok = not hasattr(os, "geteuid") or info.st_uid == os.geteuid()
+    return stat.S_ISREG(info.st_mode) and uid_ok and (info.st_mode & 0o077) == 0
+
+
+def load_config_file(
+    path: str | None = None,
+    *,
+    environ: MutableMapping[str, str] | None = None,
+    warn: Callable[[str], None] | None = None,
+) -> dict[str, str]:
+    """Read the configuration file and fill unset environment variables from it; returns what was applied.
+
+    `path` (from --config) wins over $BGW_CONFIG, which wins over the default location. A file named
+    explicitly must exist; a missing default file means "no file". The access codes are applied only
+    when the file is a regular file owned by the user with no group or other permissions (0600 or
+    stricter); otherwise they are skipped with one stderr warning naming the fix and every other key
+    is still applied. A variable already present in the environment is never replaced."""
+    env = os.environ if environ is None else environ
+    explicit = path if path is not None else (env.get(CONFIG_PATH_ENV) or None)
+    target = explicit if explicit is not None else default_config_path()
+    try:
+        with open(target, encoding="utf-8") as handle:
+            info = os.fstat(handle.fileno())
+            text = handle.read()
+    except FileNotFoundError:
+        if explicit is None:
+            return {}
+        origin = "--config" if path is not None else CONFIG_PATH_ENV
+        raise UsageError(f"{origin} names {target}, which does not exist.") from None
+    except OSError as exc:
+        raise UsageError(f"Cannot read the configuration file {target}: {exc.strerror or exc}") from exc
+    except UnicodeDecodeError as exc:
+        raise UsageError(f"Cannot read the configuration file {target}: not UTF-8 text") from exc
+    values = parse_config_text(text, target)
+    secrets = sorted(key for key in values if key in SECRET_KEYS)
+    if secrets and not _private_to_owner(info):
+        for key in secrets:
+            del values[key]
+        (warn or (lambda line: sys.stderr.write(line + "\n")))(
+            f"Ignoring {' and '.join(secrets)} in {target}: the file must be a regular file owned by you "
+            f"with mode 0600 (chmod 600 {target}); other settings were applied."
+        )
+    applied: dict[str, str] = {}
+    for key, value in values.items():
+        if key not in env:
+            env[key] = value
+            applied[key] = value
+    return applied
 
 
 @dataclass

@@ -9,7 +9,7 @@ Contents: [Install details](#install-details) · [Quality checks](#quality-check
 [Backup contract](#backup-contract) · [Choosing what to back up and restore](#choosing-what-to-back-up-and-restore) ·
 [Automatic recovery (autorestore)](#automatic-recovery-autorestore) · [Page views and `--limit`](#page-views-and---limit) ·
 [Generic Inspection And Forms](#generic-inspection-and-forms) · [Sweep](#sweep) · [Timeouts](#timeouts) ·
-[Environment Variables](#environment-variables) · [Router Fixture Pack](#router-fixture-pack) · [Diagnostics](#diagnostics) ·
+[Environment Variables](#environment-variables) · [Configuration file](#configuration-file) · [Router Fixture Pack](#router-fixture-pack) · [Diagnostics](#diagnostics) ·
 [Safety](#safety) · [Exit Codes](#exit-codes) · [Differences from bgw](#differences-from-bgw) ·
 [Router Tab Coverage](#router-tab-coverage) · [Live verification](#live-verification) ·
 [Radio and broadband restarts](#radio-and-broadband-restarts) · [5 GHz channel scan](#5-ghz-channel-scan)
@@ -460,7 +460,7 @@ CLI unit migration: replace earlier `--timeout 45000` with `--timeout 45` and `-
 
 ## Environment Variables
 
-Identical to the TypeScript CLI, so one shell setup serves both:
+Every variable below may also be set in the [configuration file](#configuration-file). The first table is identical to the TypeScript CLI, so one shell setup serves both:
 
 | Variable | Meaning | Default |
 | --- | --- | --- |
@@ -478,6 +478,22 @@ Identical to the TypeScript CLI, so one shell setup serves both:
 | `BGW_SESSION_LOCK_STALE_MS` | Age after which a legacy lock marker may be reclaimed (validated like the other numeric variables); our own crashed-writer lock temporaries (`.bgw-lock-` followed by exactly eight lowercase letters, digits or underscores, never another `.bgw-lock-*` file) and `*.tmp` files older than the larger of this and 60 s are removed when the cache directory is prepared | `900000` |
 | `BGW_SESSION_CACHE_DIR` / `XDG_CACHE_HOME` | Session cache location (`~/.cache/bgw` by default) | |
 | `BGW_DUMP_DIR` / `XDG_STATE_HOME` | Default `dump` output directory (`~/.local/state/bgw/dumps`) | |
+| `BGW_CONFIG` | The configuration file to read (`--config` wins over it); a named file that does not exist is a usage error (exit 1), a missing default file is simply no file | `$XDG_CONFIG_HOME/bgw/config`, else `~/.config/bgw/config` |
+
+Standing preferences for per-command flags (Python CLI only). Each is read only when its flag is absent, so a flag on the command line always wins; the numeric ones are validated exactly like the variables above (same message, naming the variable) and truncated to a whole number like their flag:
+
+| Variable | Meaning | Default |
+| --- | --- | --- |
+| `BGW_JSON` | `1` selects `--json` for every command, including the structured error answer on failure; any other value leaves the terminal output | off |
+| `BGW_LIMIT` | `--limit`: rows shown in page views (minimum 0) | `20` |
+| `BGW_DELAY_MS` | `--delay`: pause between audit, scan and sweep requests in milliseconds (minimum 0) | `750` |
+| `BGW_DUMP_ALL_CLIENTS` | `1` selects `dump --all-clients` | off |
+| `BGW_DUMP_INCLUDE` | `dump --include <csv\|all>`: the optional pages every dump captures; applied to `dump` only, never to `diff` or `restore`, whose `--include` selects the pages to compare; a value naming no page is a usage error | core pages |
+| `BGW_AUTORESTORE_MAX_PASSES` | `autorestore --max-passes` (minimum 1) | `3` |
+| `BGW_AUTORESTORE_WAIT` | `autorestore --wait`, in seconds (minimum 0) | `120` |
+| `BGW_AUTORESTORE_ON_ANY_DIFF` | `1` selects `autorestore --on-any-diff` | off |
+
+`--include-secrets` has no variable on purpose: redaction is a per-invocation decision, not a standing one.
 
 Numeric variables follow JavaScript `Number()` for the documented inputs: decimal, fractional (`1500.5` is kept as a float), exponent notation and surrounding whitespace are accepted; empty falls back to the default; NaN/Infinity/non-numeric/below-minimum values are rejected with the same message as `bgw`. Hex (`0x10`) is not accepted.
 
@@ -498,6 +514,18 @@ Python coordinates marker changes through a permanent `<hash>.lock.guard` file a
 These filesystem checks have bounded guarantees: release verifies the captured parent identity before opening the guard, but directory replacement or ancestor retargeting after that check remains possible. Publication, persistence and cleanup are not a complete descriptor-relative filesystem transaction; same-user namespace changes between checks remain outside these guarantees.
 
 Legacy markers without this ownership protocol require stale age (`BGW_SESSION_LOCK_STALE_MS`, default 900000) and either a valid PID proven dead or no credible PID in an owned, single-link reserved marker. This recovers empty or malformed markers left by older writers that crashed during publication. Fresh ownerless markers, held kernel locks, foreign or shared ownerless inodes, and unreadable records are preserved. A legacy marker naming a reused or inaccessible PID needs explicit operator recovery after verifying no operation still owns it; age or a permission error alone is not that verification. Older Python and TypeScript clients do not participate in the new lifetime-lock protocol, so externally serialize mixed-version/tool runs; sharing cache formats does not guarantee safe concurrent coordination with those clients. The short cleanup wait reduces ordinary leftover markers but does not remove this mixed-client limitation.
+
+## Configuration file
+
+The configuration file is a third source of defaults, below the environment. Precedence, highest first: a flag on the command line, an environment variable, the file, the built-in default. The loader fills only environment variables that are not already set, so an `export BGW_HOST=...` for one shell session keeps winning over the file, and everything that reads the environment later (the session cache directory, the dump directory, the fallback access code, the lock settings) sees the same resolved values.
+
+**Location.** `--config <file>` names the file; otherwise `BGW_CONFIG`; otherwise `$XDG_CONFIG_HOME/bgw/config`, else `~/.config/bgw/config`. A file named by `--config` or `BGW_CONFIG` must exist (usage error, exit 1, naming the option and the path); the default location is optional. `help` never reads the file, like the host variables. The file is read before the router is contacted, so a bad file never costs a request.
+
+**Format.** The format systemd's `EnvironmentFile=` and `sh` (`set -a; . file`) read, so one file can serve the CLI, the autorestore unit and a shell: one `KEY='value'` per line, `#` comments and blank lines ignored, whitespace around the key, the `=` and the value ignored. A value in single or double quotes is taken literally between the quotes (no escapes; a value containing its own quote character cannot be written, change it on the gateway). A bare value may not contain whitespace, `#`, `;`, `$`, quotes, a backslash or a backquote (a shell and systemd would read those differently): quote it. A later line for the same key replaces an earlier one, as in `sh`. The keys are exactly the `BGW_*` variables of the two tables above plus `ROUTER_IP`; `BGW_CONFIG` itself and any other name is a usage error naming the file, the line and the key (`<file>:<line>: unknown setting BGW_HSOT`), so a typo never falls through to a default. A malformed line is a usage error naming the file and line. Values are validated by the same code as the environment variables, so a bad number or an empty host in the file gets the variable's own message (`BGW_TIMEOUT_MS must be a finite number ...`, `BGW_HOST is empty ...`).
+
+**Secrets.** `BGW_ACCESS_CODE` and `BGW_FALLBACK_ACCESS_CODE` are applied from the file only when it is a regular file owned by the current user with no group or other permission bits (mode `0600` or stricter, `0400` included). Otherwise those two keys are skipped and one stderr line says so, naming the file and the fix (`chmod 600 <file>`), never the code; every other key in the file is still applied and the command continues. The file is read through the opened descriptor, so the check applies to the file that was read. `--access-code-stdin` still wins over a code from the file, as it wins over an exported one. A file holding no secret needs no particular mode.
+
+**Unreadable file.** A file that cannot be read for another reason (a directory, a permission denial, bytes that are not UTF-8) is a usage error naming the path and the cause, exit 1.
 
 ## Router Fixture Pack
 

@@ -1,4 +1,5 @@
 import ipaddress
+import os
 import socket
 
 import pytest
@@ -28,6 +29,23 @@ def _is_loopback_address(address) -> bool:
         return _is_loopback_host(address[0])
     except (TypeError, IndexError):
         return False
+
+
+@pytest.fixture(autouse=True)
+def _no_user_config_file(monkeypatch, tmp_path):
+    """No test reads the developer's own ~/.config/bgw/config: the default location points into tmp_path.
+
+    The loader fills unset variables in the real process environment, which monkeypatch.delenv does not
+    track for a variable that was absent, so the whole environment is restored after every test."""
+    saved = dict(os.environ)
+    monkeypatch.delenv("BGW_CONFIG", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    yield
+    for name in set(os.environ) - set(saved):
+        del os.environ[name]
+    for name, value in saved.items():
+        if os.environ.get(name) != value:
+            os.environ[name] = value
 
 
 @pytest.fixture(autouse=True)
@@ -118,6 +136,8 @@ def tmp_env(monkeypatch, tmp_path):
         "BGW_SESSION_WAIT_TIMEOUT_MS", "BGW_SESSION_WAIT_INTERVAL_MS", "BGW_SESSION_CACHE_TTL_MS",
         "BGW_SESSION_POOL_COOLDOWN_MS", "BGW_SESSION_LOCK_TIMEOUT_MS", "BGW_DUMP_DIR", "XDG_STATE_HOME",
         "BGW_SESSION_CACHE_DIR", "XDG_CACHE_HOME", "BGW_SESSION_LOCK_STALE_MS", "BGW_FALLBACK_ACCESS_CODE",
+        "BGW_CONFIG", "BGW_JSON", "BGW_LIMIT", "BGW_DELAY_MS", "BGW_DUMP_ALL_CLIENTS", "BGW_DUMP_INCLUDE",
+        "BGW_AUTORESTORE_MAX_PASSES", "BGW_AUTORESTORE_WAIT", "BGW_AUTORESTORE_ON_ANY_DIFF",
     ]:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("BGW_SESSION_CACHE_DIR", str(tmp_path / "cache"))

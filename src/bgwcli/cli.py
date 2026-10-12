@@ -41,7 +41,14 @@ from .client import (
     pool_full_metadata,
     session_pool_full_error,
 )
-from .config import DEFAULT_HOST, GlobalOptions, env_default_options, resolve_access_code
+from .config import (
+    DEFAULT_HOST,
+    GlobalOptions,
+    env_default_options,
+    env_number,
+    load_config_file,
+    resolve_access_code,
+)
 from .devices import fetch_device_list
 from .diagnostics import (
     DIAG_CONFIRM_TOKEN,
@@ -233,6 +240,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     json_mode = "--json" in args
     try:
         command = parse_args(args)
+        json_mode = command.options.json  # BGW_JSON=1 (environment or configuration file) also selects JSON
         if command.name == "help":
             sys.stdout.write(help_text())
             return 0
@@ -2460,6 +2468,7 @@ _FLAG = "store_true"
 # (flags, kwargs) for every global and per-command option; help strings mirror the TS printHelp text.
 _GLOBAL_OPTIONS: tuple[tuple[tuple[str, ...], dict[str, Any]], ...] = (
     (("--host",), {"metavar": "<host>", "help": "Router host. Default: BGW_HOST, ROUTER_IP, or 192.168.1.254"}),
+    (("--config",), {"metavar": "<file>", "help": "Configuration file. Default: BGW_CONFIG or ~/.config/bgw/config"}),
     (("--access-code-stdin",), {"action": _FLAG, "help": "Read the device access code from stdin"}),
     (("--json",), {"action": _FLAG, "help": "Print script-friendly JSON"}),
     (("--include-secrets",), {"action": _FLAG, "help": "Include sensitive local output instead of redacting it"}),
@@ -2621,10 +2630,15 @@ def parse_args(argv: list[str]) -> Command:
     # host never consults them, and help (which contacts nothing) carries the default instead.
     if explicit_host is None and name == "help":
         explicit_host = DEFAULT_HOST
+    else:
+        # The configuration file fills the environment variables that are not set, so every reader
+        # below (and the cache, dump and fallback-code lookups later) sees flag > environment > file.
+        # help contacts nothing and never reads it, like the host variables.
+        load_config_file(opt("config"))
     options = env_default_options(host=explicit_host)
     if opt("access_code_stdin", False):
         options.access_code_stdin = True
-    if opt("json", False):
+    if opt("json", False) or os.environ.get("BGW_JSON") == "1":
         options.json = True
     if opt("include_secrets", False):
         options.include_secrets = True
@@ -2651,6 +2665,12 @@ def parse_args(argv: list[str]) -> Command:
         include = [page.strip() for page in opt("include").split(",") if page.strip()]
         if not include:
             raise UsageError("--include needs at least one page id (or all).")
+    elif name == "dump" and os.environ.get("BGW_DUMP_INCLUDE"):
+        # A standing choice of optional pages for dump only: for diff and restore --include selects the
+        # pages to compare, a different question that a backup preference must not answer.
+        include = [page.strip() for page in os.environ["BGW_DUMP_INCLUDE"].split(",") if page.strip()]
+        if not include:
+            raise UsageError("BGW_DUMP_INCLUDE needs at least one page id (or all).")
     # --out names a destination only the commands that write files use; anywhere else it would be
     # silently ignored (or, for audit, leave empty artifact directories behind).
     if opt("out_dir") is not None and name not in _OUT_COMMANDS:
@@ -2671,18 +2691,30 @@ def parse_args(argv: list[str]) -> Command:
         full=opt("full", False),
         confirm=opt("confirm"),
         protocol=opt("protocol"),
-        delay_ms=_numeric(opt("delay"), "--delay", 0) if opt("delay") is not None else 750,
-        limit=_numeric(opt("limit"), "--limit", 0) if opt("limit") is not None else 20,
+        delay_ms=_numeric(opt("delay"), "--delay", 0) if opt("delay") is not None else _env_int("BGW_DELAY_MS", 750, 0),
+        limit=_numeric(opt("limit"), "--limit", 0) if opt("limit") is not None else _env_int("BGW_LIMIT", 20, 0),
         include_parsed=opt("include_parsed", False),
         pages=pages,
         out_dir=opt("out_dir"),
         prune=opt("prune", False),
-        all_clients=opt("all_clients", False),
+        all_clients=opt("all_clients", False) or os.environ.get("BGW_DUMP_ALL_CLIENTS") == "1",
         include=include,
-        max_passes=_numeric(opt("max_passes"), "--max-passes", 1) if opt("max_passes") is not None else 3,
-        wait_seconds=_numeric(opt("wait"), "--wait", 0) if opt("wait") is not None else 120,
-        on_any_diff=opt("on_any_diff", False),
+        max_passes=(
+            _numeric(opt("max_passes"), "--max-passes", 1) if opt("max_passes") is not None
+            else _env_int("BGW_AUTORESTORE_MAX_PASSES", 3, 1)
+        ),
+        wait_seconds=(
+            _numeric(opt("wait"), "--wait", 0) if opt("wait") is not None
+            else _env_int("BGW_AUTORESTORE_WAIT", 120, 0)
+        ),
+        on_any_diff=opt("on_any_diff", False) or os.environ.get("BGW_AUTORESTORE_ON_ANY_DIFF") == "1",
     )
+
+
+def _env_int(name: str, fallback: int, minimum: int) -> int:
+    """A numeric preference from the environment (or the configuration file), validated like the other
+    BGW_* numbers and truncated to a whole number like its flag."""
+    return int(env_number(name, fallback, minimum))
 
 
 # ---------------------------------------------------------------------------------------------
@@ -2699,6 +2731,12 @@ Auth:
   Export BGW_ACCESS_CODE once per shell session (the usual way), or pass --access-code-stdin
   to read the code from standard input in scripts that must not export it.
   Secrets are redacted by default. Use --include-secrets only for intentional local inspection.
+
+Configuration file:
+  ~/.config/bgw/config (or --config <file>, or BGW_CONFIG) holds BGW_* settings as
+  KEY='value' lines, the same format as the autorestore unit's environment file.
+  A flag wins over an environment variable, which wins over the file. BGW_ACCESS_CODE
+  is read from the file only when it is owned by you with mode 0600.
 
 Most-used read commands:
   bgwcli check | auth
@@ -2859,6 +2897,7 @@ Automatic recovery (for a systemd timer):
 
 Global options:
   --host <host>             Router host. Default: BGW_HOST, ROUTER_IP, or 192.168.1.254
+  --config <file>           Configuration file. Default: BGW_CONFIG or ~/.config/bgw/config
   --access-code-stdin       Read the device access code from stdin
   --json                    Print script-friendly JSON
   --include-secrets         Include sensitive local output instead of redacting it
@@ -2891,6 +2930,9 @@ Notes:
   Agent bursts reuse a short-lived local router session cache under a per-host
   lock to avoid filling the web session pool. Env:
   BGW_SESSION_CACHE_TTL_MS, BGW_SESSION_POOL_COOLDOWN_MS, BGW_SESSION_LOCK_TIMEOUT_MS.
+  Preferences with a flag and a variable: BGW_JSON=1, BGW_LIMIT, BGW_DELAY_MS,
+  BGW_DUMP_ALL_CLIENTS=1, BGW_DUMP_INCLUDE, BGW_AUTORESTORE_MAX_PASSES,
+  BGW_AUTORESTORE_WAIT, BGW_AUTORESTORE_ON_ANY_DIFF=1.
   JSON dry-runs include operation, dryRun, committed, page, guarded, dangerous,
   confirmation, commitCommand, payload, and changes/result fields where applicable.
 

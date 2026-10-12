@@ -87,7 +87,38 @@ Scripts that must not export the code pipe it per command instead:
 printf '%s' "$CODE" | bgwcli dump --out ~/bgw-baseline.json --access-code-stdin
 ```
 
+Or keep the host, the code and your usual flags in a [configuration file](#configuration-file) so nothing has to be exported at all.
+
 Every command accepts `--json`; global options go before or after the command name. `bgwcli <command> --help` prints one command's usage, `bgwcli --help` the whole reference.
+
+## Configuration file
+
+`~/.config/bgw/config` holds the same `BGW_*` variables as the environment, one `KEY='value'` per line. It is read before every command (except `help`) and fills in whatever the environment does not already set:
+
+```bash
+mkdir -p ~/.config/bgw && touch ~/.config/bgw/config && chmod 600 ~/.config/bgw/config
+cat > ~/.config/bgw/config <<'EOF'
+# gateway
+BGW_HOST='192.168.1.254'
+BGW_ACCESS_CODE='<access-code>'
+BGW_TIMEOUT_MS='30000'
+# standing preferences for flags
+BGW_LIMIT='50'
+BGW_DUMP_DIR='/home/<user>/bgw320'
+EOF
+bgwcli auth
+bgwcli wifi
+```
+
+What to know:
+
+- **Precedence.** A flag on the command line wins over an environment variable, which wins over the file, which wins over the built-in default. An `export BGW_HOST=...` in the shell therefore still overrides the file.
+- **Keys.** Every variable in the two tables under [Environment variables](#environment-variables) plus `ROUTER_IP`. A key the CLI does not know, or a malformed line, is a usage error naming the file and line, so a typo never falls through to a default.
+- **Format.** The `EnvironmentFile=` format systemd and `sh` (`set -a; . file`) read: quote values in single quotes, `#` starts a comment, a later line for the same key wins. One file can serve the CLI, the autorestore unit and a shell.
+- **The access code.** `BGW_ACCESS_CODE` and `BGW_FALLBACK_ACCESS_CODE` are taken from the file only when it is a regular file owned by you with mode `0600` (or stricter). Otherwise those two keys are skipped with one warning naming the `chmod 600` to run, and every other setting still applies.
+- **Another file.** `bgwcli --config <file> ...` or `BGW_CONFIG=<file>` names a different file; a named file must exist, the default location is optional.
+
+The full contract, including validation messages and how an unreadable file is reported: [reference, Configuration file](docs/REFERENCE.md#configuration-file).
 
 ## Commands
 
@@ -257,7 +288,9 @@ No configuration differences.
 
 Set `BGW_FALLBACK_ACCESS_CODE` to the sticker code so the watchdog can log in after the reset. Deploy it
 as a user unit with [deploy/README.md](deploy/README.md), and re-dump after every deliberate change so the
-baseline is always the state you want back. Reset detection, the pass and run limits, the recovery
+baseline is always the state you want back. The unit can read the same [configuration file](#configuration-file)
+as the CLI (point its `EnvironmentFile=` at `%h/.config/bgw/config`), and `BGW_AUTORESTORE_MAX_PASSES`,
+`BGW_AUTORESTORE_WAIT` and `BGW_AUTORESTORE_ON_ANY_DIFF` in that file set the timer's defaults. Reset detection, the pass and run limits, the recovery
 checkpoint and every status and exit code: [reference, Automatic recovery](docs/REFERENCE.md#automatic-recovery-autorestore).
 
 ## Router command tree
@@ -351,7 +384,7 @@ The exact mapping per command and per answer: [reference, Exit codes](docs/REFER
 
 ## Environment variables
 
-Identical to the TypeScript CLI, so one shell setup serves both:
+Every variable can also live in the [configuration file](#configuration-file). The first group is identical to the TypeScript CLI, so one shell setup serves both:
 
 | Variable | Meaning | Default |
 | --- | --- | --- |
@@ -363,6 +396,20 @@ Identical to the TypeScript CLI, so one shell setup serves both:
 | `BGW_WAIT_FOR_SESSION` | `1` waits when the web session pool is full | off |
 | `BGW_SESSION_CACHE_DIR` / `XDG_CACHE_HOME` | Session cache location | `~/.cache/bgw` |
 | `BGW_DUMP_DIR` / `XDG_STATE_HOME` | Default `dump` output directory | `~/.local/state/bgw/dumps` |
+| `BGW_CONFIG` | Configuration file (`--config`) | `~/.config/bgw/config` |
+
+Standing preferences for flags, meant for the configuration file (a flag given on the command line still wins):
+
+| Variable | Flag | Default |
+| --- | --- | --- |
+| `BGW_JSON` | `1` means `--json` everywhere | off |
+| `BGW_LIMIT` | `--limit` | `20` |
+| `BGW_DELAY_MS` | `--delay` | `750` |
+| `BGW_DUMP_ALL_CLIENTS` | `1` means `dump --all-clients` | off |
+| `BGW_DUMP_INCLUDE` | `dump --include <csv\|all>` (`dump` only) | core pages |
+| `BGW_AUTORESTORE_MAX_PASSES` | `autorestore --max-passes` | `3` |
+| `BGW_AUTORESTORE_WAIT` | `autorestore --wait`, in seconds | `120` |
+| `BGW_AUTORESTORE_ON_ANY_DIFF` | `1` means `autorestore --on-any-diff` | off |
 
 Timeouts, the session-wait and cache variables, and the session cache rules: [reference, Environment Variables](docs/REFERENCE.md#environment-variables).
 
