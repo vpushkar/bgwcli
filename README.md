@@ -256,8 +256,8 @@ bgwcli restore ~/bgw-baseline.json --commit --confirm RESTORE
 ```
 
 The first commit restores services, forwards and reservations for devices the router already lists
-(wired ones), the firewall flags and Advanced Wi-Fi, which brings the SSID and password back so Wi-Fi
-clients reconnect. Wait a few minutes and run the same commit again for their forwards and reservations.
+(wired ones), the firewall flags and Advanced Wi-Fi, which brings the SSIDs and passwords back, the
+guest network included when the dump was taken with it on, so Wi-Fi clients reconnect. Wait a few minutes and run the same commit again for their forwards and reservations.
 Repeat until the closing diff prints `No differences.` Run it from a wired client; if the dump carries a
 different LAN address, the Subnets & DHCP step (restored last) moves the gateway and you reconnect to the
 new address. Take a fresh dump afterwards as the new baseline.

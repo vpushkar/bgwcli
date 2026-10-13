@@ -677,6 +677,7 @@ def _wifi_summary(page: ParsedPage) -> dict[str, str]:
         "Home security": _select_value(page, "homeSSID_security"),
         "Home password": _field_value(page, "homeSSID_key"),
         "Guest SSID": _field_value(page, "guest_ssidname"),
+        "Guest password": _field_value(page, "guestSSID_key"),
         "Guest SSID enabled": _on_off(_select_value(page, "u_gssidenable")),
         "Guest access": _guest_access(_select_value(page, "u_gssidisolate")),
         "Guest subnet": f"192.168.{octet}.0/24" if octet else "",

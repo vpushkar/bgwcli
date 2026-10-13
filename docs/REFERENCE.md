@@ -175,7 +175,12 @@ A dumped value for a control the live page renders **disabled** is reported by `
 never posts a disabled control and its saved value can never be read back. When the same page has a
 change to an enabled field, the dumped value is posted with that save (it is often the change that
 re-enables the control, for example a Wi-Fi password behind the security mode) and checked after the
-save only if the page then renders the control enabled. Without such a change the plan shows a
+save only if the page then renders the control enabled. The guest Wi-Fi network is the live-proven
+case (firmware 6.35.8, 2026-10-12): with guest off, as after a factory reset, the gateway renders the
+guest name, key, isolation and security controls disabled and only the enable switch live; a dump
+taken with guest on restores all of them in the one save that flips the switch (`applied`, verified,
+closing diff identical). A dump taken with guest off carries no guest name or key, because the
+gateway does not render them as values then; dump again after enabling the guest network. Without such a change the plan shows a
 `blocked` step naming the disabled controls. Either way it does not hold restore convergence open,
 and a dump that differs from the router only in disabled controls is not a reset for `autorestore`.
 A name counts as disabled only when every control with that name is disabled: a radio group with one

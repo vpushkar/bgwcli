@@ -380,6 +380,41 @@ def test_form_step_description_redacts_secrets_unless_include_secrets():
     assert shown.description == "save wconfig: key11: old -> new"
 
 
+def test_guest_network_comes_back_in_one_save_when_the_live_page_renders_it_disabled():
+    """The gateway renders the guest controls disabled while the guest network is off (after a
+    factory reset too), and only the enable switch is live. A dump taken with guest on must bring
+    the name, key and isolation back in the SAME save as the enable: proven on firmware 6.35.8
+    (2026-10-12, restore applied + verified, closing diff identical)."""
+    wconfig = page(
+        "wconfig",
+        fields=[
+            field("maxclients", "text", "80"),
+            field("ssidname12", "text", "", disabled=True),
+            field("key12", "text", "", disabled=True),
+        ],
+        selects=[
+            select("gssidenable", [("off", "Off", True), ("on", "On")]),
+            select("gssidisolate", [("on", "Internet Only", True), ("off", "LAN")], disabled=True),
+        ],
+        buttons=[button("Save", "Save...")],
+    )
+    pages = {**live_pages(), "wconfig": wconfig}
+    snap = replace(
+        dump_no_service_adds(),
+        forwards=live_snapshot(pages).forwards,
+        forms={"wconfig": {"gssidenable": "on", "ssidname12": "GuestNet", "key12": "guest-key", "gssidisolate": "on"}},
+    )
+    steps = plan(snap, pages)
+    assert [s.kind for s in steps if s.page == "wconfig"] == ["form"], "one save, no skip for the disabled controls"
+    step = find(steps, "form")
+    assert sorted(step.assignments) == ["gssidenable=on", "gssidisolate=on", "key12=guest-key", "ssidname12=GuestNet"]
+    assert step.raw_payload == {
+        "maxclients": "80", "gssidenable": "on", "gssidisolate": "on", "ssidname12": "GuestNet", "key12": "guest-key",
+        "Save": "Save...",
+    }
+    assert step.display_payload["key12"] == "[redacted]"
+
+
 # --- Executor --------------------------------------------------------------------------------------
 
 

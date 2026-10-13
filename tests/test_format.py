@@ -128,6 +128,7 @@ def test_wifi_summary_uses_form_state_instead_of_noisy_option_text():
       <input name="home_ssidname" value="HomeNet">
       <input name="homeSSID_key" value="secret">
       <input name="guest_ssidname" value="GuestNet">
+      <input name="guestSSID_key" value="guest-secret-1">
       <input name="u_octet" value="2">
       <select name="u_ussidenable"><option value="off">Off</option><option value="on" selected>On</option></select>
       <select name="homeSSID_security">
@@ -145,6 +146,8 @@ def test_wifi_summary_uses_form_state_instead_of_noisy_option_text():
     assert "HomeNet" in output
     assert "Home password" in output
     assert "[redacted]" in output
+    assert "Guest password" in output
+    assert "guest-secret-1" not in output
     assert "Guest access" in output
     assert "Internet Only" in output
     assert "Guest subnet" in output
