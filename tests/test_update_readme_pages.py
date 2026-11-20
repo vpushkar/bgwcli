@@ -100,3 +100,64 @@ def test_real_readme_validates():
     text = (ROOT / "README.md").read_text(encoding="utf-8")
     blocks = {name: "" for name in script.helpdoc.README_BLOCKS}
     script.rewrite(text, blocks)
+
+
+TAIL = "<!-- b:start -->\n<!-- b:end -->\n"
+
+
+@pytest.mark.parametrize(
+    "bad_opener",
+    [
+        "<!-- a:start -->  \n",
+        "<!-- a:start -->\r\n",
+        "<!--  a:start -->\n",
+        "<!--a:start-->\n",
+    ],
+)
+def test_malformed_duplicate_opener_rejected(bad_opener):
+    text = bad_opener + "HAND-WRITTEN\n<!-- a:start -->\nold\n<!-- a:end -->\n" + TAIL
+    msg = _errors(text)
+    assert "malformed" in msg and "'a'" in msg
+
+
+def test_malformed_lone_opener_rejected():
+    text = "<!--  a:start -->\nold\n<!-- a:end -->\n" + TAIL
+    assert "malformed" in _errors(text)
+
+
+def test_malformed_end_marker_rejected():
+    text = "<!-- a:start -->\nold\n<!--  a:end -->\n" + TAIL
+    assert "malformed" in _errors(text)
+
+
+def test_indented_marker_rejected():
+    text = "<!-- a:start -->\nold\n  <!-- a:end -->\n" + TAIL
+    assert "malformed" in _errors(text)
+
+
+def test_start_marker_at_eof_without_newline_rejected():
+    text = "<!-- a:start -->\nold\n<!-- a:end -->\n<!-- b:end -->\n<!-- b:start -->"
+    assert "malformed" in _errors(text)
+
+
+def test_end_marker_at_eof_without_newline_ok():
+    text = "<!-- a:start -->\nold\n<!-- a:end -->\n<!-- b:start -->\nold\n<!-- b:end -->"
+    assert script.rewrite(text, BLOCKS) == (
+        "<!-- a:start -->\nNEW-A\n<!-- a:end -->\n<!-- b:start -->\nNEW-B\n<!-- b:end -->"
+    )
+
+
+def test_marker_name_is_case_sensitive():
+    text = "<!-- A:start -->\nkeep\n" + GOOD
+    assert script.rewrite(text, BLOCKS).startswith("<!-- A:start -->\nkeep\nintro\n")
+
+
+def test_main_trailing_space_opener_untouched(tmp_path, monkeypatch, capsys):
+    _fake_blocks(monkeypatch)
+    bad = "<!-- a:start -->  \nHAND-WRITTEN\n<!-- a:start -->\nx\n<!-- a:end -->\n" + TAIL
+    path = tmp_path / "README.md"
+    path.write_bytes(bad.encode("utf-8"))
+    assert script.main(path) == 1
+    assert path.read_bytes() == bad.encode("utf-8")
+    err = capsys.readouterr().err.splitlines()
+    assert err and all(line.startswith("README.md: ") for line in err)
