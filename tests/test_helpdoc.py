@@ -372,3 +372,170 @@ def test_section_json_byte_identical(capsys, tmp_env, section):
     assert cli.main(["section", section, "--json"]) == 0
     expected = (DATA / f"section_{section}_json_50eafa4.json").read_text(encoding="utf-8")
     assert capsys.readouterr().out == expected
+
+
+# ---------------------------------------------------------------------------------------------
+# Task 3b: backup, write and fetch command help, generated from the registries the code enforces
+
+from bgwcli import mutations, pages, restore, snapshot, snapshot_diff  # noqa: E402
+from bgwcli.actions import ROUTER_ACTIONS  # noqa: E402
+
+
+def _help(command: str) -> str:
+    text = cli.command_help(command)
+    assert text is not None
+    return text
+
+
+def _rows_starting_with(text: str, word: str) -> list[str]:
+    return [line for line in text.splitlines() if line.split()[:1] == [word]]
+
+
+def test_dump_help_lists_every_default_read():
+    text = _help("dump")
+    for page in snapshot.snapshot_pages_for(()):
+        rows = _rows_starting_with(text, page)
+        assert len(rows) == 1, page
+    assert "firmware version only" in _rows_starting_with(text, "sysinfo")[0]
+    assert "best effort" in _rows_starting_with(text, "packetfilter")[0]
+    for page in snapshot.OPTIONAL_FORM_PAGES:
+        assert len(_rows_starting_with(text, page)) == 1, page
+    assert set(helpdoc.INCLUDE_RISK_NOTES) == set(snapshot.OPTIONAL_FORM_PAGES)
+
+
+@pytest.mark.parametrize(
+    ("selector", "outcome"),
+    [("all", "accepted"), ("etherlan", "accepted"), ("dosprotect", "redundant"), ("services", "rejected")],
+)
+def test_dump_selector_rules_match_resolver(selector, outcome):
+    text = " ".join(_help("dump").split())
+    if outcome == "rejected":
+        with pytest.raises(UsageError):
+            snapshot.resolve_include(selector)
+        assert "any other id (e.g. services) is rejected" in text
+    elif outcome == "redundant":
+        assert snapshot.resolve_include(selector) == ()
+        assert "dosprotect and wconfig are accepted but always read" in text
+    else:
+        assert snapshot.resolve_include(selector)
+        assert "all = etherlan, dhcpserver, ippass, wmacauth" in text
+
+
+@pytest.mark.parametrize("command", ["diff", "restore", "autorestore"])
+def test_include_ids_listed(command):
+    text = _help(command)
+    for page in snapshot_diff.RESTORABLE_PAGES:
+        assert _rows_starting_with(text, page), page
+    flat = " ".join(text.split())
+    assert "omitted or all = every restorable page present in the dump" in flat
+    if command == "autorestore":
+        assert "also limits which pages count toward reset detection" in flat
+
+
+def test_restore_help_phases():
+    text = _help("restore")
+    block = text[text.index("Planning phases"):text.index("Exit codes:")]
+    numbered = [line.split() for line in block.splitlines() if line.strip()[:1].isdigit()]
+    assert [parts[1] for parts in numbered] == list(restore.RESTORE_PAGE_ORDER)
+    assert [parts[0] for parts in numbered] == [f"{n}." for n in range(1, len(numbered) + 1)]
+    flat = " ".join(block.split())
+    assert "not the order writes are sent" in flat
+    assert "--prune removes a forward before its service" in flat
+    packetfilter = next(line for line in block.splitlines() if " packetfilter " in line)
+    assert "never written" in packetfilter
+    assert "can move the gateway address" in flat
+
+
+def test_action_help_rows():
+    text = _help("action")
+    for action in ROUTER_ACTIONS:
+        rows = _rows_starting_with(text, action.name)
+        assert len(rows) == 1, action.name
+        row = rows[0]
+        assert f"--confirm {action.confirm_token}" in row
+        assert f" {action.page} " in f" {row} "
+        assert action.description.rstrip(".") in row
+        assert ("dangerous" in row.split()) == bool(action.dangerous), action.name
+
+
+@pytest.mark.parametrize("command", ["page", "inspect"])
+def test_page_help_arguments_resolve(command):
+    text = _help(command)
+    for tab in ROUTER_TABS:
+        rows = _rows_starting_with(text, tab.page)
+        assert len(rows) == 1, tab.page
+        assert pages.resolve_cgi_page(rows[0].split()[0]) == tab.page
+        assert helpdoc.TAB_SUMMARIES[tab.page] in rows[0]
+
+
+def test_dangerous_sets_agree():
+    assert pages.dangerous_pages() == mutations.DANGEROUS_PAGES
+
+
+@pytest.mark.parametrize("command", ["set", "submit"])
+def test_write_help_rules(command):
+    text = _help(command)
+    for page in sorted(mutations.DANGEROUS_PAGES):
+        assert _rows_starting_with(text, page), page
+    flat = " ".join(text.split())
+    assert "--confirm <PAGE ID in upper case>, e.g. --confirm WCONFIG" in flat
+    if command == "set":
+        assert "set refuses these pages even as a dry run" in flat
+    else:
+        assert "submit previews a button on these pages but refuses --commit" in flat
+
+
+@pytest.mark.parametrize(
+    ("command", "pairs"),
+    [
+        ("dump", [
+            "0 dump file written", "1 usage error", "2 the router or a page could not be read", "130 interrupted",
+        ]),
+        ("diff", ["0 identical (a firmware-only change is still 0)", "1 differences found", "2 ", "130 interrupted"]),
+        ("restore", [
+            "0 dry run: plan printed (even when work remains)",
+            "0 --commit: converged",
+            "1 not converged",
+            "2 a write was sent and never acknowledged (even when the closing diff is readable)",
+            "130 interrupted",
+        ]),
+        ("autorestore", [
+            "0 no reset, converged, or router unreachable",
+            "1 a restore is needed (dry run) or did not converge",
+            "2 page-level 401/403",
+            "130 interrupted",
+        ]),
+    ],
+)
+def test_exit_code_pairs(command, pairs):
+    text = _help(command)
+    section = " ".join(text[text.index("Exit codes:"):].split())
+    for pair in pairs:
+        assert pair in section, pair
+
+
+def test_root_help_backup_prose_preserved():
+    text = " ".join(cli.help_text().split())
+    for needle in ("dump --include all", "--include <csv|all>", "reservations are never released",
+                   "bgwcli dump -h lists", "bgwcli action -h lists every action"):
+        assert needle in text, needle
+    assert "etherlan (LAN ports), dhcpserver (Subnets & DHCP)" not in text  # literal list gone
+
+
+def test_actions_text_aligned(capsys, tmp_env):
+    assert cli.main(["actions"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == len(ROUTER_ACTIONS)
+    assert len({line.index("confirm=") for line in lines}) == 1
+    descriptions = {line.index(action.description) for line, action in zip(lines, ROUTER_ACTIONS, strict=True)}
+    assert len(descriptions) == 1
+
+
+def test_actions_json_byte_identical(capsys, tmp_env):
+    assert cli.main(["actions", "--json"]) == 0
+    assert capsys.readouterr().out == (DATA / "actions_json_50eafa4.json").read_text(encoding="utf-8")
+
+
+def test_session_help_caveat():
+    flat = " ".join(_help("session").split())
+    assert "clear-cache" in flat and "also removes the local cooldown" in flat

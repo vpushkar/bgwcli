@@ -188,11 +188,15 @@ def print_tabs(tabs: Sequence[RouterTab], stream: TextIO | None = None) -> None:
 
 def print_actions(actions: Sequence[RouterAction], stream: TextIO | None = None) -> None:
     out = stream or sys.stdout
+    # The historical widths are minimums; a longer name, page or token widens its column for every row.
+    name_width = max(30, *(len(action.name) for action in actions)) if actions else 30
+    page_width = max(12, *(len(action.page) for action in actions)) if actions else 12
+    token_width = max(21, *(len(action.confirm_token) for action in actions)) if actions else 21
     for action in actions:
         guard = "dangerous" if action.dangerous else "guarded"
         out.write(
-            f"{action.name.ljust(30)} {action.page.ljust(12)} {guard.ljust(9)} "
-            f"confirm={action.confirm_token.ljust(21)} {action.description}\n"
+            f"{action.name.ljust(name_width)} {action.page.ljust(page_width)} {guard.ljust(9)} "
+            f"confirm={action.confirm_token.ljust(token_width)} {action.description}\n"
         )
 
 

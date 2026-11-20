@@ -266,3 +266,221 @@ def root_pages_block() -> str:
             parts.append(diagnostic_operations_text(indent="    "))
         parts.extend(f"    {note}" for note in _ROOT_SECTION_NOTES.get(section, ()))
     return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------------------------
+# backup, write and fetch commands: lists generated from the registries the code enforces
+
+
+def _rows(pairs: list[tuple[str, str]], indent: str = "  ") -> str:
+    width = max(len(name) for name, _ in pairs) + 2
+    return "\n".join(f"{indent}{name.ljust(width)}{text}" for name, text in pairs)
+
+
+# What each page `dump` reads by default adds to the dump file (snapshot.snapshot_pages_for(())).
+DUMP_CONTRIBUTIONS: dict[str, str] = {
+    "sysinfo": "firmware version only (dump metadata)",
+    "services": "custom services",
+    "apphosting": "NAT/Gaming forwards",
+    "ipalloc": "fixed reservations (+ allocation table, Fixed rows unless --all-clients)",
+    "packetfilter": "packet-filter table for reference; best effort, omitted if unreadable",
+    "dosprotect": "Firewall Advanced form values",
+    "wconfig": "Advanced Wi-Fi form values",
+}
+
+# Optional form pages (snapshot.OPTIONAL_FORM_PAGES): what they capture, and the risk of restoring them.
+INCLUDE_RISK_NOTES: dict[str, str] = {
+    "etherlan": "LAN port settings; restoring can cut the LAN port you are on",
+    "dhcpserver": "Subnets & DHCP; restoring can move the gateway address (restored last)",
+    "ippass": "IP Passthrough; restoring changes which LAN client gets the public address",
+    "wmacauth": "Wi-Fi MAC filtering modes; restoring changes which Wi-Fi clients may join",
+}
+
+_EXIT_CODES: dict[str, tuple[tuple[str, str], ...]] = {
+    "dump": (
+        ("0", "dump file written"),
+        ("1", "usage error (e.g. an unknown --include id, an unusable --out)"),
+        ("2", "the router or a page could not be read, or the snapshot could not be built"),
+        ("130", "interrupted (Ctrl-C)"),
+    ),
+    "diff": (
+        ("0", "identical (a firmware-only change is still 0)"),
+        ("1", "differences found, or none of the --include pages is in the dump"),
+        ("2", "the dump file or the router could not be read"),
+        ("130", "interrupted (Ctrl-C)"),
+    ),
+    "restore": (
+        ("0", "dry run: plan printed (even when work remains)"),
+        ("0", "--commit: converged (everything in the dump is on the router)"),
+        ("1", "not converged, a write rejected, confirmation refused, or nothing to compare"),
+        ("2", "the dump file or the router could not be read"),
+        ("2", "a write was sent and never acknowledged (even when the closing diff is readable)"),
+        ("130", "interrupted (Ctrl-C); the write state is reported"),
+    ),
+    "autorestore": (
+        ("0", "no reset, converged, or router unreachable"),
+        ("1", "a restore is needed (dry run) or did not converge (the next timer run retries)"),
+        ("2", "page-level 401/403 or an initial structural failure"),
+        ("2", "allocation preflight or recovery checkpoint failure, or the same failure ended three runs"),
+        ("130", "interrupted (Ctrl-C)"),
+    ),
+}
+
+
+def exit_codes_epilog(command: str) -> str:
+    return "Exit codes:\n" + _rows(list(_EXIT_CODES[command]))
+
+
+def dump_pages_epilog() -> str:
+    from .snapshot import OPTIONAL_FORM_PAGES, snapshot_pages_for
+
+    default = [(page, DUMP_CONTRIBUTIONS[page]) for page in snapshot_pages_for(())]
+    optional = [(page, INCLUDE_RISK_NOTES[page]) for page in OPTIONAL_FORM_PAGES]
+    return "\n".join([
+        "Read by every dump:",
+        _rows(default),
+        "",
+        "Optional (--include <id>[,<id>] or --include all):",
+        _rows(optional),
+        f"  all = {', '.join(OPTIONAL_FORM_PAGES)}; dosprotect and wconfig are accepted but always read;",
+        "  any other id (e.g. services) is rejected. Capturing is read-only; the notes are restore risks.",
+    ])
+
+
+def include_ids_epilog(command: str) -> str:
+    from .snapshot_diff import RESTORABLE_PAGES
+
+    pairs = [(page, TAB_SUMMARIES[page]) for page in RESTORABLE_PAGES]
+    lines = [
+        "Pages --include accepts (--include <id>[,<id>] or all):",
+        _rows(pairs),
+        "  omitted or all = every restorable page present in the dump; a selection of pages that are",
+        "  not in the dump compares nothing and exits 1.",
+    ]
+    if command == "autorestore":
+        lines.append("  The selection also limits which pages count toward reset detection.")
+    if command in ("restore", "autorestore"):
+        lines.append("  Wi-Fi MAC filtering modes stay blocked until the recorded MAC list entries exist.")
+    return "\n".join(lines)
+
+
+_PHASE_NOTES: dict[str, str] = {
+    "services": "custom services (before the forwards that use them)",
+    "apphosting": "NAT/Gaming forwards (a forward waits until its service appears in the dropdown)",
+    "ipalloc": "fixed reservations (a reservation can need Allocate, then Save)",
+    "packetfilter": "documentary only: recorded, never written",
+    "dosprotect": "Firewall Advanced",
+    "wconfig": "Advanced Wi-Fi",
+    "wmacauth": "Wi-Fi MAC filtering modes",
+    "ippass": "IP Passthrough",
+    "etherlan": "LAN ports (can cut the LAN port you are on)",
+    "dhcpserver": "Subnets & DHCP, last (can move the gateway address)",
+}
+
+
+def restore_phases_epilog() -> str:
+    from .restore import RESTORE_PAGE_ORDER
+
+    width = max(len(page) for page in RESTORE_PAGE_ORDER) + 2
+    rows = [f"  {index:>2}. {page.ljust(width)}{_PHASE_NOTES[page]}" for index, page in enumerate(RESTORE_PAGE_ORDER, 1)]
+    return "\n".join([
+        "Planning phases (the order restore plans pages, not the order writes are sent):",
+        *rows,
+        "  With --prune, router rows missing from the dump are removed too: --prune removes a forward before its",
+        "  service, a page that still has an add pending defers its removes, and reservations are never released.",
+        "  Live runs need --commit --confirm RESTORE.",
+    ])
+
+
+def actions_epilog() -> str:
+    from .actions import ROUTER_ACTIONS
+
+    name_width = max(len(action.name) for action in ROUTER_ACTIONS) + 2
+    token_width = max(len(action.confirm_token) for action in ROUTER_ACTIONS) + len("--confirm ") + 2
+    page_width = max(len(action.page) for action in ROUTER_ACTIONS) + 2
+    lines = ["Actions (bgwcli action <name> previews; add --commit --confirm <token> to POST):"]
+    for action in ROUTER_ACTIONS:
+        guard = "dangerous" if action.dangerous else "guarded"
+        aliases = f" (also: {', '.join(action.aliases)})" if action.aliases else ""
+        lines.append(
+            f"  {action.name.ljust(name_width)}{('--confirm ' + action.confirm_token).ljust(token_width)}"
+            f"{action.page.ljust(page_width)}{guard.ljust(11)}{action.description.rstrip('.')}{aliases}"
+        )
+    return "\n".join(lines)
+
+
+def page_list_epilog() -> str:
+    lines = ["Pages (type the page id shown first; labels and \"Section/Tab\" paths also work):"]
+    sections = list(dict.fromkeys(row.section for row in page_rows()))
+    width = max(len(row.page) for row in page_rows()) + 2
+    label_width = max(len(row.label) for row in page_rows()) + 2
+    for section in sections:
+        lines.append(f"  {section}:")
+        for row in page_rows(section):
+            marker = " [guarded]" if row.guarded else ""
+            lines.append(f"    {row.page.ljust(width)}{row.label.ljust(label_width)}{row.summary}{marker}")
+    lines.append("  A bare page name such as status is not section-scoped here; use the page id.")
+    return "\n".join(lines)
+
+
+def write_pages_epilog(command: str) -> str:
+    from .mutations import DANGEROUS_PAGES
+
+    by_page = {row.page: row for row in page_rows()}
+    blocked = [(page, f"{by_page[page].section} / {by_page[page].label}") for page in sorted(DANGEROUS_PAGES)]
+    rule = (
+        "set refuses these pages even as a dry run"
+        if command == "set"
+        else "submit previews a button on these pages but refuses --commit"
+    )
+    return "\n".join([
+        "Writes: any page with form fields; bgwcli inspect <page> shows its fields and buttons.",
+        "Commit with --commit --confirm <PAGE ID in upper case>, e.g. --confirm WCONFIG.",
+        "A submit button must be an enabled button of the page's own form; buttons that only open an editor",
+        "take no KEY=VALUE.",
+        "",
+        f"Guarded pages ({rule}; use bgwcli action where one exists):",
+        _rows(blocked),
+    ])
+
+
+SESSION_EPILOG = "\n".join([
+    "Subcommands:",
+    "  status        show the local session cache and cooldown for this router (default)",
+    "  clear-cache   delete the local session cache; it also removes the local cooldown, so use it only for",
+    "                local-state troubleshooting, not as a retry shortcut (no router logout is sent)",
+])
+
+
+def command_epilog(name: str) -> str | None:
+    """The generated epilog for a non-section command's help, or None."""
+    if name == "dump":
+        return dump_pages_epilog() + "\n\n" + exit_codes_epilog("dump")
+    if name in ("diff", "autorestore"):
+        return include_ids_epilog(name) + "\n\n" + exit_codes_epilog(name)
+    if name == "restore":
+        return "\n\n".join([include_ids_epilog(name), restore_phases_epilog(), exit_codes_epilog(name)])
+    if name == "action":
+        return actions_epilog()
+    if name in ("page", "inspect"):
+        return page_list_epilog()
+    if name in ("set", "submit"):
+        return write_pages_epilog(name)
+    if name == "session":
+        return SESSION_EPILOG
+    return None
+
+
+def id_list(registry: str) -> str:
+    """Comma-separated ids of one registry, for prose in the root help."""
+    if registry == "optional":
+        from .snapshot import OPTIONAL_FORM_PAGES as ids
+    elif registry == "restorable":
+        from .snapshot_diff import RESTORABLE_PAGES as ids
+    elif registry == "guarded":
+        from .mutations import DANGEROUS_PAGES
+
+        ids = tuple(sorted(DANGEROUS_PAGES))
+    else:
+        raise ValueError(registry)
+    return ", ".join(ids)

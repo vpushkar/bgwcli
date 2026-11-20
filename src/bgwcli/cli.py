@@ -2628,7 +2628,7 @@ def build_parser() -> _Parser:
             parents=[_common_options(visible, helpdoc.OPTION_METAVAR_OVERRIDES.get(name))],
             aliases=SECTION_COMMANDS.get(name, ()), allow_abbrev=False,
             formatter_class=argparse.RawDescriptionHelpFormatter,
-            epilog=helpdoc.section_help_epilog(section) if section else None,
+            epilog=helpdoc.section_help_epilog(section) if section else helpdoc.command_epilog(name),
         )
         metavar, arg_help = helpdoc.COMMAND_ARGS[name]
         sub.add_argument("args", nargs="*", metavar=metavar, help=arg_help)
@@ -2840,6 +2840,7 @@ Generic inspection:
 Operations are dry-run by default:
   bgwcli actions
     List explicit guarded actions and their confirmation tokens.
+    bgwcli action -h lists every action, its token and source page.
 
   bgwcli action <name>
     Show the payload and required commit command. Does not POST.
@@ -2855,11 +2856,12 @@ Operations are dry-run by default:
 
   bgwcli set <page> KEY=VALUE...
     Build a dry-run config mutation from current form state plus overrides.
-    Every commit requires --commit --confirm TOKEN.
+    Every commit requires --commit --confirm <PAGE ID in upper case> (e.g. WCONFIG).
+    set refuses the guarded pages ({helpdoc.id_list("guarded")}) even as a dry run.
 
   bgwcli submit <page> <button> [KEY=VALUE...]
-    Dry-run a discovered router button/form submit. Generic submit is blocked on
-    dangerous pages such as restart/reset/update/access-code.
+    Dry-run a discovered router button/form submit. Generic submit previews but
+    refuses --commit on the guarded pages: {helpdoc.id_list("guarded")}.
 
 Diagnostics operations:
   bgwcli diagnostics ping <host> [--ipv4|--ipv6]
@@ -2875,26 +2877,24 @@ Backup:
     Capture services, NAT/Gaming forwards, host reservations and the core form
     pages Firewall Advanced (dosprotect) and Advanced Wi-Fi (wconfig) to an
     owner-only JSON file. For dump, --out is the output FILE path.
-    --include adds optional form pages: etherlan (LAN ports), dhcpserver
-    (Subnets & DHCP), ippass (IP Passthrough), wmacauth (Wi-Fi MAC filtering
-    modes); `bgwcli dump --include all` captures every page and is the
-    recommended baseline for factory-reset recovery. Pages not included are
-    not fetched. The documentary IP Allocation table keeps only Fixed
-    Allocation rows by default; --all-clients keeps every client row.
+    --include adds optional form pages ({helpdoc.id_list("optional")});
+    `bgwcli dump --include all` captures every page and is the recommended
+    baseline for factory-reset recovery. Pages not included are not fetched;
+    bgwcli dump -h lists what each page contributes and the restore risks.
+    The documentary IP Allocation table keeps only Fixed Allocation rows by
+    default; --all-clients keeps every client row.
 
   bgwcli diff <dumpfile> [--include <csv|all>]
     Compare a dump with the live router. Exit 0 identical, 1 different, 2 error.
     Every section and form page present in the dump is compared; --include
-    restricts that to the listed page ids (services, apphosting, ipalloc,
-    dosprotect, wconfig, etherlan, dhcpserver, ippass, wmacauth). A requested
+    restricts that to the listed page ids ({helpdoc.id_list("restorable")}). A requested
     page the dump never captured prints a warning on stderr and is skipped.
 
   bgwcli restore <dumpfile> [--prune] [--include <csv|all>]
     Dry-run the plan that replays missing services/forwards/reservations and
-    changed forms, in order: services -> forwards -> reservations -> firewall
-    advanced -> Advanced Wi-Fi -> Wi-Fi MAC filtering -> IP Passthrough -> LAN
-    ports -> Subnets & DHCP (last: a LAN address change moves the gateway and
-    the step carries a warning). --include restricts the plan like diff; a
+    changed forms in planning phases (bgwcli restore -h lists them; Subnets &
+    DHCP is last: a LAN address change moves the gateway and the step carries a
+    warning). --include restricts the plan like diff; a
     requested page missing from the dump becomes a skip step.
 
   bgwcli restore <dumpfile> --commit --confirm RESTORE
