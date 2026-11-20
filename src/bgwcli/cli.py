@@ -2550,7 +2550,9 @@ _COMMAND_OPTIONS: tuple[tuple[tuple[str, ...], dict[str, Any]], ...] = (
 
 
 def _common_options(
-    visible: frozenset[str] | None = None, metavars: dict[str, str] | None = None
+    visible: frozenset[str] | None = None,
+    metavars: dict[str, str] | None = None,
+    helps: dict[str, str] | None = None,
 ) -> argparse.ArgumentParser:
     """Every global and per-command flag; attached to the root and each subparser so flags go anywhere.
 
@@ -2565,6 +2567,8 @@ def _common_options(
             options = dict(kwargs)
             if visible is not None and flags[0] not in visible:
                 options["help"] = argparse.SUPPRESS
+            elif helps and flags[0] in helps:
+                options["help"] = helps[flags[0]]
             if metavars and flags[0] in metavars:
                 options["metavar"] = metavars[flags[0]]
             group.add_argument(*flags, default=argparse.SUPPRESS, **options)
@@ -2628,7 +2632,9 @@ def build_parser() -> _Parser:
         section = section_for_root(name) if name in SECTION_COMMANDS else None
         sub = subparsers.add_parser(
             name, help=description, description=description,
-            parents=[_common_options(visible, helpdoc.OPTION_METAVAR_OVERRIDES.get(name))],
+            parents=[_common_options(
+                visible, helpdoc.OPTION_METAVAR_OVERRIDES.get(name), helpdoc.OPTION_HELP_OVERRIDES.get(name)
+            )],
             aliases=SECTION_COMMANDS.get(name, ()), allow_abbrev=False,
             formatter_class=argparse.RawDescriptionHelpFormatter,
             epilog=helpdoc.section_help_epilog(section) if section else helpdoc.command_epilog(name),
@@ -2643,7 +2649,7 @@ def command_help(name: str) -> str | None:
     parser = build_parser()
     subparsers = next(action for action in parser._actions if isinstance(action, argparse._SubParsersAction))
     sub = subparsers.choices.get(name)
-    return None if sub is None or name == "fixtures-capture" else sub.format_help()
+    return None if sub is None else sub.format_help()
 
 
 _ALIAS_TO_COMMAND = {alias: name for name, aliases in SECTION_COMMANDS.items() for alias in aliases}
@@ -2960,7 +2966,8 @@ Global options:
   --session-wait-interval <seconds>  Wait poll interval in seconds. Default: 10
   --confirm <token>         Required token for every committed operation
   --strict-tls              Enforce TLS validation. Default router access does not verify its self-signed identity.
-  Global options are accepted before or after the command name. <command> --help shows argparse usage.
+  Global options are accepted before or after the command name, except --version, which must come before
+  the command. Per-command options: bgwcli help <command> or bgwcli <command> -h.
 
 Notes:
   Read commands only perform GET requests plus the login POST required by the router.

@@ -234,13 +234,29 @@ GLOBAL_OPTION_USE: dict[str, frozenset[str]] = {
     "sitemap": frozenset({"--host", "--config", "--json", "--timeout", "--strict-tls"}),  # public GET, no login
     "coverage": frozenset({"--host", "--config", "--json", "--timeout", "--strict-tls"}),
     "session": frozenset({"--host", "--config", "--json"}),  # --host selects the cache inspected/cleared
-    "tabs": frozenset({"--json"}),
-    "actions": frozenset({"--json"}),
-    "section": frozenset({"--json"}),
+    "tabs": frozenset({"--config", "--json"}),  # a config file can set BGW_JSON
+    "actions": frozenset({"--config", "--json"}),  # a config file can set BGW_JSON
+    "section": frozenset({"--config", "--json"}),  # a config file can set BGW_JSON
     "help": frozenset(),
 }
 
 OPTION_METAVAR_OVERRIDES: dict[str, dict[str, str]] = {"dump": {"--out": "<file>"}}
+
+_PAGES_HELP = "Limit the traversal to these CGI page ids (comma-separated; ids are the third column of `bgwcli tabs`)"
+_FORMS_HELP = "Include form controls in the JSON output (text output shows form counts only)"
+
+# Per-command help text for shared options whose generic wording would mislead there (display only).
+OPTION_HELP_OVERRIDES: dict[str, dict[str, str]] = {
+    "sweep": {"--forms": _FORMS_HELP, "--pages": _PAGES_HELP},
+    "scan": {"--forms": _FORMS_HELP, "--pages": _PAGES_HELP},
+    "schema": {"--pages": _PAGES_HELP},
+    "audit": {"--pages": _PAGES_HELP},
+    "readiness": {"--pages": _PAGES_HELP},
+    "fixtures-capture": {
+        "--pages": _PAGES_HELP,
+        "--out": "Fixture pack directory to write sanitized captures into. Default: ./tests/fixtures",
+    },
+}
 
 
 # ---------------------------------------------------------------------------------------------

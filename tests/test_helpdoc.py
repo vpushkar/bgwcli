@@ -98,9 +98,9 @@ EXPECTED_VISIBLE: dict[str, frozenset[str]] = {
     "auth": NO_SECRETS,
     "sitemap": PUBLIC_GET,
     "coverage": PUBLIC_GET,
-    "tabs": frozenset({"--json"}),
-    "actions": frozenset({"--json"}),
-    "section": frozenset({"--json"}),
+    "tabs": frozenset({"--config", "--json"}),
+    "actions": frozenset({"--config", "--json"}),
+    "section": frozenset({"--config", "--json"}),
     "session": frozenset({"--host", "--config", "--json"}),
     "help": frozenset(),
     "action": ALL_GLOBALS | COMMIT,
@@ -737,3 +737,40 @@ def test_final_readme_has_generated_phases_exit_codes_and_write_rules():
     for page in sorted(mutations.DANGEROUS_PAGES):
         assert f"`{page}`" in rules
     assert "logs in again and re-sends once" in rules
+
+
+def _option_help(command: str, flag: str) -> str:
+    """The full (wrapped) help of one option, whitespace-normalised."""
+    action = next(a for a in _subparsers()[command]._actions if flag in a.option_strings)
+    return " ".join(str(action.help).split())
+
+
+def test_sweep_scan_forms_help_is_truthful():
+    for command in ("sweep", "scan"):
+        text = _option_help(command, "--forms")
+        assert "terminal output" not in text
+        assert "JSON" in text and "counts" in text
+
+
+@pytest.mark.parametrize("command", ["sweep", "scan", "schema", "audit", "readiness"])
+def test_pages_help_points_to_tabs_for_ids(command):
+    text = _option_help(command, "--pages")
+    assert "bgwcli tabs" in text and "page id" in text
+
+
+def test_fixtures_capture_out_help_is_accurate():
+    text = _option_help("fixtures-capture", "--out")
+    assert "refuse" not in text and "fixture" in text
+
+
+def test_help_command_finds_hidden_fixtures_capture(capsys):
+    assert cli.command_help("fixtures-capture") == _subparsers()["fixtures-capture"].format_help()
+    assert cli.main(["help", "fixtures-capture"]) == 0
+    assert capsys.readouterr().out.startswith("usage: bgwcli fixtures-capture")
+    assert "fixtures-capture" not in cli.help_text().split("Commands:", 1)[-1].split("\n\n", 1)[0]
+
+
+def test_root_help_advertises_help_command_and_root_only_version():
+    text = " ".join(cli.help_text().split())
+    assert "bgwcli help <command>" in text and "bgwcli <command> -h" in text
+    assert "--version" in text and "before the command" in text
