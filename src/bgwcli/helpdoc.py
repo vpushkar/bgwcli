@@ -382,7 +382,9 @@ def restore_phases_epilog() -> str:
     from .restore import RESTORE_PAGE_ORDER
 
     width = max(len(page) for page in RESTORE_PAGE_ORDER) + 2
-    rows = [f"  {index:>2}. {page.ljust(width)}{_PHASE_NOTES[page]}" for index, page in enumerate(RESTORE_PAGE_ORDER, 1)]
+    rows = [
+        f"  {index:>2}. {page.ljust(width)}{_PHASE_NOTES[page]}" for index, page in enumerate(RESTORE_PAGE_ORDER, 1)
+    ]
     return "\n".join([
         "Planning phases (the order restore plans pages, not the order writes are sent):",
         *rows,
