@@ -79,6 +79,7 @@ bgwcli auth
 bgwcli wifi
 bgwcli devices
 bgwcli home-network advanced-wi-fi --json
+bgwcli device system-information   # model, serial numbers, firmware (Software Version)
 ```
 
 Scripts that must not export the code pipe it per command instead:
@@ -218,14 +219,33 @@ a host reservation. Repeat the prune run until the closing diff prints `No diffe
 **5. Cadence.** Re-dump after any change you make in the web UI, and after a firmware upgrade
 (`diff` against the old file first).
 
-**Choosing what to back up.** Four form pages are opt-in because restoring them can cut you off:
+**Choosing what to back up.** Four form pages are opt-in because restoring them can cut you off
+(`bgwcli dump -h` prints the same lists):
 
-| Page id | Router page | Why it is opt-in |
-| --- | --- | --- |
-| `etherlan` | LAN Ethernet ports | Forcing a port mode can cut the wire you are connected through. |
-| `dhcpserver` | Subnets & DHCP | A different LAN address moves the gateway; restored last, with a `warning:` line. |
-| `ippass` | IP Passthrough mode | Changes how the WAN address is handed to a LAN device. |
-| `wmacauth` | Wi-Fi MAC Filtering modes | A `deny`/`allow` mode restored before the filter list exists locks Wi-Fi clients out; blocked until the list is back. |
+<!-- include-pages:start -->
+Read by every `dump`:
+
+| Page id | What it adds to the dump |
+| --- | --- |
+| `sysinfo` | firmware version only (dump metadata) |
+| `services` | custom services |
+| `apphosting` | NAT/Gaming forwards |
+| `ipalloc` | fixed reservations (+ allocation table, Fixed rows unless --all-clients) |
+| `packetfilter` | packet-filter table for reference; best effort, omitted if unreadable |
+| `dosprotect` | Firewall Advanced form values |
+| `wconfig` | Advanced Wi-Fi form values |
+
+Optional, with `dump --include <id>[,<id>]` or `--include all`; capturing is read-only, the notes are the risks of restoring them:
+
+| Page id | What it captures; restore risk |
+| --- | --- |
+| `etherlan` | LAN port settings; restoring can cut the LAN port you are on |
+| `dhcpserver` | Subnets & DHCP; restoring can move the gateway address (restored last) |
+| `ippass` | IP Passthrough; restoring changes which LAN client gets the public address |
+| `wmacauth` | Wi-Fi MAC filtering modes; restoring changes which Wi-Fi clients may join (blocked until the list is back) |
+
+`dump --include`: `all` = `etherlan`, `dhcpserver`, `ippass`, `wmacauth`; `dosprotect` and `wconfig` are accepted but always read; any other id is rejected. `diff`, `restore` and `autorestore` `--include` take the restorable ids `services`, `apphosting`, `ipalloc`, `dosprotect`, `wconfig`, `etherlan`, `dhcpserver`, `ippass`, `wmacauth` (omitted or `all` = everything restorable in the dump; for `autorestore` the selection also limits reset detection).
+<!-- include-pages:end -->
 
 ```bash
 bgwcli dump --out ~/bgw-baseline.json                           # core only
@@ -296,53 +316,79 @@ checkpoint and every status and exit code: [reference, Automatic recovery](docs/
 ## Router command tree
 
 Every router tab is a command. All accept `--json`; `--forms` adds the page's form controls to the terminal view.
+`bgwcli <section> -h` lists that section's pages, and `bgwcli tabs` shows every page with its command.
 
-```bash
-bgwcli device status
-bgwcli device device-list
-bgwcli device system-information
-bgwcli device access-code
-bgwcli device remote-access
-bgwcli device restart-device
+<!-- pages:start -->
+### Device
 
-bgwcli broadband status
-bgwcli broadband configure
-bgwcli broadband fiber-status
+| Command | Shows |
+| --- | --- |
+| `bgwcli device status` | Gateway overview: broadband, Wi-Fi, LAN and uptime (default) |
+| `bgwcli device device-list` | Devices on the network with address and connection |
+| `bgwcli device system-information` | Model, serial numbers, firmware (Software Version) |
+| `bgwcli device access-code` | Device access code page (guarded) |
+| `bgwcli device remote-access` | Remote management access settings |
+| `bgwcli device restart-device` | Gateway restart page (guarded) |
 
-bgwcli home-network status
-bgwcli home-network configure
-bgwcli home-network ipv6
-bgwcli home-network wi-fi
-bgwcli home-network advanced-wi-fi
-bgwcli home-network mac-filtering
-bgwcli home-network subnets-dhcp
-bgwcli home-network ip-allocation
+### Broadband
 
-bgwcli voice status
-bgwcli voice line-details
-bgwcli voice call-statistics
+| Command | Shows |
+| --- | --- |
+| `bgwcli broadband status` | Broadband link status, addresses and counters (default) |
+| `bgwcli broadband configure` | Broadband connection settings |
+| `bgwcli broadband fiber-status` | Optical module and fiber signal levels |
 
-bgwcli firewall status
-bgwcli firewall custom-services
-bgwcli firewall packet-filter
-bgwcli firewall nat-gaming
-bgwcli firewall public-subnet-hosts
-bgwcli firewall ip-passthrough
-bgwcli firewall firewall-advanced
-bgwcli firewall security-options
+### Home Network
 
-bgwcli diagnostics troubleshoot
-bgwcli diagnostics ping example.com --commit --confirm DIAG
-bgwcli diagnostics traceroute example.com --commit --confirm DIAG
-bgwcli diagnostics nslookup example.com --commit --confirm DIAG
-bgwcli diagnostics speed-test
-bgwcli diagnostics logs
-bgwcli diagnostics update
-bgwcli diagnostics resets
-bgwcli diagnostics syslog
-bgwcli diagnostics event-notifications
-bgwcli diagnostics nat-table
-```
+| Command | Shows |
+| --- | --- |
+| `bgwcli home-network status` | LAN and Wi-Fi traffic counters (default) |
+| `bgwcli home-network configure` | LAN Ethernet port settings |
+| `bgwcli home-network ipv6` | LAN IPv6 settings |
+| `bgwcli home-network wi-fi` | Wi-Fi networks, names and passwords |
+| `bgwcli home-network advanced-wi-fi` | Advanced Wi-Fi radio settings and channels |
+| `bgwcli home-network mac-filtering` | Wi-Fi MAC address filtering |
+| `bgwcli home-network subnets-dhcp` | LAN subnets and DHCP server settings |
+| `bgwcli home-network ip-allocation` | IP address allocation and fixed reservations |
+
+### Voice
+
+| Command | Shows |
+| --- | --- |
+| `bgwcli voice status` | Phone line status (default) |
+| `bgwcli voice line-details` | Provisioned phone line details |
+| `bgwcli voice call-statistics` | Phone call statistics |
+
+### Firewall
+
+| Command | Shows |
+| --- | --- |
+| `bgwcli firewall status` | Firewall status summary (default) |
+| `bgwcli firewall custom-services` | Custom service (port) definitions |
+| `bgwcli firewall packet-filter` | Packet filter rules |
+| `bgwcli firewall nat-gaming` | NAT/Gaming port forwards |
+| `bgwcli firewall public-subnet-hosts` | Public subnet host settings |
+| `bgwcli firewall ip-passthrough` | IP Passthrough settings |
+| `bgwcli firewall firewall-advanced` | Advanced firewall protections |
+| `bgwcli firewall security-options` | Firewall security options |
+
+### Diagnostics
+
+| Command | Shows |
+| --- | --- |
+| `bgwcli diagnostics troubleshoot` | Troubleshooting tests and diagnostic details (default) |
+| `bgwcli diagnostics speed-test` | Speed test history |
+| `bgwcli diagnostics logs` | Router event log |
+| `bgwcli diagnostics update` | Firmware update page (guarded) |
+| `bgwcli diagnostics resets` | Reset and restart options (guarded) |
+| `bgwcli diagnostics syslog` | Remote syslog settings |
+| `bgwcli diagnostics event-notifications` | Event notification settings |
+| `bgwcli diagnostics nat-table` | Active NAT sessions |
+| `bgwcli diagnostics site-map` | The router's own page index |
+| `bgwcli diagnostics ping <host>` | Ping a host from the gateway; dry run, `--commit --confirm DIAG` sends |
+| `bgwcli diagnostics traceroute <host>` | Trace the route to a host from the gateway; dry run, `--commit --confirm DIAG` sends |
+| `bgwcli diagnostics nslookup <host>` | Resolve a name with the gateway's DNS; dry run, `--commit --confirm DIAG` sends |
+<!-- pages:end -->
 
 `home`, `lan` (for `home-network`) and `diag`, `diagnostic` (for `diagnostics`) are accepted as section
 aliases. Pages on this router can hang: a page command reports a structured page-unavailable result (exit 2),
@@ -364,8 +410,42 @@ bgwcli action run-speed-test --commit --confirm SPEED
 bgwcli action restart-wifi-2.4 --commit --confirm RESTART-WIFI --timeout 45
 ```
 
-Generic `set` and `submit` refuse the dangerous pages (`routerpasswd`, `restart`, `reset`, `update`); those
-go through named `action`s, which are marked dangerous. A write is sent once; `applied` means the gateway
+Every action, its token and the page it starts from (`bgwcli action -h` prints the same list):
+
+<!-- actions:start -->
+| Action | Token | Source page | Kind | What it does |
+| --- | --- | --- | --- | --- |
+| `restart` | `RESTART` | `restart` | dangerous | Restart the gateway. (also `restart-device`, `reboot`) |
+| `clear-device-list` | `CLEAR-DEVICES` | `devices` | guarded | Clear inactive devices from the device list. |
+| `run-speed-test` | `SPEED` | `speed` | guarded | Run the router speed test. (also `speed-test`) |
+| `detect-wifi-congestion-2.4` | `CONGESTION-2.4` | `lanstatistics` | guarded | Run 2.4 GHz Wi-Fi congestion detection from LAN Statistics. (also `congestion-2.4`, `congestion-24`) |
+| `detect-wifi-congestion-5` | `CONGESTION-5` | `lanstatistics` | guarded | Run 5 GHz Wi-Fi congestion detection from LAN Statistics. (also `congestion-5`, `congestion-5ghz`) |
+| `clear-connection-statistics` | `CLEAR-CONNECTION-STATISTICS` | `lanstatistics` | dangerous | Clear connection statistics counters from LAN Statistics. (also `clear-connection-stats`) |
+| `clear-lan-statistics` | `CLEAR-LAN-STATISTICS` | `lanstatistics` | dangerous | Clear LAN statistics counters using the LAN Statistics Clear Statistics button. (also `clear-statistics`, `clear-lan-stats`) |
+| `run-full-diagnostics` | `DIAG` | `diag` | guarded | Run the router's full diagnostic test suite. (also `full-diagnostics`) |
+| `send-diagnostics` | `SEND-DIAGNOSTICS` | `diag` | guarded | Send the router diagnostics report to AT&T. (also `send-diagnostic-report`) |
+| `diagnostics-ethernet-details` | `DIAG` | `diag` | guarded | Show Ethernet diagnostic details. (also `ethernet-details`) |
+| `diagnostics-authentication-details` | `DIAG` | `diag` | guarded | Show authentication diagnostic details. (also `authentication-details`) |
+| `diagnostics-ip-details` | `DIAG` | `diag` | guarded | Show IP diagnostic details. (also `ip-details`) |
+| `diagnostics-dns-details` | `DIAG` | `diag` | guarded | Show DNS diagnostic details. (also `dns-details`) |
+| `packet-filter-enable` | `PACKETFILTER` | `packetfilter` | guarded | Enable packet filters. (also `enable-packet-filter`, `enable-packet-filters`) |
+| `packet-filter-add-drop-rule` | `PACKETFILTER` | `packetfilter` | guarded | Open/add a packet-filter drop rule. (also `add-drop-rule`) |
+| `packet-filter-add-pass-rule` | `PACKETFILTER` | `packetfilter` | guarded | Open/add a packet-filter pass rule. (also `add-pass-rule`) |
+| `reset-ip` | `RESET-IP` | `reset` | dangerous | Reset the router IP stack. |
+| `reset-connection` | `RESET-CONNECTION` | `reset` | dangerous | Reset the router broadband connection. |
+| `restart-from-resets` | `RESTART` | `reset` | dangerous | Restart from the Diagnostics > Resets page. |
+| `reset-wifi-config` | `RESET-WIFI-CONFIG` | `reset` | dangerous | Reset Wi-Fi configuration. (also `reset-wi-fi-config`) |
+| `reset-firewall-config` | `RESET-FIREWALL-CONFIG` | `reset` | dangerous | Reset firewall configuration. |
+| `factory-reset` | `FACTORY-RESET` | `reset` | dangerous | Reset the device to defaults. (also `reset-device`) |
+| `restart-wifi-2.4` | `RESTART-WIFI` | `home` | guarded | Restart the 2.4 GHz Wi-Fi radio (home.ha Restart button; clients on 2.4 GHz drop briefly). (also `restart-wifi-24`, `restart-2.4ghz`, `restart-wifi-2-4`) |
+| `restart-wifi-5` | `RESTART-WIFI` | `home` | guarded | Restart the 5 GHz Wi-Fi radio (home.ha Restart button; clients on 5 GHz drop briefly). (also `restart-wifi-5ghz`, `restart-5ghz`) |
+| `restart-broadband` | `RESTART-BROADBAND` | `home` | dangerous | Restart the broadband connection (home.ha Restart button; drops WAN for a while). (also `restart-wan`) |
+| `find-best-channel-5` | `CHANSCAN` | `wconfig` | guarded | Run the 5 GHz 'Find Best Channel' scan on Advanced Wi-Fi (5 GHz clients drop briefly). (also `chanscan5`, `find-best-channel`, `scan-5ghz-channel`) |
+<!-- actions:end -->
+
+On the guarded pages (`reset`, `restart`, `routerpasswd`, `update`) `set` refuses even a dry run, and
+`submit` previews a button on them but refuses `--commit`; use a named `action` where one exists (Restart and
+Resets have dangerous actions; Access Code and Update have no registered action). A write is sent once; `applied` means the gateway
 acknowledged it and the requested state read back, an explicit rejection is exit 1, and an answer the CLI
 could not read is exit 2 with `committed` in the JSON telling you whether the write reached the router.
 Secrets (passwords, keys, access codes, nonces, phone numbers) are redacted on every output path unless

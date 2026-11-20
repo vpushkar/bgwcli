@@ -293,7 +293,7 @@ INCLUDE_RISK_NOTES: dict[str, str] = {
     "etherlan": "LAN port settings; restoring can cut the LAN port you are on",
     "dhcpserver": "Subnets & DHCP; restoring can move the gateway address (restored last)",
     "ippass": "IP Passthrough; restoring changes which LAN client gets the public address",
-    "wmacauth": "Wi-Fi MAC filtering modes; restoring changes which Wi-Fi clients may join",
+    "wmacauth": "Wi-Fi MAC filtering modes; restoring changes which Wi-Fi clients may join (blocked until the list is back)",
 }
 
 _EXIT_CODES: dict[str, tuple[tuple[str, str], ...]] = {
@@ -486,3 +486,74 @@ def id_list(registry: str) -> str:
     else:
         raise ValueError(registry)
     return ", ".join(ids)
+
+
+# ---------------------------------------------------------------------------------------------
+# README blocks (kept current by scripts/update_readme_pages.py; tests fail when they drift)
+
+
+def _md(text: str) -> str:
+    return text.replace("|", "\\|")
+
+
+def readme_pages_markdown() -> str:
+    lines: list[str] = []
+    for section in dict.fromkeys(row.section for row in page_rows()):
+        lines += [f"### {section}", "", "| Command | Shows |", "| --- | --- |"]
+        for row in page_rows(section):
+            marker = " (default)" if row.is_default else ""
+            marker += " (guarded)" if row.guarded else ""
+            lines.append(f"| `bgwcli {row.command} {row.slug}` | {_md(row.summary)}{marker} |")
+        if section == "Diagnostics":
+            for name, summary in _DIAGNOSTIC_OPERATIONS:
+                lines.append(f"| `bgwcli diagnostics {name}` | {summary}; dry run, `--commit --confirm DIAG` sends |")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def readme_include_markdown() -> str:
+    from .snapshot import OPTIONAL_FORM_PAGES, snapshot_pages_for
+    from .snapshot_diff import RESTORABLE_PAGES
+
+    lines = ["Read by every `dump`:", "", "| Page id | What it adds to the dump |", "| --- | --- |"]
+    lines += [f"| `{page}` | {_md(DUMP_CONTRIBUTIONS[page])} |" for page in snapshot_pages_for(())]
+    lines += [
+        "",
+        "Optional, with `dump --include <id>[,<id>]` or `--include all`; capturing is read-only, the notes are the "
+        "risks of restoring them:",
+        "",
+        "| Page id | What it captures; restore risk |",
+        "| --- | --- |",
+    ]
+    lines += [f"| `{page}` | {_md(INCLUDE_RISK_NOTES[page])} |" for page in OPTIONAL_FORM_PAGES]
+    lines += [
+        "",
+        f"`dump --include`: `all` = {', '.join(f'`{page}`' for page in OPTIONAL_FORM_PAGES)}; `dosprotect` and "
+        "`wconfig` are accepted but always read; any other id is rejected. `diff`, `restore` and `autorestore` "
+        f"`--include` take the restorable ids {', '.join(f'`{page}`' for page in RESTORABLE_PAGES)} (omitted or "
+        "`all` = everything restorable in the dump; for `autorestore` the selection also limits reset detection).",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def readme_actions_markdown() -> str:
+    from .actions import ROUTER_ACTIONS
+
+    lines = ["| Action | Token | Source page | Kind | What it does |", "| --- | --- | --- | --- | --- |"]
+    for action in ROUTER_ACTIONS:
+        kind = "dangerous" if action.dangerous else "guarded"
+        aliases = f" (also `{'`, `'.join(action.aliases)}`)" if action.aliases else ""
+        lines.append(
+            f"| `{action.name}` | `{action.confirm_token}` | `{action.page}` | {kind} | "
+            f"{_md(action.description)}{aliases} |"
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
+README_BLOCKS: dict[str, str] = {
+    "pages": "readme_pages_markdown",
+    "include-pages": "readme_include_markdown",
+    "actions": "readme_actions_markdown",
+}

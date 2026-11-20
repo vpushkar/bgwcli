@@ -539,3 +539,56 @@ def test_actions_json_byte_identical(capsys, tmp_env):
 def test_session_help_caveat():
     flat = " ".join(_help("session").split())
     assert "clear-cache" in flat and "also removes the local cooldown" in flat
+
+
+# ---------------------------------------------------------------------------------------------
+# Task 4: README blocks generated from the same sources
+
+README = Path(__file__).resolve().parent.parent / "README.md"
+_BLOCKS = {"pages": "readme_pages_markdown", "include-pages": "readme_include_markdown",
+           "actions": "readme_actions_markdown"}
+
+
+def _readme_block(name: str) -> str:
+    text = README.read_text(encoding="utf-8")
+    start, end = f"<!-- {name}:start -->\n", f"<!-- {name}:end -->"
+    assert start in text and end in text, f"README is missing the {name} markers"
+    return text[text.index(start) + len(start):text.index(end)]
+
+
+@pytest.mark.parametrize("name", sorted(_BLOCKS))
+def test_readme_blocks_are_current(name):
+    expected = getattr(helpdoc, _BLOCKS[name])()
+    assert _readme_block(name) == expected, "README is stale: run .venv/bin/python -I scripts/update_readme_pages.py"
+
+
+def test_readme_pages_block_lists_every_tab_under_its_section():
+    block = _readme_block("pages")
+    for tab in ROUTER_TABS:
+        heading = block.index(f"### {tab.section}\n")
+        following = block.find("\n### ", heading + 1)
+        section = block[heading:following if following != -1 else len(block)]
+        command = f"`bgwcli {helpdoc.section_command(tab.section)} {helpdoc.tab_slug(tab)}`"
+        assert section.count(command) == 1, command
+    assert "`bgwcli diagnostics site-map`" in block
+
+
+def test_readme_include_block_lists_every_selector():
+    block = _readme_block("include-pages")
+    for page in (*snapshot.snapshot_pages_for(()), *snapshot.OPTIONAL_FORM_PAGES, *snapshot_diff.RESTORABLE_PAGES):
+        assert f"`{page}`" in block, page
+
+
+def test_readme_actions_block_lists_every_action():
+    block = _readme_block("actions")
+    for action in ROUTER_ACTIONS:
+        row = next(line for line in block.splitlines() if line.startswith(f"| `{action.name}` |"))
+        assert f"`{action.confirm_token}`" in row and f"`{action.page}`" in row
+
+
+def test_readme_states_submit_and_set_rules_and_firmware_command():
+    text = " ".join(README.read_text(encoding="utf-8").split())
+    assert "`submit` previews a button on them but refuses `--commit`" in text
+    assert "Access Code and Update have no registered action" in text
+    assert "bgwcli device system-information" in text and "Software Version" in text
+    assert "`bgwcli <section> -h` lists that section's pages" in text
