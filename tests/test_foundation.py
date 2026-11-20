@@ -101,7 +101,7 @@ def test_package_version_has_a_single_source():
         r'(?m)^version\s*=\s*\{\s*attr\s*=\s*"bgwcli\.__version__"\s*\}', tables["tool.setuptools.dynamic"]
     )
 
-    expected_agent = f"bgw/{bgwcli.__version__}"
+    expected_agent = f"bgwcli/{bgwcli.__version__}"
     assert {client.DEFAULT_USER_AGENT, cli.USER_AGENT} == {expected_agent}
     literal = re.compile(r"[\"']\d+\.\d+\.\d+[\"']")
     for module in ("client.py", "cli.py"):

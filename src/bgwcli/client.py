@@ -35,7 +35,7 @@ from .types import HttpMethod, HttpResponse, RouterSessionSnapshot
 
 MAX_REDIRECTS = 5
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
-DEFAULT_USER_AGENT = f"bgw/{__version__}"
+DEFAULT_USER_AGENT = f"bgwcli/{__version__}"
 _ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 

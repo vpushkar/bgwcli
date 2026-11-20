@@ -174,7 +174,7 @@ from .terminal import printable_error, sanitize_terminal_text
 from .types import ParsedPage
 from .write_outcome import unanswered_write_step
 
-USER_AGENT = f"bgw/{__version__}"
+USER_AGENT = f"bgwcli/{__version__}"
 # Delays before the 2nd and 3rd post-save verification re-read (3 attempts total).
 VERIFY_RETRY_DELAYS: tuple[float, ...] = (2.0, 4.0)
 RESTORE_CONFIRM_TOKEN = "RESTORE"
@@ -2619,6 +2619,8 @@ def build_parser() -> _Parser:
     # instead of silently resolving to a flag the user may not have meant.
     parser = _Parser(prog="bgwcli", parents=[common], add_help=False, allow_abbrev=False)
     parser.add_argument("-h", "--help", action=_FLAG, dest="help_flag", default=argparse.SUPPRESS, help="Show help")
+    # Root parser only: `bgwcli device --version` stays an unrecognized argument, as before.
+    parser.add_argument("--version", action="version", version=f"bgwcli {__version__}")
     subparsers = parser.add_subparsers(dest="command", metavar="<command>")
     for name, description in _SUBCOMMANDS:
         visible = helpdoc.GLOBAL_OPTION_USE[name] | helpdoc.COMMAND_OPTION_USE[name]
@@ -2930,6 +2932,7 @@ Automatic recovery (for a systemd timer):
     is removed); check by hand. See deploy/README.md.
 
 Global options:
+  --version                 Print the bgwcli version and exit (before the command only)
   --host <host>             Router host. Default: BGW_HOST, ROUTER_IP, or 192.168.1.254
   --config <file>           Configuration file. Default: BGW_CONFIG or ~/.config/bgw/config
   --access-code-stdin       Read the device access code from stdin

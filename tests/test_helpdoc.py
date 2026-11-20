@@ -592,3 +592,46 @@ def test_readme_states_submit_and_set_rules_and_firmware_command():
     assert "Access Code and Update have no registered action" in text
     assert "bgwcli device system-information" in text and "Software Version" in text
     assert "`bgwcli <section> -h` lists that section's pages" in text
+
+
+# ---------------------------------------------------------------------------------------------
+# Task 5: bgwcli --version
+
+import bgwcli  # noqa: E402
+
+
+@pytest.fixture
+def no_router_no_config(monkeypatch):
+    def refuse(*args, **kwargs):
+        raise AssertionError("--version must not build a client or read configuration")
+
+    monkeypatch.setattr(cli, "_client_factory", refuse)
+    monkeypatch.setattr(cli, "load_config_file", refuse)
+
+
+@pytest.mark.parametrize("argv", [["--version"], ["--bogus", "--version"], ["--version", "device"]])
+def test_version_flag(capsys, no_router_no_config, argv):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(argv)
+    assert exc.value.code == 0
+    captured = capsys.readouterr()
+    assert captured.out == f"bgwcli {bgwcli.__version__}\n"
+    assert captured.err == ""
+
+
+def test_version_only_on_root(capsys, tmp_env):
+    assert cli.main(["device", "--version"]) == 1
+    assert "unrecognized arguments: --version" in capsys.readouterr().err
+
+
+def test_help_mentions_version():
+    text = " ".join(cli.help_text().split())
+    assert "--version Print the bgwcli version and exit (before the command only)" in text
+
+
+def test_version_is_0_2_0():
+    assert bgwcli.__version__ == "0.2.0"
+
+
+def test_readme_install_mentions_version_check():
+    assert "Check what is installed with `bgwcli --version`" in README.read_text(encoding="utf-8")
