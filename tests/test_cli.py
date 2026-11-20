@@ -200,8 +200,8 @@ def test_help_explains_operation_safety_and_high_value_commands(capsys, argv):
     code, out, err = run(capsys, argv)
     assert code == 0
     for needle in [
-        "Auth:", "Most-used read commands:", "bgwcli device status", "advanced-wi-fi",
-        "bgwcli voice status | line-details | call-statistics", "bgwcli sweep", "bgwcli audit",
+        "Auth:", "Most-used read commands:", "Router pages (bgwcli <section> <page>", "bgwcli device",
+        "advanced-wi-fi", "call-statistics", "bgwcli sweep", "bgwcli audit",
         "bgwcli session status | clear-cache", "--include-parsed", "--pages <csv>", "--out <dir>",
         "--wait-for-session", "Operations are dry-run by default:", "Diagnostics operations:",
         "--access-code-stdin", "Fallbacks are intentionally narrow", "dump [--out <file>]", "diff <dumpfile>",

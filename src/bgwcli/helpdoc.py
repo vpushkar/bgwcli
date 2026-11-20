@@ -237,3 +237,32 @@ GLOBAL_OPTION_USE: dict[str, frozenset[str]] = {
 }
 
 OPTION_METAVAR_OVERRIDES: dict[str, dict[str, str]] = {"dump": {"--out": "<file>"}}
+
+
+# ---------------------------------------------------------------------------------------------
+# root help
+
+_ROOT_SECTION_NOTES: dict[RouterSectionName, tuple[str, ...]] = {
+    "Device": (
+        "Note: status is a concise overview; if home.ha hangs it falls back to System Information,",
+        "      Broadband Status and Firewall Status without touching flaky LAN/Fiber pages.",
+    ),
+    "Firewall": (
+        "Note: security-options falls back to Firewall Status plus Firewall Advanced on firmware",
+        "      where securityoptions.ha returns Page not found.",
+    ),
+}
+
+
+def root_pages_block() -> str:
+    """Every page of every section with its summary, for ``bgwcli -h``."""
+    parts = ["Router pages (bgwcli <section> <page>; details: bgwcli <section> -h):"]
+    sections = list(dict.fromkeys(row.section for row in page_rows()))
+    for section in sections:
+        command = section_command(section)
+        parts.append(f"  bgwcli {command}")
+        parts.append(page_rows_text(page_rows(section), indent="    "))
+        if section == "Diagnostics":
+            parts.append(diagnostic_operations_text(indent="    "))
+        parts.extend(f"    {note}" for note in _ROOT_SECTION_NOTES.get(section, ()))
+    return "\n".join(parts)

@@ -2795,10 +2795,6 @@ Most-used read commands:
   bgwcli check | auth
     Verify the router is reachable, or verify the access code and login flow.
 
-  bgwcli device status
-    Concise gateway overview. If home.ha hangs, falls back to System Information,
-    Broadband Status, and Firewall Status without touching flaky LAN/Fiber pages.
-
   bgwcli devices [--all] [--limit 20]
     Connected device list. Falls back to IP Allocation if devices.ha hangs.
 
@@ -2808,22 +2804,7 @@ Most-used read commands:
   bgwcli nat | logs [--limit 20] | status
     NAT table, router logs, and the core status pages.
 
-  bgwcli broadband status | configure | fiber-status
-    Broadband link details, editable broadband config, or optical/fiber module data.
-
-  bgwcli home-network status | configure | ipv6 | wi-fi | advanced-wi-fi | mac-filtering | subnets-dhcp | ip-allocation
-    LAN, IPv6, basic/advanced Wi-Fi, MAC filtering, DHCP/subnet, and IP allocation surfaces.
-
-  bgwcli voice status | line-details | call-statistics
-    Router-reported POTS/SIP line state, provisioned line details, and complete call-statistic tables.
-
-  bgwcli firewall status | packet-filter | nat-gaming | public-subnet-hosts | ip-passthrough
-  bgwcli firewall firewall-advanced | security-options
-    Firewall status/config pages. security-options falls back to Firewall Status
-    plus Firewall Advanced on firmware where securityoptions.ha returns Page not found.
-
-  bgwcli diagnostics troubleshoot | speed-test | logs | update | resets | syslog | event-notifications | nat-table
-    Diagnostics pages, speed-test history, logs, firmware/update/reset/syslog/event/NAT views.
+{helpdoc.root_pages_block()}
 
 Generic inspection:
   bgwcli page <page-or-tab> [--forms] [--raw] [--json]

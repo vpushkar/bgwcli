@@ -296,3 +296,79 @@ def test_metadata_covers_every_parser():
 def test_usage_error_type_is_unchanged():
     with pytest.raises(UsageError):
         cli.parse_args(["device", "--lim", "5"])
+
+
+# ---------------------------------------------------------------------------------------------
+# Task 3: root help, tabs, section
+
+from pathlib import Path  # noqa: E402
+
+DATA = Path(__file__).resolve().parent / "data"
+
+
+def _root_pages_block() -> str:
+    text = cli.help_text()
+    start = text.index("Router pages (bgwcli <section> <page>")
+    return text[start:text.index("\n\n", text.index("bgwcli diagnostics", start))]
+
+
+def test_root_help_lists_every_page_with_summary():
+    block = _root_pages_block()
+    lines = block.splitlines()
+    headers = [index for index, line in enumerate(lines) if line.startswith("  bgwcli ")]
+    commands = [lines[index].split()[1] for index in headers]
+    assert commands == list(cli.SECTION_COMMANDS)
+    for position, index in enumerate(headers):
+        end = headers[position + 1] if position + 1 < len(headers) else len(lines)
+        section_lines = lines[index + 1:end]
+        for tab in ROUTER_TABS:
+            if helpdoc.section_command(tab.section) != commands[position]:
+                continue
+            matching = [line for line in section_lines if line.split()[:1] == [helpdoc.tab_slug(tab)]]
+            assert len(matching) == 1, tab.label
+            assert helpdoc.TAB_SUMMARIES[tab.page] in matching[0]
+    assert not any(mark in block for mark in ELLIPSES)
+
+
+def _tabs_text(capsys, argv) -> list[str]:
+    assert cli.main(argv) == 0
+    return capsys.readouterr().out.splitlines()
+
+
+def _assert_one_row_per_tab(lines, tabs):
+    assert len(lines) == len(tabs)
+    for tab in tabs:
+        command = f"bgwcli {helpdoc.section_command(tab.section)} {helpdoc.tab_slug(tab)}"
+        matching = [line for line in lines if f" {tab.page} " in f" {line} " and command in line]
+        assert len(matching) == 1, tab.label
+        line = matching[0]
+        assert helpdoc.TAB_SUMMARIES[tab.page] in line
+        assert line == line.rstrip()
+        assert line.split()[-1] == "guarded" if tab.dangerous else line.split()[-1] != "guarded"
+
+
+def test_tabs_text_has_one_row_per_tab(capsys, tmp_env):
+    _assert_one_row_per_tab(_tabs_text(capsys, ["tabs"]), ROUTER_TABS)
+
+
+@pytest.mark.parametrize("section", ["device", "broadband", "home-network", "voice", "firewall", "diagnostics"])
+def test_section_text_has_one_row_per_tab(capsys, tmp_env, section):
+    tabs = [tab for tab in ROUTER_TABS if helpdoc.section_command(tab.section) == section]
+    _assert_one_row_per_tab(_tabs_text(capsys, ["section", section]), tabs)
+
+
+def test_tabs_text_keeps_first_column_minimum_width(capsys, tmp_env):
+    voice = [line for line in _tabs_text(capsys, ["section", "voice"])]
+    assert all(line.startswith("Voice    ") for line in voice)  # "Voice" padded to the 7-wide minimum + 2
+
+
+def test_tabs_json_byte_identical(capsys, tmp_env):
+    assert cli.main(["tabs", "--json"]) == 0
+    assert capsys.readouterr().out == (DATA / "tabs_json_50eafa4.json").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("section", ["device", "broadband", "home-network", "voice", "firewall", "diagnostics"])
+def test_section_json_byte_identical(capsys, tmp_env, section):
+    assert cli.main(["section", section, "--json"]) == 0
+    expected = (DATA / f"section_{section}_json_50eafa4.json").read_text(encoding="utf-8")
+    assert capsys.readouterr().out == expected

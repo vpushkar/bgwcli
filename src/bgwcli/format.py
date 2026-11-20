@@ -168,12 +168,22 @@ def print_sitemap(entries: Sequence[SitemapEntry], stream: TextIO | None = None)
 
 
 def print_tabs(tabs: Sequence[RouterTab], stream: TextIO | None = None) -> None:
+    """Section, label, CGI page id, the command that shows the page, and what it shows; guarded rows end
+    with the word ``guarded``."""
+    from .helpdoc import TAB_SUMMARIES, section_command, tab_slug
+
     out = stream or sys.stdout
     section_width = max(7, *(len(tab.section) for tab in tabs)) if tabs else 7
     label_width = max(5, *(len(tab.label) for tab in tabs)) if tabs else 5
-    for tab in tabs:
+    commands = [f"bgwcli {section_command(tab.section)} {tab_slug(tab)}" for tab in tabs]
+    page_width = max((len(tab.page) for tab in tabs), default=0)
+    command_width = max((len(command) for command in commands), default=0)
+    for tab, command in zip(tabs, commands, strict=True):
         danger = "  guarded" if tab.dangerous else ""
-        out.write(f"{tab.section.ljust(section_width)}  {tab.label.ljust(label_width)}  {tab.page}{danger}\n")
+        out.write(
+            f"{tab.section.ljust(section_width)}  {tab.label.ljust(label_width)}  {tab.page.ljust(page_width)}  "
+            f"{command.ljust(command_width)}  {TAB_SUMMARIES[tab.page]}{danger}\n"
+        )
 
 
 def print_actions(actions: Sequence[RouterAction], stream: TextIO | None = None) -> None:

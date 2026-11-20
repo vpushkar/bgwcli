@@ -673,9 +673,11 @@ def test_print_tabs_lists_section_label_page_and_guard():
     output = capture(fmt.print_tabs, ROUTER_TABS)
     lines = output.splitlines()
     assert len(lines) == len(ROUTER_TABS)
-    restart = next(line for line in lines if line.rstrip().endswith("restart  guarded"))
+    restart = next(line for line in lines if " restart " in line and line.endswith("guarded"))
     assert restart.startswith("Device")
-    assert any(line.split()[-1] == "home" for line in lines)
+    assert "bgwcli device restart-device" in restart
+    home = next(line for line in lines if " home " in line)
+    assert "bgwcli device status" in home and not home.endswith("guarded")
 
 
 def test_print_actions_lists_every_router_action_with_token():
