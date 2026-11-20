@@ -21,7 +21,7 @@ from pathlib import Path
 from time import sleep
 from typing import Any
 
-from . import __version__
+from . import __version__, helpdoc
 from . import format as fmt
 from .actions import ROUTER_ACTIONS, display_action_payload, get_action, is_opener_button
 from .allocation_preflight import (
@@ -93,7 +93,14 @@ from .operations import (
     submit_committed,
     submit_dry_run,
 )
-from .pages import list_sections, resolve_cgi_page, resolve_section_command, router_tabs, tabs_for_section
+from .pages import (
+    list_sections,
+    resolve_cgi_page,
+    resolve_section_command,
+    router_tabs,
+    section_for_root,
+    tabs_for_section,
+)
 from .parser import looks_like_login, parse_logs, parse_page, parse_sitemap
 from .recovery_state import RecoveryCheckpoint
 from .redact import page_sensitive_names, redact_value
@@ -245,7 +252,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         command = parse_args(args)
         json_mode = command.options.json  # BGW_JSON=true (environment or configuration file) also selects JSON
         if command.name == "help":
-            sys.stdout.write(help_text())
+            target = command_help(command.args[0]) if command.args else None
+            sys.stdout.write(target or help_text())
             return 0
         return run(command)
     except RouterSessionPoolFullError as error:
@@ -2501,7 +2509,7 @@ _GLOBAL_OPTIONS: tuple[tuple[tuple[str, ...], dict[str, Any]], ...] = (
 _COMMAND_OPTIONS: tuple[tuple[tuple[str, ...], dict[str, Any]], ...] = (
     (("--raw",), {"action": _FLAG, "help": "Emit router HTML instead of parsed output"}),
     (("--forms",), {"action": _FLAG, "help": "Include form controls in terminal output"}),
-    (("--all",), {"action": _FLAG, "help": "devices: include offline devices"}),
+    (("--all",), {"action": _FLAG, "help": "Device List (devices, device device-list): include offline devices"}),
     (("--limit",), {"metavar": "<n>", "help": "Limit displayed rows. Default: 20"}),
     (("--commit",), {"action": _FLAG, "help": "Actually POST (operations are dry-run by default)"}),
     (("--confirm",), {"metavar": "<token>", "help": "Required token for every committed operation"}),
@@ -2540,16 +2548,25 @@ _COMMAND_OPTIONS: tuple[tuple[tuple[str, ...], dict[str, Any]], ...] = (
 )
 
 
-def _common_options() -> argparse.ArgumentParser:
+def _common_options(
+    visible: frozenset[str] | None = None, metavars: dict[str, str] | None = None
+) -> argparse.ArgumentParser:
     """Every global and per-command flag; attached to the root and each subparser so flags go anywhere.
 
-    Defaults are SUPPRESS so a subparser never clobbers a value parsed before the command name.
+    Defaults are SUPPRESS so a subparser never clobbers a value parsed before the command name. Each call
+    builds new action objects, so hiding a flag from one command's help (``visible``) never touches
+    another parser; a hidden flag is still registered and parsed exactly like a visible one.
     """
     common = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
     for title, table in (("global options", _GLOBAL_OPTIONS), ("command options", _COMMAND_OPTIONS)):
         group = common.add_argument_group(title)
         for flags, kwargs in table:
-            group.add_argument(*flags, default=argparse.SUPPRESS, **kwargs)
+            options = dict(kwargs)
+            if visible is not None and flags[0] not in visible:
+                options["help"] = argparse.SUPPRESS
+            if metavars and flags[0] in metavars:
+                options["metavar"] = metavars[flags[0]]
+            group.add_argument(*flags, default=argparse.SUPPRESS, **options)
     return common
 
 
@@ -2568,12 +2585,12 @@ _SUBCOMMANDS: tuple[tuple[str, str], ...] = (
     ("audit", "Sweep-backed health check across every mapped tab."),
     ("readiness", "Alias for audit."),
     ("section", "section <section>: print mapped tabs for one router section."),
-    ("device", "device [tab]: Device section pages (status, device-list, system-information, ...)."),
-    ("broadband", "broadband [tab]: status | configure | fiber-status."),
-    ("home-network", "home-network [tab]: status | configure | ipv6 | wi-fi | advanced-wi-fi | ..."),
-    ("voice", "voice [tab]: status | line-details | call-statistics."),
-    ("firewall", "firewall [tab]: status | packet-filter | nat-gaming | ... | security-options."),
-    ("diagnostics", "diagnostics [tab] | diagnostics ping|traceroute|nslookup <host>."),
+    ("device", helpdoc.section_description("Device")),
+    ("broadband", helpdoc.section_description("Broadband")),
+    ("home-network", helpdoc.section_description("Home Network")),
+    ("voice", helpdoc.section_description("Voice")),
+    ("firewall", helpdoc.section_description("Firewall")),
+    ("diagnostics", helpdoc.section_description("Diagnostics")),
     ("page", "page <page-or-tab>: fetch and parse any mapped tab or raw CGI page ID."),
     ("inspect", "inspect <page-or-tab>: same as page --forms."),
     ("devices", "List connected devices."),
@@ -2604,12 +2621,26 @@ def build_parser() -> _Parser:
     parser.add_argument("-h", "--help", action=_FLAG, dest="help_flag", default=argparse.SUPPRESS, help="Show help")
     subparsers = parser.add_subparsers(dest="command", metavar="<command>")
     for name, description in _SUBCOMMANDS:
+        visible = helpdoc.GLOBAL_OPTION_USE[name] | helpdoc.COMMAND_OPTION_USE[name]
+        section = section_for_root(name) if name in SECTION_COMMANDS else None
         sub = subparsers.add_parser(
-            name, help=description, description=description, parents=[common], aliases=SECTION_COMMANDS.get(name, ()),
-            allow_abbrev=False,
+            name, help=description, description=description,
+            parents=[_common_options(visible, helpdoc.OPTION_METAVAR_OVERRIDES.get(name))],
+            aliases=SECTION_COMMANDS.get(name, ()), allow_abbrev=False,
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            epilog=helpdoc.section_help_epilog(section) if section else None,
         )
-        sub.add_argument("args", nargs="*", help="positional arguments for the command")
+        metavar, arg_help = helpdoc.COMMAND_ARGS[name]
+        sub.add_argument("args", nargs="*", metavar=metavar, help=arg_help)
     return parser
+
+
+def command_help(name: str) -> str | None:
+    """The argparse help of one command (canonical name or alias); None when no such command exists."""
+    parser = build_parser()
+    subparsers = next(action for action in parser._actions if isinstance(action, argparse._SubParsersAction))
+    sub = subparsers.choices.get(name)
+    return None if sub is None or name == "fixtures-capture" else sub.format_help()
 
 
 _ALIAS_TO_COMMAND = {alias: name for name, aliases in SECTION_COMMANDS.items() for alias in aliases}
