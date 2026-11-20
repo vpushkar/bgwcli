@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from bgwcli import cli, helpdoc
@@ -204,9 +207,11 @@ def test_device_help_names_firmware(capsys):
 def test_section_rows_survive_narrow_terminal(capsys, monkeypatch):
     monkeypatch.setenv("COLUMNS", "60")
     block = _page_block(_section_help(capsys, ["home-network", "-h"]))
-    starts = [line.split()[0] for line in block.splitlines() if line.startswith("  ") and line.split()]
-    for row in helpdoc.page_rows("Home Network"):
-        assert row.slug in starts
+    lines = [line.split() for line in block.splitlines() if line.startswith("  ") and line.split()]
+    rows = helpdoc.page_rows("Home Network")
+    assert rows
+    for row in rows:
+        assert [row.slug, *row.summary.split()] in [line[: 1 + len(row.summary.split())] for line in lines], row.slug
 
 
 def test_no_parser_has_generic_positional_help():
@@ -226,14 +231,46 @@ def test_dump_out_option_shows_a_file():
     assert "<file>" in lines["--out"]
 
 
+_PARSER_MANIFEST = Path(__file__).resolve().parent / "data" / "parser_manifest_50eafa4.json"
+
+
+def _action_records(parser: argparse.ArgumentParser) -> list[dict[str, object]]:
+    """Behavioural fingerprint of every action (help strings and metavars are excluded on purpose)."""
+    records = [
+        {"option_strings": list(a.option_strings), "dest": a.dest, "action": type(a).__name__,
+         "const": repr(a.const), "nargs": repr(a.nargs), "default": repr(a.default)}
+        for a in parser._actions
+    ]
+    return sorted(records, key=lambda record: json.dumps(record, sort_keys=True))
+
+
+def _parser_manifest() -> dict[str, list[dict[str, object]]]:
+    parser = cli.build_parser()
+    action = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+    groups: dict[int, tuple[argparse.ArgumentParser, list[str]]] = {}
+    for name, sub in action.choices.items():
+        groups.setdefault(id(sub), (sub, []))[1].append(name)
+    manifest = {"<root>": _action_records(parser)}
+    for sub, names in groups.values():
+        manifest["|".join(sorted(names))] = _action_records(sub)
+    return manifest
+
+
 def test_parser_surface_unchanged():
-    expected = {flag for flags, _ in (*cli._GLOBAL_OPTIONS, *cli._COMMAND_OPTIONS) for flag in flags}
-    expected |= {"-h", "--help"}
+    base = json.loads(_PARSER_MANIFEST.read_text(encoding="utf-8"))
+    current = _parser_manifest()
+    version = [r for r in current["<root>"] if r["option_strings"] == ["--version"]]
+    assert len(version) == 1, "the root parser must gain exactly one --version action"
+    current["<root>"] = [r for r in current["<root>"] if r is not version[0]]
+    for name, records in current.items():
+        if name != "<root>":
+            assert not any("--version" in r["option_strings"] for r in records), name
+    assert sorted(current) == sorted(base)
+    for name in base:
+        assert current[name] == base[name], name
     seen_actions: dict[int, str] = {}
     distinct = {id(sub): (name, sub) for name, sub in _subparsers().items()}
     for name, sub in distinct.values():
-        registered = {flag for action in sub._actions for flag in action.option_strings}
-        assert registered == expected, name
         for action in sub._actions:
             assert seen_actions.setdefault(id(action), name) == name, (name, action.option_strings)
 
@@ -302,7 +339,6 @@ def test_usage_error_type_is_unchanged():
 # ---------------------------------------------------------------------------------------------
 # Task 3: root help, tabs, section
 
-from pathlib import Path  # noqa: E402
 
 DATA = Path(__file__).resolve().parent / "data"
 
@@ -379,7 +415,7 @@ def test_section_json_byte_identical(capsys, tmp_env, section):
 # Task 3b: backup, write and fetch command help, generated from the registries the code enforces
 
 from bgwcli import mutations, pages, restore, snapshot, snapshot_diff  # noqa: E402
-from bgwcli.actions import ROUTER_ACTIONS  # noqa: E402
+from bgwcli.actions import ROUTER_ACTIONS, get_action  # noqa: E402
 
 
 def _help(command: str) -> str:
@@ -453,10 +489,14 @@ def test_action_help_rows():
         rows = _rows_starting_with(text, action.name)
         assert len(rows) == 1, action.name
         row = rows[0]
-        assert f"--confirm {action.confirm_token}" in row
+        fields = row.split()
+        assert fields[fields.index("--confirm") + 1] == action.confirm_token, action.name
         assert f" {action.page} " in f" {row} "
         assert action.description.rstrip(".") in row
         assert ("dangerous" in row.split()) == bool(action.dangerous), action.name
+        for alias in action.aliases or ():
+            assert get_action(alias) is action, alias
+            assert f"(also: {', '.join(action.aliases)})" in row, alias
 
 
 @pytest.mark.parametrize("command", ["page", "inspect"])
@@ -487,32 +527,47 @@ def test_write_help_rules(command):
 
 
 @pytest.mark.parametrize(
-    ("command", "pairs"),
+    ("command", "expected"),
     [
         ("dump", [
-            "0 dump file written", "1 usage error", "2 the router or a page could not be read", "130 interrupted",
+            "0    dump file written",
+            "1    usage error (e.g. an unknown --include id)",
+            "2    the router or a page could not be read, or the snapshot could not be built",
+            "2    the --out destination is unusable or could not be written",
+            "130  interrupted (Ctrl-C)",
         ]),
-        ("diff", ["0 identical (a firmware-only change is still 0)", "1 differences found", "2 ", "130 interrupted"]),
+        ("diff", [
+            "0    identical (a firmware-only change is still 0)",
+            "1    differences found, or none of the --include pages is in the dump",
+            "2    the dump file or the router could not be read",
+            "130  interrupted (Ctrl-C)",
+        ]),
         ("restore", [
-            "0 dry run: plan printed (even when work remains)",
-            "0 --commit: everything selected is on the router",
-            "1 not converged",
-            "2 a write was sent and never acknowledged (even when the closing diff is readable)",
-            "130 interrupted",
+            "0    dry run: plan printed (even when work remains)",
+            "0    --commit: everything selected is on the router (all restorable pages in the dump, or only the "
+            "--include pages)",
+            "1    not converged, a write rejected, confirmation refused, or nothing to compare",
+            "2    the dump file or the router could not be read",
+            "2    a write was sent and never acknowledged (even when the closing diff is readable)",
+            "130  interrupted (Ctrl-C); the write state is reported",
         ]),
         ("autorestore", [
-            "0 no reset, converged, or router unreachable",
-            "1 a restore is needed (dry run) or did not converge",
-            "2 page-level 401/403",
-            "130 interrupted",
+            "0    no reset, converged, or router unreachable (also during the allocation preflight, before any write)",
+            "1    a restore is needed (dry run) or did not converge (the next timer run retries)",
+            "2    page-level 401/403 or an initial structural failure",
+            "2    the allocation preflight was blocked by a conflict or failed for another reason",
+            "2    a write was sent and never acknowledged, or the closing verification failed",
+            "2    a recovery checkpoint failure, or the same failure ended three consecutive runs",
+            "130  interrupted (Ctrl-C)",
         ]),
     ],
 )
-def test_exit_code_pairs(command, pairs):
+def test_exit_code_pairs(command, expected):
     text = _help(command)
-    section = " ".join(text[text.index("Exit codes:"):].split())
-    for pair in pairs:
-        assert pair in section, pair
+    section = text[text.index("Exit codes:"):]
+    section = section.split("\n\n")[0]
+    rows = [" ".join(line.split()) for line in section.splitlines()[1:]]
+    assert rows == [" ".join(row.split()) for row in expected]
 
 
 def test_root_help_backup_prose_preserved():
@@ -575,9 +630,24 @@ def test_readme_pages_block_lists_every_tab_under_its_section():
     assert "`bgwcli diagnostics site-map`" in block
 
 
+def _include_table_ids(block: str, heading: str) -> list[str]:
+    """Page ids (first backticked cell) of the table that follows the line starting with ``heading``."""
+    lines = block.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith(heading))
+    ids: list[str] = []
+    for line in lines[start + 1:]:
+        if line.startswith("| `"):
+            ids.append(line.split("`")[1])
+        elif ids and not line.startswith("|"):
+            break
+    return ids
+
+
 def test_readme_include_block_lists_every_selector():
     block = _readme_block("include-pages")
-    for page in (*snapshot.snapshot_pages_for(()), *snapshot.OPTIONAL_FORM_PAGES, *snapshot_diff.RESTORABLE_PAGES):
+    assert _include_table_ids(block, "Read by every `dump`") == list(snapshot.snapshot_pages_for(()))
+    assert _include_table_ids(block, "Optional, with `dump --include") == list(snapshot.OPTIONAL_FORM_PAGES)
+    for page in snapshot_diff.RESTORABLE_PAGES:
         assert f"`{page}`" in block, page
 
 
