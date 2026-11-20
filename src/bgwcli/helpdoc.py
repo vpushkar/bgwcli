@@ -293,7 +293,9 @@ INCLUDE_RISK_NOTES: dict[str, str] = {
     "etherlan": "LAN port settings; restoring can cut the LAN port you are on",
     "dhcpserver": "Subnets & DHCP; restoring can move the gateway address (restored last)",
     "ippass": "IP Passthrough; restoring changes which LAN client gets the public address",
-    "wmacauth": "Wi-Fi MAC filtering modes; restoring changes which Wi-Fi clients may join (blocked until the list is back)",
+    "wmacauth": (
+        "Wi-Fi MAC filtering modes; restoring changes which Wi-Fi clients may join (blocked until the list is back)"
+    ),
 }
 
 _EXIT_CODES: dict[str, tuple[tuple[str, str], ...]] = {
