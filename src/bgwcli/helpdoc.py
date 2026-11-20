@@ -227,6 +227,10 @@ GLOBAL_OPTION_USE: dict[str, frozenset[str]] = {
     "check": _NO_SECRETS,
     "auth": _NO_SECRETS,  # --include-secrets has no effect on a successful auth result
     "fixtures-capture": _NO_SECRETS,  # forces include_secrets off
+    "autorestore": _NO_SECRETS,  # forces redaction
+    "dump": _NO_SECRETS,  # the dump file always keeps secrets; stdout is a summary
+    "logs": _NO_SECRETS,  # the log view ignores the flag
+    "devices": _NO_SECRETS,  # the device view ignores the flag
     "sitemap": frozenset({"--host", "--config", "--json", "--timeout", "--strict-tls"}),  # public GET, no login
     "coverage": frozenset({"--host", "--config", "--json", "--timeout", "--strict-tls"}),
     "session": frozenset({"--host", "--config", "--json"}),  # --host selects the cache inspected/cleared
@@ -294,15 +298,17 @@ INCLUDE_RISK_NOTES: dict[str, str] = {
     "dhcpserver": "Subnets & DHCP; restoring can move the gateway address (restored last)",
     "ippass": "IP Passthrough; restoring changes which LAN client gets the public address",
     "wmacauth": (
-        "Wi-Fi MAC filtering modes; restoring changes which Wi-Fi clients may join (blocked until the list is back)"
+        "Wi-Fi MAC filtering modes; restoring mode none disables filtering even with an empty list, allow/deny "
+        "restore only when the dump recorded a nonempty list and every entry is on the gateway"
     ),
 }
 
 _EXIT_CODES: dict[str, tuple[tuple[str, str], ...]] = {
     "dump": (
         ("0", "dump file written"),
-        ("1", "usage error (e.g. an unknown --include id, an unusable --out)"),
+        ("1", "usage error (e.g. an unknown --include id)"),
         ("2", "the router or a page could not be read, or the snapshot could not be built"),
+        ("2", "the --out destination is unusable or could not be written"),
         ("130", "interrupted (Ctrl-C)"),
     ),
     "diff": (
@@ -313,17 +319,20 @@ _EXIT_CODES: dict[str, tuple[tuple[str, str], ...]] = {
     ),
     "restore": (
         ("0", "dry run: plan printed (even when work remains)"),
-        ("0", "--commit: converged (everything in the dump is on the router)"),
+        ("0", "--commit: everything selected is on the router (all restorable pages in the dump, or only the "
+              "--include pages)"),
         ("1", "not converged, a write rejected, confirmation refused, or nothing to compare"),
         ("2", "the dump file or the router could not be read"),
         ("2", "a write was sent and never acknowledged (even when the closing diff is readable)"),
         ("130", "interrupted (Ctrl-C); the write state is reported"),
     ),
     "autorestore": (
-        ("0", "no reset, converged, or router unreachable"),
+        ("0", "no reset, converged, or router unreachable (also during the allocation preflight, before any write)"),
         ("1", "a restore is needed (dry run) or did not converge (the next timer run retries)"),
         ("2", "page-level 401/403 or an initial structural failure"),
-        ("2", "allocation preflight or recovery checkpoint failure, or the same failure ended three runs"),
+        ("2", "the allocation preflight was blocked by a conflict or failed for another reason"),
+        ("2", "a write was sent and never acknowledged, or the closing verification failed"),
+        ("2", "a recovery checkpoint failure, or the same failure ended three consecutive runs"),
         ("130", "interrupted (Ctrl-C)"),
     ),
 }
@@ -346,6 +355,9 @@ def dump_pages_epilog() -> str:
         _rows(optional),
         f"  all = {', '.join(OPTIONAL_FORM_PAGES)}; dosprotect and wconfig are accepted but always read;",
         "  any other id (e.g. services) is rejected. Capturing is read-only; the notes are restore risks.",
+        "",
+        "The dump file keeps Wi-Fi keys and other secrets in clear text (owner-only file), with or without",
+        "--include-secrets.",
     ])
 
 
@@ -362,7 +374,9 @@ def include_ids_epilog(command: str) -> str:
     if command == "autorestore":
         lines.append("  The selection also limits which pages count toward reset detection.")
     if command in ("restore", "autorestore"):
-        lines.append("  Wi-Fi MAC filtering modes stay blocked until the recorded MAC list entries exist.")
+        lines.append("  Wi-Fi MAC filtering: mode none restores even with an empty list (it disables filtering);")
+        lines.append("  allow/deny restore only when the dump recorded a nonempty list and every entry is on the")
+        lines.append("  gateway.")
     return "\n".join(lines)
 
 
@@ -381,15 +395,9 @@ _PHASE_NOTES: dict[str, str] = {
 
 
 def restore_phases_epilog() -> str:
-    from .restore import RESTORE_PAGE_ORDER
-
-    width = max(len(page) for page in RESTORE_PAGE_ORDER) + 2
-    rows = [
-        f"  {index:>2}. {page.ljust(width)}{_PHASE_NOTES[page]}" for index, page in enumerate(RESTORE_PAGE_ORDER, 1)
-    ]
     return "\n".join([
         "Planning phases (the order restore plans pages, not the order writes are sent):",
-        *rows,
+        restore_phase_rows(),
         "  With --prune, router rows missing from the dump are removed too: --prune removes a forward before its",
         "  service, a page that still has an add pending defers its removes, and reservations are never released.",
         "  Live runs need --commit --confirm RESTORE.",
@@ -438,10 +446,11 @@ def write_pages_epilog(command: str) -> str:
         else "submit previews a button on these pages but refuses --commit"
     )
     return "\n".join([
-        "Writes: any page with form fields; bgwcli inspect <page> shows its fields and buttons.",
-        "Commit with --commit --confirm <PAGE ID in upper case>, e.g. --confirm WCONFIG.",
-        "A submit button must be an enabled button of the page's own form; buttons that only open an editor",
-        "take no KEY=VALUE.",
+        "Writes: bgwcli inspect <page> shows the fields and buttons of form pages (pages with a dedicated view,",
+        "such as devices, show that view instead).",
+        confirm_token_rule(),
+        "The button must be enabled; a button that belongs only to another form on the page is refused, and a",
+        "button that only opens an editor takes no KEY=VALUE.",
         "",
         f"Guarded pages ({rule}; use bgwcli action where one exists):",
         _rows(blocked),
@@ -558,4 +567,80 @@ README_BLOCKS: dict[str, str] = {
     "pages": "readme_pages_markdown",
     "include-pages": "readme_include_markdown",
     "actions": "readme_actions_markdown",
+    "restore-phases": "readme_restore_phases_markdown",
+    "backup-exits": "readme_backup_exits_markdown",
+    "write-rules": "readme_write_rules_markdown",
 }
+
+
+def confirm_token_rule() -> str:
+    """How set/submit derive their --confirm token (mutations.confirm_token_for_page), with a generated example."""
+    from .mutations import confirm_token_for_page
+
+    return (
+        "Commit with --commit --confirm <TOKEN>: the page id in upper case, punctuation runs become hyphens, as "
+        f"the dry run prints it (e.g. wconfig_unified -> {confirm_token_for_page('wconfig_unified')})."
+    )
+
+
+def restore_phase_rows(indent: str = "  ") -> str:
+    from .restore import RESTORE_PAGE_ORDER
+
+    width = max(len(page) for page in RESTORE_PAGE_ORDER) + 2
+    rows = enumerate(RESTORE_PAGE_ORDER, 1)
+    return "\n".join(f"{indent}{index:>2}. {page.ljust(width)}{_PHASE_NOTES[page]}" for index, page in rows)
+
+
+def root_actions_list(indent: str = "      ") -> str:
+    from .actions import ROUTER_ACTIONS
+
+    width = max(len(action.name) for action in ROUTER_ACTIONS) + 1
+    token_width = max(len(action.confirm_token) for action in ROUTER_ACTIONS) + len("--confirm=") + 2
+    return "\n".join(
+        f"{indent}{action.name.ljust(width)}{('--confirm=' + action.confirm_token).ljust(token_width)}"
+        f"{'dangerous' if action.dangerous else 'guarded'}"
+        for action in ROUTER_ACTIONS
+    )
+
+
+def snapshot_page_count() -> int:
+    from .snapshot import SNAPSHOT_PAGES
+
+    return len(SNAPSHOT_PAGES)
+
+
+def readme_restore_phases_markdown() -> str:
+    from .restore import RESTORE_PAGE_ORDER
+
+    lines = ["| Phase | Page id | What restore does there |", "| --- | --- | --- |"]
+    lines += [f"| {index} | `{page}` | {_md(_PHASE_NOTES[page])} |" for index, page in enumerate(RESTORE_PAGE_ORDER, 1)]
+    lines += ["", "These are planning phases, not the order writes are sent: with `--prune` a forward is removed "
+              "before its service, and a page with an add pending defers its removes.", ""]
+    return "\n".join(lines)
+
+
+def readme_backup_exits_markdown() -> str:
+    lines = ["| Command | Code | Meaning |", "| --- | --- | --- |"]
+    for command in ("dump", "diff", "restore", "autorestore"):
+        lines += [f"| `{command}` | `{code}` | {_md(meaning)} |" for code, meaning in _EXIT_CODES[command]]
+    lines.append("")
+    return "\n".join(lines)
+
+
+def readme_write_rules_markdown() -> str:
+    from .mutations import DANGEROUS_PAGES, confirm_token_for_page
+
+    guarded = ", ".join(f"`{page}`" for page in sorted(DANGEROUS_PAGES))
+    return "\n".join([
+        f"On the guarded pages ({guarded}) `set` refuses even a dry run, and `submit` previews a button on them "
+        "but refuses `--commit`; use a named `action` where one exists (Restart and Resets have dangerous actions; "
+        "Access Code and Update have no registered action).",
+        "",
+        "`set` and `submit` commit with `--commit --confirm <TOKEN>`: the page id in upper case, punctuation runs "
+        "become hyphens, as the dry run prints it "
+        f"(`wconfig_unified` → `{confirm_token_for_page('wconfig_unified')}`).",
+        "",
+        "A write is sent once, with one exception: if the gateway answers a configuration POST with its Login "
+        "page, bgwcli logs in again and re-sends once, so two attempts can be reported.",
+        "",
+    ])

@@ -78,6 +78,7 @@ def test_page_rows_cover_every_tab_in_map_order():
 # Task 2: command help, help <command>, option visibility (display only)
 
 import argparse  # noqa: E402
+import re  # noqa: E402
 
 from bgwcli.errors import UsageError  # noqa: E402
 
@@ -116,17 +117,17 @@ EXPECTED_VISIBLE: dict[str, frozenset[str]] = {
     "diagnostics": ALL_GLOBALS | PAGE_VIEW | COMMIT | {"--ipv4", "--ipv6"},
     "page": ALL_GLOBALS | PAGE_VIEW | {"--all"},
     "inspect": ALL_GLOBALS | {"--raw", "--limit", "--all"},
-    "devices": ALL_GLOBALS | {"--raw", "--limit", "--all"},
+    "devices": NO_SECRETS | {"--raw", "--limit", "--all"},
     "wifi": ALL_GLOBALS | PAGE_VIEW,
     "nat": ALL_GLOBALS | PAGE_VIEW,
-    "logs": ALL_GLOBALS | {"--raw", "--limit"},
+    "logs": NO_SECRETS | {"--raw", "--limit"},
     "set": ALL_GLOBALS | COMMIT,
     "submit": ALL_GLOBALS | COMMIT,
     "status": ALL_GLOBALS,
-    "dump": ALL_GLOBALS | {"--out", "--include", "--all-clients"},
+    "dump": NO_SECRETS | {"--out", "--include", "--all-clients"},
     "diff": ALL_GLOBALS | {"--include"},
     "restore": ALL_GLOBALS | {"--prune", "--include"} | COMMIT,
-    "autorestore": ALL_GLOBALS | {"--include", "--max-passes", "--wait", "--on-any-diff"} | COMMIT,
+    "autorestore": NO_SECRETS | {"--include", "--max-passes", "--wait", "--on-any-diff"} | COMMIT,
     "fixtures-capture": NO_SECRETS | {"--out", "--delay", "--pages"},
 }
 SECTION_ALIASES = {"home-network": ("home", "lan"), "diagnostics": ("diag", "diagnostic")}
@@ -478,7 +479,7 @@ def test_write_help_rules(command):
     for page in sorted(mutations.DANGEROUS_PAGES):
         assert _rows_starting_with(text, page), page
     flat = " ".join(text.split())
-    assert "--confirm <PAGE ID in upper case>, e.g. --confirm WCONFIG" in flat
+    assert "punctuation runs become hyphens" in flat
     if command == "set":
         assert "set refuses these pages even as a dry run" in flat
     else:
@@ -494,7 +495,7 @@ def test_write_help_rules(command):
         ("diff", ["0 identical (a firmware-only change is still 0)", "1 differences found", "2 ", "130 interrupted"]),
         ("restore", [
             "0 dry run: plan printed (even when work remains)",
-            "0 --commit: converged",
+            "0 --commit: everything selected is on the router",
             "1 not converged",
             "2 a write was sent and never acknowledged (even when the closing diff is readable)",
             "130 interrupted",
@@ -546,7 +547,8 @@ def test_session_help_caveat():
 
 README = Path(__file__).resolve().parent.parent / "README.md"
 _BLOCKS = {"pages": "readme_pages_markdown", "include-pages": "readme_include_markdown",
-           "actions": "readme_actions_markdown"}
+           "actions": "readme_actions_markdown", "restore-phases": "readme_restore_phases_markdown",
+           "backup-exits": "readme_backup_exits_markdown", "write-rules": "readme_write_rules_markdown"}
 
 
 def _readme_block(name: str) -> str:
@@ -635,3 +637,103 @@ def test_version_is_0_2_0():
 
 def test_readme_install_mentions_version_check():
     assert "Check what is installed with `bgwcli --version`" in README.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------------------------
+# Final review fixes (each written to fail first)
+
+
+def _exit_section(command: str) -> str:
+    text = _help(command)
+    return " ".join(text[text.index("Exit codes:"):].split())
+
+
+def test_final_dump_out_failures_are_exit_2():
+    section = _exit_section("dump")
+    assert "2 the --out destination is unusable or could not be written" in section
+    assert "--out" not in section[:section.index("2 ")]
+
+
+def test_final_restore_exit_0_names_the_selected_scope():
+    assert "0 --commit: everything selected is on the router (all restorable pages in the dump, or only the " \
+           "--include pages)" in _exit_section("restore")
+
+
+def test_final_autorestore_exit_rows_match_handlers():
+    section = _exit_section("autorestore")
+    assert "0 no reset, converged, or router unreachable (also during the allocation preflight, before any write)" \
+        in section
+    assert "2 a write was sent and never acknowledged, or the closing verification failed" in section
+    assert "2 the allocation preflight was blocked by a conflict or failed for another reason" in section
+
+
+@pytest.mark.parametrize("command", ["dump", "autorestore", "logs", "devices"])
+def test_final_include_secrets_hidden_where_it_changes_nothing(command):
+    assert "--include-secrets" not in _option_lines(_help(command))
+
+
+def test_final_dump_help_states_secrets_in_the_file():
+    flat = " ".join(_help("dump").split())
+    assert "The dump file keeps Wi-Fi keys and other secrets in clear text (owner-only file), with or without " \
+           "--include-secrets" in flat
+
+
+def test_final_readme_redaction_promise_names_the_exceptions():
+    text = " ".join(README.read_text(encoding="utf-8").split())
+    assert "redacted on every output path unless" not in text
+    assert "except `--raw` output, `--out` artifacts and dump files, which keep them (files are owner-only)" in text
+
+
+@pytest.mark.parametrize("command", ["set", "submit"])
+def test_final_confirm_token_rule_matches_the_generator(command):
+    flat = " ".join(_help(command).split())
+    token = mutations.confirm_token_for_page("wconfig_unified")
+    assert token == "WCONFIG-UNIFIED"
+    assert f"wconfig_unified -> {token}" in flat
+    assert "punctuation runs become hyphens" in flat
+    assert "WCONFIG_UNIFIED" not in flat
+
+
+def test_final_root_help_confirm_token_rule():
+    flat = " ".join(cli.help_text().split())
+    assert "wconfig_unified -> WCONFIG-UNIFIED" in flat
+    assert "<PAGE ID in upper case>" not in flat
+
+
+@pytest.mark.parametrize("command", ["set", "submit"])
+def test_final_write_help_does_not_overclaim(command):
+    flat = " ".join(_help(command).split())
+    assert "must be an enabled button of the page's own form" not in flat
+    assert "pages with a dedicated view, such as devices, show that view instead" in flat
+    assert "a button that belongs only to another form on the page is refused" in flat
+
+
+def test_final_mac_filter_note_keeps_both_cases():
+    for text in (helpdoc.INCLUDE_RISK_NOTES["wmacauth"], _help("restore"), README.read_text(encoding="utf-8")):
+        flat = " ".join(text.split())
+        assert "mode none" in flat and "nonempty" in flat, flat[:80]
+
+
+def test_final_root_help_lists_phases_actions_and_snapshot_count():
+    text = cli.help_text()
+    phases = [line.split()[1] for line in text.splitlines() if re.match(r"^\s+\d+\. ", line)]
+    assert phases == list(restore.RESTORE_PAGE_ORDER)
+    for action in ROUTER_ACTIONS:
+        assert any(line.split()[:2] == [action.name, f"--confirm={action.confirm_token}"]
+                   for line in text.splitlines()), action.name
+    flat = " ".join(text.split())
+    assert "captures every page" not in flat
+    assert f"captures all {len(snapshot.SNAPSHOT_PAGES)} snapshot pages" in flat
+
+
+def test_final_readme_has_generated_phases_exit_codes_and_write_rules():
+    phases = _readme_block("restore-phases")
+    rows = [line for line in phases.splitlines() if line.startswith("| ")][2:]
+    assert [row.split("`")[1] for row in rows] == list(restore.RESTORE_PAGE_ORDER)
+    exits = _readme_block("backup-exits")
+    for command in ("dump", "diff", "restore", "autorestore"):
+        assert f"`{command}`" in exits
+    rules = " ".join(_readme_block("write-rules").split())
+    for page in sorted(mutations.DANGEROUS_PAGES):
+        assert f"`{page}`" in rules
+    assert "logs in again and re-sends once" in rules

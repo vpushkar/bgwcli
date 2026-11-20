@@ -13,6 +13,7 @@ import argparse
 import math
 import os
 import sys
+import textwrap
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -2842,7 +2843,8 @@ Generic inspection:
 Operations are dry-run by default:
   bgwcli actions
     List explicit guarded actions and their confirmation tokens.
-    bgwcli action -h lists every action, its token and source page.
+    bgwcli action -h lists every action, its token and source page:
+{helpdoc.root_actions_list()}
 
   bgwcli action <name>
     Show the payload and required commit command. Does not POST.
@@ -2858,7 +2860,8 @@ Operations are dry-run by default:
 
   bgwcli set <page> KEY=VALUE...
     Build a dry-run config mutation from current form state plus overrides.
-    Every commit requires --commit --confirm <PAGE ID in upper case> (e.g. WCONFIG).
+{textwrap.fill(helpdoc.confirm_token_rule(), width=84, initial_indent="    ", subsequent_indent="    ",
+              break_on_hyphens=False, break_long_words=False)}
     set refuses the guarded pages ({helpdoc.id_list("guarded")}) even as a dry run.
 
   bgwcli submit <page> <button> [KEY=VALUE...]
@@ -2880,8 +2883,8 @@ Backup:
     pages Firewall Advanced (dosprotect) and Advanced Wi-Fi (wconfig) to an
     owner-only JSON file. For dump, --out is the output FILE path.
     --include adds optional form pages ({helpdoc.id_list("optional")});
-    `bgwcli dump --include all` captures every page and is the recommended
-    baseline for factory-reset recovery. Pages not included are not fetched;
+    `bgwcli dump --include all` captures all {helpdoc.snapshot_page_count()} snapshot pages and is the
+    recommended baseline for factory-reset recovery. Pages not included are not fetched;
     bgwcli dump -h lists what each page contributes and the restore risks.
     The documentary IP Allocation table keeps only Fixed Allocation rows by
     default; --all-clients keeps every client row.
@@ -2894,10 +2897,12 @@ Backup:
 
   bgwcli restore <dumpfile> [--prune] [--include <csv|all>]
     Dry-run the plan that replays missing services/forwards/reservations and
-    changed forms in planning phases (bgwcli restore -h lists them; Subnets &
+    changed forms in these planning phases (not the order writes are sent; Subnets &
     DHCP is last: a LAN address change moves the gateway and the step carries a
-    warning). --include restricts the plan like diff; a
-    requested page missing from the dump becomes a skip step.
+    warning):
+{helpdoc.restore_phase_rows(indent="    ")}
+    --include restricts the plan like diff; a requested page missing from the dump
+    becomes a skip step.
 
   bgwcli restore <dumpfile> --commit --confirm RESTORE
     Apply the plan, then re-diff. Exit 0 once everything in the dump is present

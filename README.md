@@ -243,10 +243,29 @@ Optional, with `dump --include <id>[,<id>]` or `--include all`; capturing is rea
 | `etherlan` | LAN port settings; restoring can cut the LAN port you are on |
 | `dhcpserver` | Subnets & DHCP; restoring can move the gateway address (restored last) |
 | `ippass` | IP Passthrough; restoring changes which LAN client gets the public address |
-| `wmacauth` | Wi-Fi MAC filtering modes; restoring changes which Wi-Fi clients may join (blocked until the list is back) |
+| `wmacauth` | Wi-Fi MAC filtering modes; restoring mode none disables filtering even with an empty list, allow/deny restore only when the dump recorded a nonempty list and every entry is on the gateway |
 
 `dump --include`: `all` = `etherlan`, `dhcpserver`, `ippass`, `wmacauth`; `dosprotect` and `wconfig` are accepted but always read; any other id is rejected. `diff`, `restore` and `autorestore` `--include` take the restorable ids `services`, `apphosting`, `ipalloc`, `dosprotect`, `wconfig`, `etherlan`, `dhcpserver`, `ippass`, `wmacauth` (omitted or `all` = everything restorable in the dump; for `autorestore` the selection also limits reset detection).
 <!-- include-pages:end -->
+
+How `restore` plans the pages (`bgwcli restore -h` prints the same list):
+
+<!-- restore-phases:start -->
+| Phase | Page id | What restore does there |
+| --- | --- | --- |
+| 1 | `services` | custom services (before the forwards that use them) |
+| 2 | `apphosting` | NAT/Gaming forwards (a forward waits until its service appears in the dropdown) |
+| 3 | `ipalloc` | fixed reservations (a reservation can need Allocate, then Save) |
+| 4 | `packetfilter` | documentary only: recorded, never written |
+| 5 | `dosprotect` | Firewall Advanced |
+| 6 | `wconfig` | Advanced Wi-Fi |
+| 7 | `wmacauth` | Wi-Fi MAC filtering modes |
+| 8 | `ippass` | IP Passthrough |
+| 9 | `etherlan` | LAN ports (can cut the LAN port you are on) |
+| 10 | `dhcpserver` | Subnets & DHCP, last (can move the gateway address) |
+
+These are planning phases, not the order writes are sent: with `--prune` a forward is removed before its service, and a page with an add pending defers its removes.
+<!-- restore-phases:end -->
 
 ```bash
 bgwcli dump --out ~/bgw-baseline.json                           # core only
@@ -444,13 +463,18 @@ Every action, its token and the page it starts from (`bgwcli action -h` prints t
 | `find-best-channel-5` | `CHANSCAN` | `wconfig` | guarded | Run the 5 GHz 'Find Best Channel' scan on Advanced Wi-Fi (5 GHz clients drop briefly). (also `chanscan5`, `find-best-channel`, `scan-5ghz-channel`) |
 <!-- actions:end -->
 
-On the guarded pages (`reset`, `restart`, `routerpasswd`, `update`) `set` refuses even a dry run, and
-`submit` previews a button on them but refuses `--commit`; use a named `action` where one exists (Restart and
-Resets have dangerous actions; Access Code and Update have no registered action). A write is sent once; `applied` means the gateway
-acknowledged it and the requested state read back, an explicit rejection is exit 1, and an answer the CLI
+<!-- write-rules:start -->
+On the guarded pages (`reset`, `restart`, `routerpasswd`, `update`) `set` refuses even a dry run, and `submit` previews a button on them but refuses `--commit`; use a named `action` where one exists (Restart and Resets have dangerous actions; Access Code and Update have no registered action).
+
+`set` and `submit` commit with `--commit --confirm <TOKEN>`: the page id in upper case, punctuation runs become hyphens, as the dry run prints it (`wconfig_unified` → `WCONFIG-UNIFIED`).
+
+A write is sent once, with one exception: if the gateway answers a configuration POST with its Login page, bgwcli logs in again and re-sends once, so two attempts can be reported.
+<!-- write-rules:end -->
+`applied` means the gateway acknowledged it and the requested state read back, an explicit rejection is exit 1, and an answer the CLI
 could not read is exit 2 with `committed` in the JSON telling you whether the write reached the router.
-Secrets (passwords, keys, access codes, nonces, phone numbers) are redacted on every output path unless
-you pass `--include-secrets`. The complete rules: [reference, Safety](docs/REFERENCE.md#safety).
+Secrets (passwords, keys, access codes, nonces, phone numbers) are redacted in terminal and JSON output unless
+you pass `--include-secrets`, except `--raw` output, `--out` artifacts and dump files, which keep them (files are
+owner-only). The complete rules: [reference, Safety](docs/REFERENCE.md#safety).
 
 ## Exit codes
 
@@ -460,6 +484,35 @@ you pass `--include-secrets`. The complete rules: [reference, Safety](docs/REFER
 | `1` | Negative answer: `diff` differs, restore not converged, usage error, confirmation refused, the gateway rejected a write, or a save read back differently. |
 | `2` | No answer: connection or authentication failure, a full session pool, a page that could not be read, or a write whose acknowledgement was never seen (check `committed` before retrying). |
 | `130` | Interrupted (Ctrl-C); with `--json` the object carries the write evidence. |
+
+The backup commands in detail (`bgwcli <command> -h` prints the same rows):
+
+<!-- backup-exits:start -->
+| Command | Code | Meaning |
+| --- | --- | --- |
+| `dump` | `0` | dump file written |
+| `dump` | `1` | usage error (e.g. an unknown --include id) |
+| `dump` | `2` | the router or a page could not be read, or the snapshot could not be built |
+| `dump` | `2` | the --out destination is unusable or could not be written |
+| `dump` | `130` | interrupted (Ctrl-C) |
+| `diff` | `0` | identical (a firmware-only change is still 0) |
+| `diff` | `1` | differences found, or none of the --include pages is in the dump |
+| `diff` | `2` | the dump file or the router could not be read |
+| `diff` | `130` | interrupted (Ctrl-C) |
+| `restore` | `0` | dry run: plan printed (even when work remains) |
+| `restore` | `0` | --commit: everything selected is on the router (all restorable pages in the dump, or only the --include pages) |
+| `restore` | `1` | not converged, a write rejected, confirmation refused, or nothing to compare |
+| `restore` | `2` | the dump file or the router could not be read |
+| `restore` | `2` | a write was sent and never acknowledged (even when the closing diff is readable) |
+| `restore` | `130` | interrupted (Ctrl-C); the write state is reported |
+| `autorestore` | `0` | no reset, converged, or router unreachable (also during the allocation preflight, before any write) |
+| `autorestore` | `1` | a restore is needed (dry run) or did not converge (the next timer run retries) |
+| `autorestore` | `2` | page-level 401/403 or an initial structural failure |
+| `autorestore` | `2` | the allocation preflight was blocked by a conflict or failed for another reason |
+| `autorestore` | `2` | a write was sent and never acknowledged, or the closing verification failed |
+| `autorestore` | `2` | a recovery checkpoint failure, or the same failure ended three consecutive runs |
+| `autorestore` | `130` | interrupted (Ctrl-C) |
+<!-- backup-exits:end -->
 
 The exact mapping per command and per answer: [reference, Exit codes](docs/REFERENCE.md#exit-codes).
 
