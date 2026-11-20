@@ -526,6 +526,13 @@ def test_write_help_rules(command):
         assert "submit previews a button on these pages but refuses --commit" in flat
 
 
+RESTORE_EXIT_0 = (
+    "0    --commit: the closing diff finds no selected dumped service, forward, reservation or form value still "
+    "missing or different (--prune: and no extra service or forward); form fields the live page disables or does "
+    "not render, controls only on the router, and extra reservations are ignored"
+)
+
+
 @pytest.mark.parametrize(
     ("command", "expected"),
     [
@@ -544,10 +551,11 @@ def test_write_help_rules(command):
         ]),
         ("restore", [
             "0    dry run: plan printed (even when work remains)",
-            "0    --commit: everything selected is on the router (all restorable pages in the dump, or only the "
-            "--include pages)",
+            RESTORE_EXIT_0,
             "1    not converged, a write rejected, confirmation refused, or nothing to compare",
             "2    the dump file or the router could not be read",
+            "2    the allocation preflight is blocked (a fixed allocation held by another MAC, no enabled Clear and "
+            "Rescan button, or a failed preflight or rescan), also in a dry run",
             "2    a write was sent and never acknowledged (even when the closing diff is readable)",
             "130  interrupted (Ctrl-C); the write state is reported",
         ]),
@@ -557,7 +565,8 @@ def test_write_help_rules(command):
             "2    page-level 401/403 or an initial structural failure",
             "2    the allocation preflight was blocked by a conflict or failed for another reason",
             "2    a write was sent and never acknowledged, or the closing verification failed",
-            "2    a recovery checkpoint failure, or the same failure ended three consecutive runs",
+            "2    a recovery checkpoint could not be read or written, another unfinished recovery is recorded, or the "
+            "same failure ended three consecutive runs",
             "130  interrupted (Ctrl-C)",
         ]),
     ],
@@ -725,8 +734,7 @@ def test_final_dump_out_failures_are_exit_2():
 
 
 def test_final_restore_exit_0_names_the_selected_scope():
-    assert "0 --commit: everything selected is on the router (all restorable pages in the dump, or only the " \
-           "--include pages)" in _exit_section("restore")
+    assert " ".join(RESTORE_EXIT_0.split()) in _exit_section("restore")
 
 
 def test_final_autorestore_exit_rows_match_handlers():
@@ -775,7 +783,6 @@ def test_final_write_help_does_not_overclaim(command):
     flat = " ".join(_help(command).split())
     assert "must be an enabled button of the page's own form" not in flat
     assert "pages with a dedicated view, such as devices, show that view instead" in flat
-    assert "a button that belongs only to another form on the page is refused" in flat
 
 
 def test_final_mac_filter_note_keeps_both_cases():
@@ -844,3 +851,90 @@ def test_root_help_advertises_help_command_and_root_only_version():
     text = " ".join(cli.help_text().split())
     assert "bgwcli help <command>" in text and "bgwcli <command> -h" in text
     assert "--version" in text and "before the command" in text
+
+
+# ---------------------------------------------------------------------------------------------
+# Wording that states exactly what the code enforces (reviewer round: items 1, 3, 4, 5)
+
+
+def _flat(text: str) -> str:
+    return " ".join(text.split())
+
+
+def test_restore_exit_0_does_not_claim_everything_selected_is_on_the_router():
+    section = _exit_section("restore")
+    assert "everything selected is on the router" not in section
+    assert "extra reservations are ignored" in section
+
+
+def test_root_help_restore_and_autorestore_do_not_claim_whole_dump_convergence():
+    flat = _flat(cli.help_text())
+    assert "everything in the dump is present" not in flat
+    assert "the allocation preflight could not complete" not in flat
+    # the same exit rows the command help renders
+    assert _flat(RESTORE_EXIT_0) in flat
+    assert "2 the allocation preflight is blocked (a fixed allocation held by another MAC" in flat
+    assert "0 no reset, converged, or router unreachable (also during the allocation preflight, before any write)" \
+        in flat
+
+
+def test_set_and_submit_help_state_their_own_checks_separately():
+    set_help = _flat(_help("set"))
+    submit_help = _flat(_help("submit"))
+    for text in (set_help, submit_help):
+        assert "a button that belongs only to another form on the page is refused" not in text
+        assert "pages with a dedicated view, such as devices, show that view instead" in text
+    assert "set posts the page's current form values plus your KEY=VALUE overrides with the page's Save " \
+           "button, and refuses a Save button the page renders disabled" in set_help
+    assert "submit presses the named button, which must be enabled" in submit_help
+    assert "refused only when the page records the form that owns the button and none of its owner forms " \
+           "posts to this page's own CGI" in submit_help
+    assert "A button that only opens an editor takes no KEY=VALUE" in submit_help
+
+
+def test_root_help_inspect_names_pages_with_a_dedicated_view():
+    flat = _flat(cli.help_text())
+    assert "Pages with a dedicated view (home, lanstatistics, securityoptions, devices, logs) show that view " \
+           "instead; --raw returns the router HTML." in flat
+
+
+def test_mac_filter_wording_states_the_page_wide_guard():
+    expected = (
+        "disabling filtering (mode none) needs no recorded list; enabling allow/deny on any network needs a "
+        "nonempty recorded list with every entry on the gateway, and the check covers the whole page, so a save "
+        "that enables filtering on one network can also hold up disabling it on another"
+    )
+    assert expected in _flat(helpdoc.INCLUDE_RISK_NOTES["wmacauth"])
+    for command in ("restore", "autorestore"):
+        flat = _flat(_help(command))
+        assert "restoring mode none (disable) needs no recorded list" in flat
+        assert "needs a nonempty recorded list with every entry on the gateway" in flat
+        assert "The check covers the whole page" in flat
+        assert "can also hold up disabling it on another" in flat
+    assert expected in _flat(README.read_text(encoding="utf-8"))
+    assert "restore only when the dump recorded a nonempty list" not in _flat(README.read_text(encoding="utf-8"))
+
+
+def test_readme_restore_walkthrough_qualifies_every_write_is_sent_once():
+    flat = _flat(README.read_text(encoding="utf-8"))
+    assert "Every write is sent once" not in flat
+    assert "Each write is sent once, except that a Login-page answer to a configuration POST is followed by " \
+           "one re-send after logging in again" in flat
+    assert "the exit code is 0 only when everything in the dump is on the router" not in flat
+    assert "the exit code is 0 only when the closing diff shows nothing the restore still owes" in flat
+
+
+def test_readme_committed_advice_describes_each_evidence_field():
+    flat = _flat(README.read_text(encoding="utf-8"))
+    assert "an answer the CLI could not read is exit 2 with `committed` in the JSON telling you whether the " \
+           "write reached the router" not in flat
+    for needle in (
+        "`committed: true` means the gateway acknowledged the save (`Changes saved`)",
+        "`writeAttempted` says the POST was sent",
+        "`writeResponseReceived` says the gateway answered it with any status",
+        "`writeAttempts` is 2 after a re-send and absent otherwise",
+        "a key whose answer is unknown is absent",
+        "`committed: false` does not prove the write did not land",
+        "re-read the gateway state (for example `bgwcli page <page>`) before retrying",
+    ):
+        assert needle in flat, needle

@@ -2822,6 +2822,8 @@ Generic inspection:
   bgwcli inspect <page-or-tab> [--json]
     Same as page --forms: includes preserved values, fields, options, textareas,
     buttons, forms, links, disabled/readonly state, and submit targets.
+    Pages with a dedicated view (home, lanstatistics, securityoptions, devices, logs) show that view
+    instead; --raw returns the router HTML.
 
   bgwcli tabs | section <section> | sitemap | coverage
     Show the local tab map, one section, live sitemap, or sitemap-vs-CLI coverage.
@@ -2865,13 +2867,16 @@ Operations are dry-run by default:
       bgwcli action find-best-channel-5 --commit --confirm CHANSCAN     (5 GHz channel scan; 5 GHz clients drop briefly)
 
   bgwcli set <page> KEY=VALUE...
-    Build a dry-run config mutation from current form state plus overrides.
+    Build a dry-run config mutation from current form state plus overrides, posted with the
+    page's Save button (refused when the page renders it disabled).
 {textwrap.fill(helpdoc.confirm_token_rule(), width=84, initial_indent="    ", subsequent_indent="    ",
               break_on_hyphens=False, break_long_words=False)}
     set refuses the guarded pages ({helpdoc.id_list("guarded")}) even as a dry run.
 
   bgwcli submit <page> <button> [KEY=VALUE...]
-    Dry-run a discovered router button/form submit. Generic submit previews but
+    Dry-run a discovered router button/form submit. The button must be enabled; it is refused
+    only when the page records the form that owns it and none of its owner forms posts to this
+    page's own CGI; an editor-opening button takes no KEY=VALUE. Generic submit previews but
     refuses --commit on the guarded pages: {helpdoc.id_list("guarded")}.
 
 Diagnostics operations:
@@ -2911,14 +2916,14 @@ Backup:
     becomes a skip step.
 
   bgwcli restore <dumpfile> --commit --confirm RESTORE
-    Apply the plan, then re-diff. Exit 0 once everything in the dump is present
-    on the router (router-only extras are left alone unless --prune is given).
+    Apply the plan, then re-diff (router-only extras are left alone unless --prune is given).
     Note: reservations are never released by --prune, only added or corrected.
     Optional pages are only restored when the dump captured them. Removes are
     deferred on any page that still has an add to make, so adds and prunes may
     need two runs. A step shown as applied means the gateway acknowledged the
     save (Changes saved) and the requested values or table state read back; the
     closing diff is the authoritative convergence check.
+{textwrap.indent(helpdoc.exit_codes_epilog("restore"), "    ")}
 
 Automatic recovery (for a systemd timer):
   bgwcli autorestore <dumpfile> [--max-passes 3] [--wait 120] [--on-any-diff] [--include <csv|all>]
@@ -2935,12 +2940,10 @@ Automatic recovery (for a systemd timer):
   bgwcli autorestore <dumpfile> --commit --confirm RESTORE
     Run restore passes (never --prune) until the closing diff converges, sleeping
     --wait seconds between passes, at most --max-passes times. Exit 0 converged,
-    1 not converged (the next timer run retries), 2 error: the allocation
-    preflight could not complete, pages could not be re-read after a write, the
-    recovery checkpoint could not be read or written, another unfinished
-    recovery is recorded, or the same failure ended three consecutive runs
-    (later runs send nothing until the router converges or the recovery intent
-    is removed); check by hand. See deploy/README.md.
+    1 not converged (the next timer run retries), 2 error (check by hand; after
+    three consecutive identical failures later runs send nothing until the router
+    converges or the recovery intent is removed). See deploy/README.md.
+{textwrap.indent(helpdoc.exit_codes_epilog("autorestore"), "    ")}
 
 Global options:
   --version                 Print the bgwcli version and exit (before the command only)

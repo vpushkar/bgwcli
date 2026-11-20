@@ -200,8 +200,9 @@ No differences.
 ```
 
 A step is `applied` only when the gateway acknowledged the save (`Changes saved`) **and** the requested
-state read back. Every write is sent once; the run stops at the first rejected or unconfirmed write and
-ends with a diff, and the exit code is 0 only when everything in the dump is on the router.
+state read back. Each write is sent once, except that a Login-page answer to a configuration POST is followed by
+one re-send after logging in again; the run stops at the first rejected or unconfirmed write and ends with a
+diff, and the exit code is 0 only when the closing diff shows nothing the restore still owes.
 
 **4. Remove what the dump does not have (`--prune`)**
 
@@ -243,7 +244,7 @@ Optional, with `dump --include <id>[,<id>]` or `--include all`; capturing is rea
 | `etherlan` | LAN port settings; restoring can cut the LAN port you are on |
 | `dhcpserver` | Subnets & DHCP; restoring can move the gateway address (restored last) |
 | `ippass` | IP Passthrough; restoring changes which LAN client gets the public address |
-| `wmacauth` | Wi-Fi MAC filtering modes; restoring mode none disables filtering even with an empty list, allow/deny restore only when the dump recorded a nonempty list and every entry is on the gateway |
+| `wmacauth` | Wi-Fi MAC filtering modes; disabling filtering (mode none) needs no recorded list; enabling allow/deny on any network needs a nonempty recorded list with every entry on the gateway, and the check covers the whole page, so a save that enables filtering on one network can also hold up disabling it on another |
 
 `dump --include`: `all` = `etherlan`, `dhcpserver`, `ippass`, `wmacauth`; `dosprotect` and `wconfig` are accepted but always read; any other id is rejected. `diff`, `restore` and `autorestore` `--include` take the restorable ids `services`, `apphosting`, `ipalloc`, `dosprotect`, `wconfig`, `etherlan`, `dhcpserver`, `ippass`, `wmacauth` (omitted or `all` = everything restorable in the dump; for `autorestore` the selection also limits reset detection).
 <!-- include-pages:end -->
@@ -259,7 +260,7 @@ How `restore` plans the pages (`bgwcli restore -h` prints the same list):
 | 4 | `packetfilter` | documentary only: recorded, never written |
 | 5 | `dosprotect` | Firewall Advanced |
 | 6 | `wconfig` | Advanced Wi-Fi |
-| 7 | `wmacauth` | Wi-Fi MAC filtering modes |
+| 7 | `wmacauth` | Wi-Fi MAC filtering modes (allow/deny need the recorded list on the gateway; the guard is page-wide) |
 | 8 | `ippass` | IP Passthrough |
 | 9 | `etherlan` | LAN ports (can cut the LAN port you are on) |
 | 10 | `dhcpserver` | Subnets & DHCP, last (can move the gateway address) |
@@ -471,7 +472,11 @@ On the guarded pages (`reset`, `restart`, `routerpasswd`, `update`) `set` refuse
 A write is sent once, with one exception: if the gateway answers a configuration POST with its Login page, bgwcli logs in again and re-sends once, so two attempts can be reported.
 <!-- write-rules:end -->
 `applied` means the gateway acknowledged it and the requested state read back, an explicit rejection is exit 1, and an answer the CLI
-could not read is exit 2 with `committed` in the JSON telling you whether the write reached the router.
+could not read is exit 2. In the JSON, `committed: true` means the gateway acknowledged the save (`Changes saved`), even when
+the later read-back failed. `committed: false` does not prove the write did not land: `writeAttempted` says the POST was sent,
+`writeResponseReceived` says the gateway answered it with any status, and `writeAttempts` is 2 after a re-send and absent
+otherwise; a key whose answer is unknown is absent. After an uncertain write, re-read the gateway state (for example
+`bgwcli page <page>`) before retrying.
 Secrets (passwords, keys, access codes, nonces, phone numbers) are redacted in terminal and JSON output unless
 you pass `--include-secrets`, except `--raw` output, `--out` artifacts and dump files, which keep them (files are
 owner-only). The complete rules: [reference, Safety](docs/REFERENCE.md#safety).
@@ -500,9 +505,10 @@ The backup commands in detail (`bgwcli <command> -h` prints the same rows):
 | `diff` | `2` | the dump file or the router could not be read |
 | `diff` | `130` | interrupted (Ctrl-C) |
 | `restore` | `0` | dry run: plan printed (even when work remains) |
-| `restore` | `0` | --commit: everything selected is on the router (all restorable pages in the dump, or only the --include pages) |
+| `restore` | `0` | --commit: the closing diff finds no selected dumped service, forward, reservation or form value still missing or different (--prune: and no extra service or forward); form fields the live page disables or does not render, controls only on the router, and extra reservations are ignored |
 | `restore` | `1` | not converged, a write rejected, confirmation refused, or nothing to compare |
 | `restore` | `2` | the dump file or the router could not be read |
+| `restore` | `2` | the allocation preflight is blocked (a fixed allocation held by another MAC, no enabled Clear and Rescan button, or a failed preflight or rescan), also in a dry run |
 | `restore` | `2` | a write was sent and never acknowledged (even when the closing diff is readable) |
 | `restore` | `130` | interrupted (Ctrl-C); the write state is reported |
 | `autorestore` | `0` | no reset, converged, or router unreachable (also during the allocation preflight, before any write) |
@@ -510,7 +516,7 @@ The backup commands in detail (`bgwcli <command> -h` prints the same rows):
 | `autorestore` | `2` | page-level 401/403 or an initial structural failure |
 | `autorestore` | `2` | the allocation preflight was blocked by a conflict or failed for another reason |
 | `autorestore` | `2` | a write was sent and never acknowledged, or the closing verification failed |
-| `autorestore` | `2` | a recovery checkpoint failure, or the same failure ended three consecutive runs |
+| `autorestore` | `2` | a recovery checkpoint could not be read or written, another unfinished recovery is recorded, or the same failure ended three consecutive runs |
 | `autorestore` | `130` | interrupted (Ctrl-C) |
 <!-- backup-exits:end -->
 

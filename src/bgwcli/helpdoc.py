@@ -314,8 +314,9 @@ INCLUDE_RISK_NOTES: dict[str, str] = {
     "dhcpserver": "Subnets & DHCP; restoring can move the gateway address (restored last)",
     "ippass": "IP Passthrough; restoring changes which LAN client gets the public address",
     "wmacauth": (
-        "Wi-Fi MAC filtering modes; restoring mode none disables filtering even with an empty list, allow/deny "
-        "restore only when the dump recorded a nonempty list and every entry is on the gateway"
+        "Wi-Fi MAC filtering modes; disabling filtering (mode none) needs no recorded list; enabling allow/deny on "
+        "any network needs a nonempty recorded list with every entry on the gateway, and the check covers the "
+        "whole page, so a save that enables filtering on one network can also hold up disabling it on another"
     ),
 }
 
@@ -335,10 +336,13 @@ _EXIT_CODES: dict[str, tuple[tuple[str, str], ...]] = {
     ),
     "restore": (
         ("0", "dry run: plan printed (even when work remains)"),
-        ("0", "--commit: everything selected is on the router (all restorable pages in the dump, or only the "
-              "--include pages)"),
+        ("0", "--commit: the closing diff finds no selected dumped service, forward, reservation or form value "
+              "still missing or different (--prune: and no extra service or forward); form fields the live page "
+              "disables or does not render, controls only on the router, and extra reservations are ignored"),
         ("1", "not converged, a write rejected, confirmation refused, or nothing to compare"),
         ("2", "the dump file or the router could not be read"),
+        ("2", "the allocation preflight is blocked (a fixed allocation held by another MAC, no enabled Clear and "
+              "Rescan button, or a failed preflight or rescan), also in a dry run"),
         ("2", "a write was sent and never acknowledged (even when the closing diff is readable)"),
         ("130", "interrupted (Ctrl-C); the write state is reported"),
     ),
@@ -348,7 +352,8 @@ _EXIT_CODES: dict[str, tuple[tuple[str, str], ...]] = {
         ("2", "page-level 401/403 or an initial structural failure"),
         ("2", "the allocation preflight was blocked by a conflict or failed for another reason"),
         ("2", "a write was sent and never acknowledged, or the closing verification failed"),
-        ("2", "a recovery checkpoint failure, or the same failure ended three consecutive runs"),
+        ("2", "a recovery checkpoint could not be read or written, another unfinished recovery is recorded, or the "
+              "same failure ended three consecutive runs"),
         ("130", "interrupted (Ctrl-C)"),
     ),
 }
@@ -390,9 +395,10 @@ def include_ids_epilog(command: str) -> str:
     if command == "autorestore":
         lines.append("  The selection also limits which pages count toward reset detection.")
     if command in ("restore", "autorestore"):
-        lines.append("  Wi-Fi MAC filtering: mode none restores even with an empty list (it disables filtering);")
-        lines.append("  allow/deny restore only when the dump recorded a nonempty list and every entry is on the")
-        lines.append("  gateway.")
+        lines.append("  Wi-Fi MAC filtering: restoring mode none (disable) needs no recorded list; allow/deny on any")
+        lines.append("  network needs a nonempty recorded list with every entry on the gateway. The check covers the")
+        lines.append("  whole page, so a save that enables filtering on one network can also hold up disabling it on")
+        lines.append("  another.")
     return "\n".join(lines)
 
 
@@ -403,7 +409,7 @@ _PHASE_NOTES: dict[str, str] = {
     "packetfilter": "documentary only: recorded, never written",
     "dosprotect": "Firewall Advanced",
     "wconfig": "Advanced Wi-Fi",
-    "wmacauth": "Wi-Fi MAC filtering modes",
+    "wmacauth": "Wi-Fi MAC filtering modes (allow/deny need the recorded list on the gateway; the guard is page-wide)",
     "ippass": "IP Passthrough",
     "etherlan": "LAN ports (can cut the LAN port you are on)",
     "dhcpserver": "Subnets & DHCP, last (can move the gateway address)",
@@ -456,17 +462,24 @@ def write_pages_epilog(command: str) -> str:
 
     by_page = {row.page: row for row in page_rows()}
     blocked = [(page, f"{by_page[page].section} / {by_page[page].label}") for page in sorted(DANGEROUS_PAGES)]
-    rule = (
-        "set refuses these pages even as a dry run"
-        if command == "set"
-        else "submit previews a button on these pages but refuses --commit"
-    )
+    if command == "set":
+        rule = "set refuses these pages even as a dry run"
+        checks = [
+            "set posts the page's current form values plus your KEY=VALUE overrides with the page's Save button,",
+            "and refuses a Save button the page renders disabled; a page with no Save button only gets a warning.",
+        ]
+    else:
+        rule = "submit previews a button on these pages but refuses --commit"
+        checks = [
+            "submit presses the named button, which must be enabled. It is refused only when the page records the",
+            "form that owns the button and none of its owner forms posts to this page's own CGI. A button that",
+            "only opens an editor takes no KEY=VALUE.",
+        ]
     return "\n".join([
         "Writes: bgwcli inspect <page> shows the fields and buttons of form pages (pages with a dedicated view,",
         "such as devices, show that view instead).",
         confirm_token_rule(),
-        "The button must be enabled; a button that belongs only to another form on the page is refused, and a",
-        "button that only opens an editor takes no KEY=VALUE.",
+        *checks,
         "",
         f"Guarded pages ({rule}; use bgwcli action where one exists):",
         _rows(blocked),
