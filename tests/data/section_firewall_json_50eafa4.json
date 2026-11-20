@@ -1,0 +1,77 @@
+[
+  {
+    "section": "Firewall",
+    "label": "Status",
+    "page": "firewall",
+    "aliases": [
+      "firewall",
+      "firewall status"
+    ]
+  },
+  {
+    "section": "Firewall",
+    "label": "Custom Services",
+    "page": "services",
+    "aliases": [
+      "custom services",
+      "services"
+    ]
+  },
+  {
+    "section": "Firewall",
+    "label": "Packet Filter",
+    "page": "packetfilter",
+    "aliases": [
+      "packet filter",
+      "packetfilter"
+    ]
+  },
+  {
+    "section": "Firewall",
+    "label": "NAT/Gaming",
+    "page": "apphosting",
+    "aliases": [
+      "nat gaming",
+      "nat/gaming",
+      "gaming",
+      "apphosting"
+    ]
+  },
+  {
+    "section": "Firewall",
+    "label": "Public Subnet Hosts",
+    "page": "pshosts",
+    "aliases": [
+      "public subnet hosts",
+      "pshosts"
+    ]
+  },
+  {
+    "section": "Firewall",
+    "label": "IP Passthrough",
+    "page": "ippass",
+    "aliases": [
+      "ip passthrough",
+      "ippass"
+    ]
+  },
+  {
+    "section": "Firewall",
+    "label": "Firewall Advanced",
+    "page": "dosprotect",
+    "aliases": [
+      "firewall advanced",
+      "advanced firewall",
+      "dosprotect"
+    ]
+  },
+  {
+    "section": "Firewall",
+    "label": "Security Options",
+    "page": "securityoptions",
+    "aliases": [
+      "security options",
+      "securityoptions"
+    ]
+  }
+]

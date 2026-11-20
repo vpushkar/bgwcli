@@ -1,0 +1,84 @@
+[
+  {
+    "section": "Diagnostics",
+    "label": "Troubleshoot",
+    "page": "diag",
+    "aliases": [
+      "troubleshoot",
+      "diagnostics",
+      "diag"
+    ]
+  },
+  {
+    "section": "Diagnostics",
+    "label": "Speed Test",
+    "page": "speed",
+    "aliases": [
+      "speed test",
+      "speed"
+    ]
+  },
+  {
+    "section": "Diagnostics",
+    "label": "Logs",
+    "page": "logs",
+    "aliases": [
+      "logs"
+    ]
+  },
+  {
+    "section": "Diagnostics",
+    "label": "Update",
+    "page": "update",
+    "aliases": [
+      "update",
+      "firmware update"
+    ],
+    "dangerous": true
+  },
+  {
+    "section": "Diagnostics",
+    "label": "Resets",
+    "page": "reset",
+    "aliases": [
+      "resets",
+      "reset"
+    ],
+    "dangerous": true
+  },
+  {
+    "section": "Diagnostics",
+    "label": "Syslog",
+    "page": "syslog",
+    "aliases": [
+      "syslog"
+    ]
+  },
+  {
+    "section": "Diagnostics",
+    "label": "Event Notifications",
+    "page": "events",
+    "aliases": [
+      "event notifications",
+      "events"
+    ]
+  },
+  {
+    "section": "Diagnostics",
+    "label": "NAT Table",
+    "page": "nattable",
+    "aliases": [
+      "nat table",
+      "nattable"
+    ]
+  },
+  {
+    "section": "Diagnostics",
+    "label": "Site Map",
+    "page": "sitemap",
+    "aliases": [
+      "site map",
+      "sitemap"
+    ]
+  }
+]

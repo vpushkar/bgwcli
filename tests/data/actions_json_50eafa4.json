@@ -1,0 +1,343 @@
+[
+  {
+    "name": "restart",
+    "page": "restart",
+    "description": "Restart the gateway.",
+    "confirmToken": "RESTART",
+    "payload": {
+      "Restart": "Restart Device"
+    },
+    "dangerous": true,
+    "aliases": [
+      "restart-device",
+      "reboot"
+    ]
+  },
+  {
+    "name": "clear-device-list",
+    "page": "devices",
+    "description": "Clear inactive devices from the device list.",
+    "confirmToken": "CLEAR-DEVICES",
+    "payload": {
+      "Clear": "Clear Device List"
+    },
+    "dangerous": false
+  },
+  {
+    "name": "run-speed-test",
+    "page": "speed",
+    "description": "Run the router speed test.",
+    "confirmToken": "SPEED",
+    "payload": {
+      "run": "Run Speed Test"
+    },
+    "dangerous": false,
+    "aliases": [
+      "speed-test"
+    ]
+  },
+  {
+    "name": "detect-wifi-congestion-2.4",
+    "page": "lanstatistics",
+    "description": "Run 2.4 GHz Wi-Fi congestion detection from LAN Statistics.",
+    "confirmToken": "CONGESTION-2.4",
+    "payload": {
+      "Congestion": "Congestion Detection 2.4 GHz"
+    },
+    "dangerous": false,
+    "aliases": [
+      "congestion-2.4",
+      "congestion-24"
+    ],
+    "formButton": "Congestion"
+  },
+  {
+    "name": "detect-wifi-congestion-5",
+    "page": "lanstatistics",
+    "description": "Run 5 GHz Wi-Fi congestion detection from LAN Statistics.",
+    "confirmToken": "CONGESTION-5",
+    "payload": {
+      "CongRadio2": "Congestion Detection 5 GHz"
+    },
+    "dangerous": false,
+    "aliases": [
+      "congestion-5",
+      "congestion-5ghz"
+    ],
+    "formButton": "CongRadio2"
+  },
+  {
+    "name": "clear-connection-statistics",
+    "page": "lanstatistics",
+    "description": "Clear connection statistics counters from LAN Statistics.",
+    "confirmToken": "CLEAR-CONNECTION-STATISTICS",
+    "payload": {
+      "ClearSta": "Clear Connection Statistics"
+    },
+    "dangerous": true,
+    "aliases": [
+      "clear-connection-stats"
+    ],
+    "formButton": "ClearSta"
+  },
+  {
+    "name": "clear-lan-statistics",
+    "page": "lanstatistics",
+    "description": "Clear LAN statistics counters using the LAN Statistics Clear Statistics button.",
+    "confirmToken": "CLEAR-LAN-STATISTICS",
+    "payload": {
+      "Clear": "Clear Statistics"
+    },
+    "dangerous": true,
+    "aliases": [
+      "clear-statistics",
+      "clear-lan-stats"
+    ],
+    "formButton": "Clear"
+  },
+  {
+    "name": "run-full-diagnostics",
+    "page": "diag",
+    "description": "Run the router's full diagnostic test suite.",
+    "confirmToken": "DIAG",
+    "payload": {
+      "RunFullDiagnostics": "Run Full Diagnostics"
+    },
+    "dangerous": false,
+    "aliases": [
+      "full-diagnostics"
+    ]
+  },
+  {
+    "name": "send-diagnostics",
+    "page": "diag",
+    "description": "Send the router diagnostics report to AT&T.",
+    "confirmToken": "SEND-DIAGNOSTICS",
+    "payload": {
+      "SendDiagnostics": "Send Diagnostics"
+    },
+    "dangerous": false,
+    "aliases": [
+      "send-diagnostic-report"
+    ]
+  },
+  {
+    "name": "diagnostics-ethernet-details",
+    "page": "diag",
+    "description": "Show Ethernet diagnostic details.",
+    "confirmToken": "DIAG",
+    "payload": {
+      "EthDetails": "Details"
+    },
+    "dangerous": false,
+    "aliases": [
+      "ethernet-details"
+    ]
+  },
+  {
+    "name": "diagnostics-authentication-details",
+    "page": "diag",
+    "description": "Show authentication diagnostic details.",
+    "confirmToken": "DIAG",
+    "payload": {
+      "AuthDetails": "Details"
+    },
+    "dangerous": false,
+    "aliases": [
+      "authentication-details"
+    ]
+  },
+  {
+    "name": "diagnostics-ip-details",
+    "page": "diag",
+    "description": "Show IP diagnostic details.",
+    "confirmToken": "DIAG",
+    "payload": {
+      "IPDetails": "Details"
+    },
+    "dangerous": false,
+    "aliases": [
+      "ip-details"
+    ]
+  },
+  {
+    "name": "diagnostics-dns-details",
+    "page": "diag",
+    "description": "Show DNS diagnostic details.",
+    "confirmToken": "DIAG",
+    "payload": {
+      "DNSDetails": "Details"
+    },
+    "dangerous": false,
+    "aliases": [
+      "dns-details"
+    ]
+  },
+  {
+    "name": "packet-filter-enable",
+    "page": "packetfilter",
+    "description": "Enable packet filters.",
+    "confirmToken": "PACKETFILTER",
+    "payload": {
+      "Enable": "Enable Packet Filters"
+    },
+    "dangerous": false,
+    "aliases": [
+      "enable-packet-filter",
+      "enable-packet-filters"
+    ]
+  },
+  {
+    "name": "packet-filter-add-drop-rule",
+    "page": "packetfilter",
+    "description": "Open/add a packet-filter drop rule.",
+    "confirmToken": "PACKETFILTER",
+    "payload": {
+      "AddDropRule": "Add a 'Drop' Rule"
+    },
+    "dangerous": false,
+    "aliases": [
+      "add-drop-rule"
+    ]
+  },
+  {
+    "name": "packet-filter-add-pass-rule",
+    "page": "packetfilter",
+    "description": "Open/add a packet-filter pass rule.",
+    "confirmToken": "PACKETFILTER",
+    "payload": {
+      "AddPassRule": "Add a 'Pass' Rule"
+    },
+    "dangerous": false,
+    "aliases": [
+      "add-pass-rule"
+    ]
+  },
+  {
+    "name": "reset-ip",
+    "page": "reset",
+    "description": "Reset the router IP stack.",
+    "confirmToken": "RESET-IP",
+    "payload": {
+      "ResetIP": "Reset IP"
+    },
+    "dangerous": true
+  },
+  {
+    "name": "reset-connection",
+    "page": "reset",
+    "description": "Reset the router broadband connection.",
+    "confirmToken": "RESET-CONNECTION",
+    "payload": {
+      "ResetConn": "Reset Connection"
+    },
+    "dangerous": true
+  },
+  {
+    "name": "restart-from-resets",
+    "page": "reset",
+    "description": "Restart from the Diagnostics > Resets page.",
+    "confirmToken": "RESTART",
+    "payload": {
+      "Restart": "Restart"
+    },
+    "dangerous": true
+  },
+  {
+    "name": "reset-wifi-config",
+    "page": "reset",
+    "description": "Reset Wi-Fi configuration.",
+    "confirmToken": "RESET-WIFI-CONFIG",
+    "payload": {
+      "WReset": "Reset Wi-Fi Config"
+    },
+    "dangerous": true,
+    "aliases": [
+      "reset-wi-fi-config"
+    ]
+  },
+  {
+    "name": "reset-firewall-config",
+    "page": "reset",
+    "description": "Reset firewall configuration.",
+    "confirmToken": "RESET-FIREWALL-CONFIG",
+    "payload": {
+      "FReset": "Reset Firewall Config"
+    },
+    "dangerous": true
+  },
+  {
+    "name": "factory-reset",
+    "page": "reset",
+    "description": "Reset the device to defaults.",
+    "confirmToken": "FACTORY-RESET",
+    "payload": {
+      "Reset": "Reset Device..."
+    },
+    "dangerous": true,
+    "aliases": [
+      "reset-device"
+    ]
+  },
+  {
+    "name": "restart-wifi-2.4",
+    "page": "home",
+    "description": "Restart the 2.4 GHz Wi-Fi radio (home.ha Restart button; clients on 2.4 GHz drop briefly).",
+    "confirmToken": "RESTART-WIFI",
+    "payload": {
+      "WRestart1": "Restart"
+    },
+    "dangerous": false,
+    "aliases": [
+      "restart-wifi-24",
+      "restart-2.4ghz",
+      "restart-wifi-2-4"
+    ],
+    "postPath": "wrestart.ha?1"
+  },
+  {
+    "name": "restart-wifi-5",
+    "page": "home",
+    "description": "Restart the 5 GHz Wi-Fi radio (home.ha Restart button; clients on 5 GHz drop briefly).",
+    "confirmToken": "RESTART-WIFI",
+    "payload": {
+      "WRestart2": "Restart"
+    },
+    "dangerous": false,
+    "aliases": [
+      "restart-wifi-5ghz",
+      "restart-5ghz"
+    ],
+    "postPath": "wrestart.ha?2"
+  },
+  {
+    "name": "restart-broadband",
+    "page": "home",
+    "description": "Restart the broadband connection (home.ha Restart button; drops WAN for a while).",
+    "confirmToken": "RESTART-BROADBAND",
+    "payload": {
+      "Broadband": "Restart"
+    },
+    "dangerous": true,
+    "aliases": [
+      "restart-wan"
+    ],
+    "postPath": "crestart.ha?1"
+  },
+  {
+    "name": "find-best-channel-5",
+    "page": "wconfig",
+    "description": "Run the 5 GHz 'Find Best Channel' scan on Advanced Wi-Fi (5 GHz clients drop briefly).",
+    "confirmToken": "CHANSCAN",
+    "payload": {
+      "chanscan5": "Find Best Channel"
+    },
+    "dangerous": false,
+    "aliases": [
+      "chanscan5",
+      "find-best-channel",
+      "scan-5ghz-channel"
+    ],
+    "formButton": "chanscan5"
+  }
+]

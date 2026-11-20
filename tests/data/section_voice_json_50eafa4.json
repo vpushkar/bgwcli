@@ -1,0 +1,31 @@
+[
+  {
+    "section": "Voice",
+    "label": "Status",
+    "page": "voice",
+    "aliases": [
+      "voice",
+      "voice status"
+    ]
+  },
+  {
+    "section": "Voice",
+    "label": "Line Details",
+    "page": "voiceconfig",
+    "aliases": [
+      "line details",
+      "voice line details",
+      "voiceconfig"
+    ]
+  },
+  {
+    "section": "Voice",
+    "label": "Call Statistics",
+    "page": "voicestat",
+    "aliases": [
+      "call statistics",
+      "voice call statistics",
+      "voicestat"
+    ]
+  }
+]

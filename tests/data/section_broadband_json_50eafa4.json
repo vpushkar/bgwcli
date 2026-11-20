@@ -1,0 +1,32 @@
+[
+  {
+    "section": "Broadband",
+    "label": "Status",
+    "page": "broadbandstatistics",
+    "aliases": [
+      "broadband",
+      "broadband status",
+      "broadbandstatistics"
+    ]
+  },
+  {
+    "section": "Broadband",
+    "label": "Configure",
+    "page": "broadbandconfig",
+    "aliases": [
+      "broadband configure",
+      "broadband config",
+      "broadbandconfig"
+    ]
+  },
+  {
+    "section": "Broadband",
+    "label": "Fiber Status",
+    "page": "fiberstat",
+    "aliases": [
+      "fiber",
+      "fiber status",
+      "fiberstat"
+    ]
+  }
+]

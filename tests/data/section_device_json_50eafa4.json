@@ -1,0 +1,61 @@
+[
+  {
+    "section": "Device",
+    "label": "Status",
+    "page": "home",
+    "aliases": [
+      "device",
+      "device status",
+      "status"
+    ]
+  },
+  {
+    "section": "Device",
+    "label": "Device List",
+    "page": "devices",
+    "aliases": [
+      "device list",
+      "devices"
+    ]
+  },
+  {
+    "section": "Device",
+    "label": "System Information",
+    "page": "sysinfo",
+    "aliases": [
+      "system information",
+      "sysinfo",
+      "system info"
+    ]
+  },
+  {
+    "section": "Device",
+    "label": "Access Code",
+    "page": "routerpasswd",
+    "aliases": [
+      "access code",
+      "router password",
+      "routerpasswd"
+    ],
+    "dangerous": true
+  },
+  {
+    "section": "Device",
+    "label": "Remote Access",
+    "page": "remoteaccess",
+    "aliases": [
+      "remote access",
+      "remoteaccess"
+    ]
+  },
+  {
+    "section": "Device",
+    "label": "Restart Device",
+    "page": "restart",
+    "aliases": [
+      "restart device",
+      "restart"
+    ],
+    "dangerous": true
+  }
+]
