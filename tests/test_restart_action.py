@@ -97,7 +97,8 @@ def test_restart_never_follows_a_redirect_that_leaves_the_gateway(tmp_env, clock
         monkeypatch, capsys, "restart", _restarting_page, location="http://example.com/cgi-bin/restarting.ha"
     )
 
-    assert code == 0 and len(posts) == 1
+    # Not the gateway's own restarting page: never requested, and the restart stays unconfirmed.
+    assert code == 2 and len(posts) == 1 and out["committed"] is False
     assert gets_after_post == []
 
 

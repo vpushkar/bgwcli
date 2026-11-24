@@ -711,16 +711,14 @@ def _run_action(client: Any, command: Command) -> None:
         )
         if action.follow_redirect and status_code in _GET_REDIRECT_STATUSES:
             posted_path = f"/cgi-bin/{action.post_path or action.page + '.ha'}"
-            handoff = _request_redirect_handoff(client, location, posted_path)
-            if handoff is not None:
-                failed_exit, text = handoff
-                if failed_exit is None:
-                    result = replace(result, result=text)
-                else:
-                    command.exit_code = failed_exit
-                    result = replace(
-                        result, committed=False, outcome="failed", answer_read=True, warning=text, result=None
-                    )
+            failed_exit, text, read = _request_redirect_handoff(client, location, posted_path)
+            if failed_exit is None:
+                result = replace(result, result=text)
+            else:
+                command.exit_code = failed_exit
+                result = replace(
+                    result, committed=False, outcome="failed", answer_read=read, warning=text, result=None
+                )
     if action.opener:
         result = replace(
             result, committed=False, outcome="opened", write_attempted=True, write_response_received=True,
@@ -730,48 +728,61 @@ def _run_action(client: Any, command: Command) -> None:
 
 
 _GET_REDIRECT_STATUSES = (301, 302, 303)
+_RESTART_HANDOFF_PATH = "/cgi-bin/restarting.ha"
 
 
 def _request_redirect_handoff(
     client: Any, location: str | None, posted_path: str
-) -> tuple[int | None, str] | None:
-    """Load the page a restart POST redirected to, as the browser does (the reboot may belong to
-    that hand-off). None when nothing was requested (no location, another origin, outside /cgi-bin/).
-    Otherwise (exit code or None, text): a readable refusal is reported as one - a lost session
-    (401/403, Login page) is no answer (exit 2), a rejection banner a negative answer (exit 1), a full
-    session pool raises. A dropped connection, a 5xx or a page without a refusal is the gateway
-    accepting the request and going down: the restart is requested, the reboot is not verified."""
+) -> tuple[int | None, str, bool]:
+    """Load the gateway's restarting page the restart POST redirected to, as the browser does (the
+    reboot may belong to that hand-off). Returns (exit code or None, text, answer read).
+
+    Only a same-origin redirect to /cgi-bin/restarting.ha is the hand-off; any other location
+    (including none or a malformed one) is never requested and leaves the restart unconfirmed
+    (exit 2). On restarting.ha a dropped connection, a 2xx or a 5xx is the gateway accepting the
+    request and going down (None: requested, reboot not verified). A rejection banner is a negative
+    answer (exit 1); a Login page, 401/403, another 3xx or 4xx, a full session pool or an
+    unreadable answer leaves the restart unconfirmed (exit 2). Every failure keeps the POST's
+    write evidence (the caller's result carries it)."""
     unverified = (
         "The reboot itself is not verified; 'Time Since Last Reboot' on sysinfo confirms it once the gateway is back."
     )
+    unconfirmed = "the restart is unconfirmed; verify the gateway state"
     try:
-        response = client.get_redirect_target(location or "", posted_path)
-    except RouterSessionPoolFullError:
-        raise
+        response = client.get_redirect_target(location or "", posted_path, _RESTART_HANDOFF_PATH)
     except (RouterConnectionError, OSError) as exc:
         return None, (
             f"Restart requested: the gateway redirected to {location} and dropped the connection while "
             f"serving it ({exc}), as it does when it goes down for the reboot. {unverified}"
-        )
+        ), False
     except BgwError as exc:
-        return NO_ANSWER, f"the restart hand-off page {location} could not be read ({exc}); verify the gateway state"
+        return NO_ANSWER, f"the restart hand-off page {location} could not be read ({exc}); {unconfirmed}", False
     if response is None:
-        return None
-    body = response.body or ""
-    if router_sessions_full(body):
-        raise session_pool_full_error()
-    if response.status_code in (401, 403) or looks_like_login(body):
         return NO_ANSWER, (
-            f"the restart hand-off page {location} answered with the login page or HTTP {response.status_code}: "
-            "the session was lost and the restart is unconfirmed; verify the gateway state"
-        )
+            f"the restart POST was answered with a redirect to {location or '(no location)'!s}, not to the "
+            f"gateway's restarting page; {unconfirmed}"
+        ), False
+    body = response.body or ""
+    status = response.status_code
+    if router_sessions_full(body):
+        client.clear_session()
+        return NO_ANSWER, (
+            f"the restart hand-off page {location} answered that all web sessions are in use; {unconfirmed}"
+        ), True
+    redirect = _location(response.headers) if 300 <= status < 400 else None
+    if status in (401, 403) or looks_like_login(body) or (redirect and "login.ha" in redirect.lower()):
+        return NO_ANSWER, (
+            f"the restart hand-off page {location} answered with the login page or HTTP {status}: the "
+            f"session was lost and {unconfirmed}"
+        ), True
+    if 300 <= status < 500:
+        return NO_ANSWER, f"the restart hand-off page {location} answered HTTP {status}; {unconfirmed}", True
     banner = router_error_banner(body)
     if banner and not no_changes_text(banner):
-        return NEGATIVE_ANSWER, f"{WRITE_REJECTED_PREFIX}{banner}"
+        return NEGATIVE_ANSWER, f"{WRITE_REJECTED_PREFIX}{banner}", True
     return None, (
-        f"Restart requested: the gateway redirected to {location} and answered it with HTTP "
-        f"{response.status_code}. {unverified}"
-    )
+        f"Restart requested: the gateway redirected to {location} and answered it with HTTP {status}. {unverified}"
+    ), False
 
 
 def _run_diagnostic(client: Any, command: Command) -> None:

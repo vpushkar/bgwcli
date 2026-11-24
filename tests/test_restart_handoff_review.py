@@ -75,9 +75,10 @@ def test_a_wifi_warning_redirect_never_adds_a_second_post(tmp_env, clock, monkey
 
     assert len(posts) == 1
     assert all("wconfig" not in post.url for post in posts)
-    # The Wi-Fi Warning flow (read the warning twice, post Continue) belongs to the Wi-Fi pages. What
-    # remains is one read of the redirect target: restart's hand-off, or clear's answer read.
-    assert len([g for g in gets_after if "wifiwarn" in g.path]) <= 1
+    # The Wi-Fi Warning flow (read the warning twice, post Continue) belongs to the Wi-Fi pages. restart
+    # requests only the gateway's restarting page (never this one); clear reads its answer page once.
+    expected_reads = 0 if name == "restart" else 1
+    assert len([g for g in gets_after if "wifiwarn" in g.path]) == expected_reads
 
 
 # --- the hand-off requests what it validated -----------------------------------------------------------
@@ -141,8 +142,8 @@ def test_hand_off_answered_by_a_rejection_banner_is_a_negative_answer(tmp_env, c
 def test_hand_off_answered_by_a_full_session_pool_is_not_a_reboot(tmp_env, clock, monkeypatch, capsys):
     code, out, posts, _ = _run(monkeypatch, capsys, "restart", after_post=lambda request: html(POOL_FULL))
 
-    assert code != 0 and len(posts) == 1
-    assert out.get("committed") is not True
+    assert code == 2 and len(posts) == 1
+    assert out["committed"] is False and out["writeAttempted"] is True and out["statusCode"] == 302
 
 
 @pytest.mark.parametrize(

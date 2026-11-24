@@ -716,20 +716,24 @@ class BGW320Client:
         to log in with; otherwise it is the final answer."""
         return self.options.wait_for_session is True and bool(self.options.access_code)
 
-    def get_redirect_target(self, location: str, posted_path: str) -> HttpResponse | None:
+    def get_redirect_target(self, location: str, posted_path: str, expected_path: str) -> HttpResponse | None:
         """GET, once and without following further redirects, the /cgi-bin/ page a POST to
         ``posted_path`` redirected to. ``location`` is resolved against the POST's URL like a browser
         does, dot segments are removed, and the path that is validated is the one requested. Returns
-        None, sending nothing, when the location is empty, resolves to another origin (scheme, host
-        and port compared normalized) or leaves /cgi-bin/. Transport failures raise like any other
-        request (a restart drops the connection here)."""
+        None, sending nothing, when the location is empty or malformed, resolves to another origin
+        (scheme, host and port compared normalized) or to any path but ``expected_path``. Transport
+        failures raise like any other request (a restart drops the connection here)."""
         if not location:
             return None
-        target = urlsplit(urljoin(urljoin(self._origin + "/", posted_path), location))
-        if _normalized_origin(target) != _normalized_origin(urlsplit(self._origin)):
+        try:
+            target = urlsplit(urljoin(urljoin(self._origin + "/", posted_path), location))
+            same_origin = _normalized_origin(target) == _normalized_origin(urlsplit(self._origin))
+        except ValueError:
+            return None
+        if not same_origin:
             return None
         path = posixpath.normpath(target.path) if target.path else "/"
-        if not path.startswith("/cgi-bin/"):
+        if path != expected_path:
             return None
         return self._request(path + (f"?{target.query}" if target.query else ""), "GET", follow_redirects=False)
 
@@ -1164,9 +1168,48 @@ def _nonce_value(raw: str) -> str | None:
     return None
 
 
-_NON_MARKUP = re.compile(
-    r"<!--.*?(?:-->|$)|<(script|style)\b[^>]*>.*?(?:</\1\s*>|$)", re.IGNORECASE | re.DOTALL
-)
+_NON_MARKUP_OPENER = re.compile(r"<!--|<(script|style)\b")
+
+
+def _strip_non_markup(html: str) -> str:
+    """``html`` without comments and script/style text, which are not markup to a browser. One
+    left-to-right pass (each search starts where the previous one ended), so hostile input stays
+    linear. ``<!-->`` and ``<!--->`` are empty comments; an unterminated comment or script/style
+    element runs to the end of the document."""
+    lower = html.lower()
+    kept: list[str] = []
+    index = 0
+    while True:
+        match = _NON_MARKUP_OPENER.search(lower, index)
+        if match is None:
+            kept.append(html[index:])
+            break
+        kept.append(html[index : match.start()])
+        if match.group(1) is None:  # a comment
+            after = match.end()
+            if lower.startswith(">", after):
+                index = after + 1
+                continue
+            if lower.startswith("->", after):
+                index = after + 2
+                continue
+            close = lower.find("-->", after)
+            if close < 0:
+                break
+            index = close + 3
+            continue
+        opener_end = lower.find(">", match.end())
+        if opener_end < 0:  # an unterminated opener is not an element: keep the rest as text
+            kept.append(html[match.start() :])
+            break
+        close = lower.find("</" + match.group(1), opener_end + 1)
+        if close < 0:
+            break
+        close_end = lower.find(">", close)
+        if close_end < 0:
+            break
+        index = close_end + 1
+    return "".join(kept)
 
 
 def _scan_forms(html: str) -> list[tuple[str, list[str], list[str]]]:
@@ -1179,7 +1222,7 @@ def _scan_forms(html: str) -> list[tuple[str, list[str], list[str]]]:
     current: tuple[str, list[str], list[str]] | None = None
     # Comments and script/style text are not markup to a browser: a commented-out <form> opener must
     # not open a form that captures the next real form's controls and nonce.
-    for match in _TAG.finditer(_NON_MARKUP.sub("", html)):
+    for match in _TAG.finditer(_strip_non_markup(html)):
         closing, tag, raw = match.group(1), match.group(2).lower(), match.group(3)
         if tag == "form":
             if closing:
@@ -1187,7 +1230,7 @@ def _scan_forms(html: str) -> list[tuple[str, list[str], list[str]]]:
             elif current is None:
                 current = (_attributes(raw).get("action", "").strip(), [], [])
                 forms.append(current)
-        elif tag in ("input", "button") and not closing and current is not None:
+        elif tag in ("input", "button", "select", "textarea") and not closing and current is not None:
             name = _attributes(raw).get("name")
             if name:
                 current[2].append(name)
@@ -1223,7 +1266,7 @@ def _select_write_nonces(html: str, nonce_page: str, post_path: str, fields: Map
     forms = _scan_forms(html)
     target = form_target(post_path)
     matching = [form for form in forms if form_target(form[0]) == target]
-    page_nonce = extract_nonce(html)
+    page_nonce = extract_nonce(_strip_non_markup(html))
     no_nonce = f"{nonce_page}: no write nonce found for {post_path}; nothing was sent"
 
     # A posted control that only another form holds belongs to that form (a browser would post it
@@ -1303,7 +1346,12 @@ def _redirects_to_login(response: HttpResponse) -> bool:
     location = response.headers.get("location")
     if isinstance(location, list):
         location = location[0] if location else None
-    return bool(location) and _is_login_url(urljoin(response.url, location))
+    if not location:
+        return False
+    try:
+        return _is_login_url(urljoin(response.url, location))
+    except ValueError:  # a malformed Location (e.g. an unclosed IPv6 bracket) is no login redirect
+        return _is_login_url(location)
 
 
 def router_sessions_full(html: str) -> bool:

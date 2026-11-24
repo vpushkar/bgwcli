@@ -40,7 +40,9 @@ def _handler(action, answer):
     def handler(request, n):
         if request.method == "POST":
             state["posted"] = True
-            return html("", 302, {"location": f"/cgi-bin/{action.page}.ha"})
+            # The restart actions are redirected to the gateway's restarting page (fw 6.35.8).
+            target = "restarting" if action.follow_redirect else action.page
+            return html("", 302, {"location": f"/cgi-bin/{target}.ha"})
         if state["posted"]:
             state["reads_after_post"] += 1
             return answer()
