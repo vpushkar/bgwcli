@@ -111,7 +111,7 @@ class FakeClient:
             raise RouterConnectionError(f"{page}.ha timed out")
         return HttpResponse(200, "OK", {}, body, f"{self.origin}/cgi-bin/{page}.ha")
 
-    def post_cgi_page(self, page, fields):
+    def post_cgi_page(self, page, fields, submit=None):
         self.posts.append((page, dict(fields)))
         headers = {"location": self.post_location} if self.post_location else {}
         body = self.post_body(page) if callable(self.post_body) else self.post_body
@@ -1409,8 +1409,8 @@ class SaveAcknowledgingClient(FakeClient):
 
     pending_ack: str | None = None
 
-    def post_cgi_page(self, page, fields):
-        response = super().post_cgi_page(page, fields)
+    def post_cgi_page(self, page, fields, **kwargs):
+        response = super().post_cgi_page(page, fields, **kwargs)
         if "Continue" in fields:
             self.pending_ack = page
             return HttpResponse(302, "Found", {"location": f"/cgi-bin/{page}.ha"}, "", response.url)

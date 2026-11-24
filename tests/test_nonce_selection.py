@@ -39,7 +39,7 @@ def test_scan_forms_collects_control_names_in_the_same_pass():
         '<form action="/cgi-bin/a.ha"><input name="x" value="1"><button name="Go">Go</button>'
         '<input name="nonce" value="aa11"></form>'
     )
-    assert forms == [("/cgi-bin/a.ha", ["aa11"], ["x", "Go", "nonce"])]
+    assert forms == [("/cgi-bin/a.ha", ["aa11"], ["x", "Go", "nonce"], {"Go": ""})]
 
 
 # -- control gate -----------------------------------------------------------------------------------

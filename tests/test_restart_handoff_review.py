@@ -142,8 +142,9 @@ def test_hand_off_answered_by_a_rejection_banner_is_a_negative_answer(tmp_env, c
 def test_hand_off_answered_by_a_full_session_pool_is_not_a_reboot(tmp_env, clock, monkeypatch, capsys):
     code, out, posts, _ = _run(monkeypatch, capsys, "restart", after_post=lambda request: html(POOL_FULL))
 
-    assert code == 2 and len(posts) == 1
-    assert out["committed"] is False and out["writeAttempted"] is True and out["statusCode"] == 302
+    # Raised (the coordinator records the pool-full cooldown) with the restart POST's write evidence.
+    assert code != 0 and len(posts) == 1
+    assert out["sessionPoolFull"] is True and out["writeAttempted"] is True
 
 
 @pytest.mark.parametrize(

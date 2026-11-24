@@ -84,9 +84,14 @@ def build_submit_plan(
     button_name: str,
     assignments: list[str],
     include_secrets: bool = False,
+    *,
+    exact_name: bool = False,
 ) -> MutationPlan:
+    """``exact_name`` (named actions): the button is the one whose HTML name is exactly
+    ``button_name``, never one whose value or label happens to read the same."""
     page = _resolve_page(page)
-    button = _resolve_button(page, parsed, button_name)
+    resolve = _resolve_exact_button if exact_name else _resolve_button
+    button = resolve(page, parsed, button_name)
     if button.disabled:
         raise UsageError(f"Button '{button_name}' is disabled on {page}; nothing was posted.")
     _require_own_form(page, parsed, button)
@@ -100,7 +105,8 @@ def build_submit_plan(
             f"`set {page} KEY=VALUE --commit --confirm {token}`. Nothing was posted."
         )
     changes = parse_assignments(assignments)
-    payload = _without_foreign_allocations(page, base_payload(parsed), changes)
+    base = _without_foreign_allocations(page, base_payload(parsed), changes)
+    payload = _owning_form_payload(page, parsed, button, base)
     payload.update(changes)
     if button.name:
         payload[button.name] = button.value or button.label or button.name
@@ -117,6 +123,34 @@ def _is_own_form(page: str, action: str) -> bool:
         return True
     path = target.split("?", 1)[0].split("#", 1)[0]
     return path.lower() in (f"{page}.ha", page)
+
+
+def _resolve_exact_button(page: str, parsed: ParsedPage, button_name: str) -> ParsedButton:
+    matches = [b for b in parsed.buttons if b.name == button_name]
+    if not matches:
+        raise UsageError(f"Button '{button_name}' was not found on {page}.")
+    if len(matches) > 1 and len({(b.value, b.disabled) for b in matches}) > 1:
+        raise UsageError(f"Button '{button_name}' appears more than once on {page}; nothing was posted.")
+    return matches[0]
+
+
+def _owning_form_payload(
+    page: str, parsed: ParsedPage, button: ParsedButton, payload: dict[str, str]
+) -> dict[str, str]:
+    """The page's base payload cut to the controls of the button's own form, as a browser submits it:
+    a sibling form's fields are never posted with this button. Unchanged when the page has no form
+    holding the button (a page-level form-less control set)."""
+    if not button.name:
+        return payload
+    owners = [form for form in parsed.forms if button.name in form.button_names and _is_own_form(page, form.action)]
+    if not owners:
+        return payload
+    allowed = {
+        name
+        for form in owners
+        for name in (*form.field_names, *form.select_names, *form.textarea_names)
+    }
+    return {key: value for key, value in payload.items() if key in allowed or key.lower() in ("nonce", "hashpassword")}
 
 
 def _require_own_form(page: str, parsed: ParsedPage, button: ParsedButton) -> None:

@@ -1083,7 +1083,7 @@ def execute_restore(
                     )
                 elif step.follow_up is not None:
                     result = _run_follow_up(client, step.follow_up, base)
-                elif location and _CONFIRMATION_PAGE.search(location):
+                elif is_confirmation_redirect(location, response.status_code, _client_origin(client)):
                     # The gateway explicitly requires Continue before committing this Save. The
                     # save POST's answer is how far the write got: every failure produced while
                     # confirming it (warning GET, missing Continue, Continue POST) keeps it.
@@ -1764,9 +1764,33 @@ def confirm_saved_page(
     return _wait_for_save(client, page, response, base, reservations=reservations, releases=releases)
 
 
-def is_confirmation_redirect(location: str | None) -> bool:
-    """True when a POST answered with a redirect to the gateway's Wi-Fi Warning confirmation page."""
-    return bool(location) and _CONFIRMATION_PAGE.search(location) is not None
+def _client_origin(client: Any) -> str | None:
+    identity = getattr(client, "session_identity", None)
+    return identity() if callable(identity) else None
+
+
+def is_confirmation_redirect(location: str | None, status_code: int | None = None, origin: str | None = None) -> bool:
+    """True when a POST answered with a GET redirect (301/302/303, when ``status_code`` is given) to the
+    gateway's Wi-Fi Warning confirmation page on the gateway itself: a relative Location, or an
+    absolute one on ``origin`` (when given). Only then may Continue be posted."""
+    if not location or _CONFIRMATION_PAGE.search(location) is None:
+        return False
+    if status_code is not None and status_code not in (301, 302, 303):
+        return False
+    if origin is not None:
+        from urllib.parse import urlsplit
+
+        try:
+            target = urlsplit(location)
+            gateway = urlsplit(origin)
+        except ValueError:
+            return False
+        absolute = bool(target.scheme or target.netloc)
+        if absolute and (target.scheme.lower(), (target.hostname or "").lower(), target.port) != (
+            gateway.scheme.lower(), (gateway.hostname or "").lower(), gateway.port
+        ):
+            return False
+    return True
 
 
 def confirm_warning_page(

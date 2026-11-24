@@ -13,7 +13,6 @@ from __future__ import annotations
 import hashlib
 import http.client
 import ipaddress
-import posixpath
 import re
 import socket
 import ssl
@@ -730,19 +729,23 @@ class BGW320Client:
             same_origin = _normalized_origin(target) == _normalized_origin(urlsplit(self._origin))
         except ValueError:
             return None
-        if not same_origin:
+        # The path is compared as sent: a trailing slash, dot segments or encoded variants are not the
+        # gateway's restarting page, so nothing is normalized into it.
+        if not same_origin or target.path != expected_path:
             return None
-        path = posixpath.normpath(target.path) if target.path else "/"
-        if path != expected_path:
-            return None
-        return self._request(path + (f"?{target.query}" if target.query else ""), "GET", follow_redirects=False)
+        query = f"?{target.query}" if target.query else ""
+        return self._request(expected_path + query, "GET", follow_redirects=False)
 
-    def post_cgi_page(self, page: str, fields: Mapping[str, str]) -> HttpResponse:
+    def post_cgi_page(
+        self, page: str, fields: Mapping[str, str], *, submit: tuple[str, str] | None = None
+    ) -> HttpResponse:
         """POST a page's own form: nonce from GET <page>.ha, POST to /cgi-bin/<page>.ha."""
         page = canonical_cgi_page(page)
-        return self.post_form(page, f"{page}.ha", fields)
+        return self.post_form(page, f"{page}.ha", fields, submit=submit)
 
-    def post_form(self, nonce_page: str, post_path: str, fields: Mapping[str, str]) -> HttpResponse:
+    def post_form(
+        self, nonce_page: str, post_path: str, fields: Mapping[str, str], *, submit: tuple[str, str] | None = None
+    ) -> HttpResponse:
         """POST to an arbitrary CGI path (e.g. ``wrestart.ha?1``) with the nonces read from
         ``nonce_page``. home.ha hosts several Restart forms whose actions are other CGI scripts
         with a query string; the nonces they carry are the ones served on home.ha.
@@ -756,7 +759,7 @@ class BGW320Client:
         nonce_page = canonical_cgi_page(nonce_page)
         if not self.has_authenticated_session():
             self.login()
-        response = self._post_form_once(nonce_page, post_path, fields)
+        response = self._post_form_once(nonce_page, post_path, fields, submit)
         if router_sessions_full(response.body) and not self._can_wait_and_relogin():
             # A full pool is the answer, whatever credentials are held: classify it before any
             # credential-dependent forced login so the cooldown is recorded and the error is not
@@ -766,7 +769,7 @@ class BGW320Client:
         if looks_like_login(response.body):
             self.login(response.body, force=True)
             try:
-                response = self._post_form_once(nonce_page, post_path, fields)
+                response = self._post_form_once(nonce_page, post_path, fields, submit)
             except NoncePageRefusedError as refusal:
                 # The first POST went out and was answered with the Login page, so the refusal's own
                 # "nothing was sent" clause is untrue here: it only covers the re-send.
@@ -790,7 +793,9 @@ class BGW320Client:
         self.authenticated_requests += 1
         return response
 
-    def _post_form_once(self, nonce_page: str, post_path: str, fields: Mapping[str, str]) -> HttpResponse:
+    def _post_form_once(
+        self, nonce_page: str, post_path: str, fields: Mapping[str, str], submit: tuple[str, str] | None = None
+    ) -> HttpResponse:
         from .fetch import is_page_not_found
         from .parser import looks_like_login, parse_page
 
@@ -816,6 +821,8 @@ class BGW320Client:
             raise NoncePageRefusedError(f"{nonce_page}: the page read for the write nonce has no form controls")
         # A page can host several forms, each with its own nonce (home.ha's Restart forms carry two).
         nonces = _select_write_nonces(current.body, nonce_page, post_path, fields)
+        if submit is not None:
+            _require_submit_on_page(current.body, nonce_page, post_path, submit)
         pairs = [(k, v) for k, v in fields.items() if k != "nonce"] + [("nonce", n) for n in nonces]
         referer = f"{self._origin}/cgi-bin/{nonce_page}.ha"
         return self._request(
@@ -1212,28 +1219,78 @@ def _strip_non_markup(html: str) -> str:
     return "".join(kept)
 
 
-def _scan_forms(html: str) -> list[tuple[str, list[str], list[str]]]:
-    """(action, nonce values, input/button names, both in document order) of every form, in one
-    pass. A form ends at its closing tag or at the end of the document. A <form> start tag met while
-    a form is open is ignored, as browsers do (HTML5 form-element pointer): home.ha's Wi-Fi Restart
-    forms open a second form inside themselves, and the browser posts the button and both nonces
-    to the outer form's action."""
-    forms: list[tuple[str, list[str], list[str]]] = []
-    current: tuple[str, list[str], list[str]] | None = None
-    # Comments and script/style text are not markup to a browser: a commented-out <form> opener must
-    # not open a form that captures the next real form's controls and nonce.
-    for match in _TAG.finditer(_strip_non_markup(html)):
-        closing, tag, raw = match.group(1), match.group(2).lower(), match.group(3)
+_TAG_START = re.compile(r"<(/?)([a-zA-Z][a-zA-Z0-9]*)")
+_RCDATA = ("textarea", "title")
+
+
+def _iter_tags(html: str):
+    """(closing, lowercased name, raw attribute text) of every tag, read the way a browser tokenizes:
+    a quoted attribute value may hold ``<`` and ``>`` without ending the tag, and the text of a
+    <textarea> or <title> is never markup. One left-to-right pass: every search starts where the
+    previous one ended, so hostile input stays linear. A tag whose quote or ``>`` never comes ends
+    the scan (the rest of the document is not markup)."""
+    lower = html.lower()
+    length = len(html)
+    index = 0
+    while True:
+        match = _TAG_START.search(html, index)
+        if match is None:
+            return
+        cursor = match.end()
+        quote: str | None = None
+        previous = ""
+        while cursor < length:
+            char = html[cursor]
+            if quote is not None:
+                if char == quote:
+                    quote = None
+                    previous = char
+            elif char in "\"'" and previous == "=":
+                quote = char
+            elif char == ">" or char == "<":
+                break
+            elif not char.isspace():
+                previous = char
+            cursor += 1
+        if cursor >= length:
+            return
+        if html[cursor] == "<":  # an unterminated tag is text; scan on from the next "<"
+            index = cursor
+            continue
+        closing, name = match.group(1), match.group(2).lower()
+        yield closing, name, html[match.end() : cursor]
+        index = cursor + 1
+        if not closing and name in _RCDATA:
+            close = lower.find("</" + name, index)
+            if close < 0:
+                return
+            index = close
+
+
+def _scan_forms(html: str) -> list[tuple[str, list[str], list[str], dict[str, str]]]:
+    """(action, nonce values, control names, submit name -> value) of every form, in one pass, names
+    and nonces in document order. A form ends at its closing tag or at the end of the document. A
+    <form> start tag met while a form is open is ignored, as browsers do (HTML5 form-element
+    pointer): home.ha's Wi-Fi Restart forms open a second form inside themselves, and the browser
+    posts the button and both nonces to the outer form's action. Comments, script/style text,
+    <textarea>/<title> text and quoted attribute values are not markup (see _iter_tags)."""
+    forms: list[tuple[str, list[str], list[str], dict[str, str]]] = []
+    current: tuple[str, list[str], list[str], dict[str, str]] | None = None
+    for closing, tag, raw in _iter_tags(_strip_non_markup(html)):
         if tag == "form":
             if closing:
                 current = None
             elif current is None:
-                current = (_attributes(raw).get("action", "").strip(), [], [])
+                current = (_attributes(raw).get("action", "").strip(), [], [], {})
                 forms.append(current)
         elif tag in ("input", "button", "select", "textarea") and not closing and current is not None:
-            name = _attributes(raw).get("name")
+            attributes = _attributes(raw)
+            name = attributes.get("name")
             if name:
                 current[2].append(name)
+                kind = (attributes.get("type") or ("submit" if tag == "button" else "")).lower()
+                if kind in ("submit", "image") and "disabled" not in attributes:
+                    current[3].setdefault(name, attributes.get("value") or "")
             if tag == "input":
                 nonce = _nonce_value(raw)
                 if nonce is not None:
@@ -1241,11 +1298,28 @@ def _scan_forms(html: str) -> list[tuple[str, list[str], list[str]]]:
     return forms
 
 
+def _require_submit_on_page(html: str, nonce_page: str, post_path: str, submit: tuple[str, str]) -> None:
+    """The button a write was planned with must still be an enabled submit, with the same value, in a
+    form posting to ``post_path`` on the page the nonce is read from (the same response). Otherwise
+    the page changed between the planning read and this one, and nothing is sent."""
+    name, value = submit
+    target = form_target(post_path)
+    forms = _scan_forms(html)
+    if not forms:  # a form-less page: nothing to tie the button to
+        return
+    owners = [form for form in forms if form_target(form[0]) == target]
+    if not any(form[3].get(name) == value for form in owners):
+        raise NoncePageRefusedError(
+            f"{nonce_page}: the '{name}' button ({value!r}) is not on the page read for the write nonce "
+            "(the page changed since it was planned); nothing was sent"
+        )
+
+
 def form_nonces(html: str, action_path: str) -> list[str]:
     """Nonce values (in document order) of the form whose action equals ``action_path``
     (e.g. ``/cgi-bin/wrestart.ha?1``); empty when no such form exists. Only that form's own inputs
     count, whatever order their attributes come in."""
-    for action, nonces, _names in _scan_forms(html):
+    for action, nonces, _names, _submits in _scan_forms(html):
         if action == action_path:
             return nonces
     return []
@@ -1272,8 +1346,9 @@ def _select_write_nonces(html: str, nonce_page: str, post_path: str, fields: Map
     # A posted control that only another form holds belongs to that form (a browser would post it
     # there): the target's own form nonce is not its nonce.
     posted_controls = [name for name in fields if name not in ("nonce", "hashpassword")]
-    foreign = [form for form in forms if form_target(form[0]) != target and any(n in form[2] for n in posted_controls)]
-    if matching and foreign and not any(any(n in form[2] for n in posted_controls) for form in matching):
+    posted_set = set(posted_controls)
+    foreign = [form for form in forms if form_target(form[0]) != target and not posted_set.isdisjoint(form[2])]
+    if matching and foreign and all(posted_set.isdisjoint(form[2]) for form in matching):
         raise NoncePageRefusedError(
             f"{nonce_page}: {', '.join(posted_controls)} belongs to the form posting to {foreign[0][0]!r}, not to "
             f"/cgi-bin/{post_path}; another form's nonce is never sent; nothing was sent"
@@ -1316,9 +1391,9 @@ def _select_write_nonces(html: str, nonce_page: str, post_path: str, fields: Map
 
 def extract_nonce(html: str) -> str | None:
     """The first nonce input on the page, attributes in either order."""
-    for match in _TAG.finditer(html):
-        if not match.group(1) and match.group(2).lower() == "input":
-            nonce = _nonce_value(match.group(3))
+    for closing, tag, raw in _iter_tags(_strip_non_markup(html)):
+        if not closing and tag == "input":
+            nonce = _nonce_value(raw)
             if nonce is not None:
                 return nonce
     return None
@@ -1331,7 +1406,8 @@ def _normalized_origin(parts) -> tuple[str, str, int | None]:
         port = parts.port
     except ValueError:
         return (scheme, "\0invalid", None)
-    return (scheme, (parts.hostname or "").lower(), port or {"http": 80, "https": 443}.get(scheme))
+    default = {"http": 80, "https": 443}.get(scheme)
+    return (scheme, (parts.hostname or "").lower(), port if port is not None else default)
 
 
 def _is_login_url(url: str) -> bool:

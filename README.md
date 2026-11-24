@@ -418,9 +418,10 @@ shows what the CLI discovered on a page that changed.
 
 ## Writing to the router
 
-Read commands only send GET requests plus the login POST. Every write is dry-run by default and needs
-`--commit --confirm TOKEN`; the token is derived from the target page (`WCONFIG-UNIFIED` for Wi-Fi,
-`RESTORE` for restore, `DIAG` for diagnostics) and the dry run prints it:
+Read commands only send GET requests plus the login POST. Every write is dry-run by default and is
+sent with `--commit`. `set`, `submit`, `restore` and the dangerous or connection-dropping actions also
+need `--confirm TOKEN`; the token is derived from the target page (`WCONFIG-UNIFIED` for Wi-Fi,
+`RESTORE` for restore) and the dry run prints it. Other actions and `diagnostics` need `--commit` only:
 
 ```bash
 bgwcli set wconfig maxclients=80                                  # dry run: plan + token

@@ -73,9 +73,8 @@ def test_a_redirect_that_is_not_the_restarting_page_is_never_requested_and_leave
         lambda r: html("<title>Not Found</title>", 404),
         lambda r: html("", 302, {"location": "/cgi-bin/login.ha"}),
         lambda r: html("", 302, {"location": "/cgi-bin/home.ha"}),
-        lambda r: html(POOL_FULL),
     ],
-    ids=["404", "redirect-to-login", "redirect-elsewhere", "pool-full"],
+    ids=["404", "redirect-to-login", "redirect-elsewhere"],
 )
 def test_a_restarting_page_answer_that_is_not_the_gateway_going_down_is_unconfirmed_with_evidence(
     tmp_env, clock, monkeypatch, capsys, answer

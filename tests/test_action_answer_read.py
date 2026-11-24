@@ -76,7 +76,8 @@ def test_dropping_action_reports_committed_without_reading_the_answer(
 ):
     def unreadable():
         if answer_kind == "connection":
-            raise RouterConnectionError("connection reset")
+            # What the transport raises when the gateway resets the connection (wrapped by the client).
+            raise ConnectionResetError("connection reset")
         return html("<title>Unavailable</title>", 503)
 
     action = get_action(name)

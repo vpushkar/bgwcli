@@ -21,6 +21,7 @@ from decimal import Decimal, DecimalException
 from pathlib import Path
 from time import sleep
 from typing import Any
+from urllib.parse import urlsplit
 
 from . import __version__, helpdoc
 from . import format as fmt
@@ -641,7 +642,8 @@ def _run_action(client: Any, command: Command) -> None:
         command.output(fmt.operation_output(result), lambda: fmt.print_operation(result))
         return
 
-    if command.confirm != action.confirm_token and (action.requires_confirmation or command.confirm):
+    # `--confirm=` (an empty value, e.g. an unset variable in a script) is a token given, and the wrong one.
+    if command.confirm != action.confirm_token and (action.requires_confirmation or command.confirm is not None):
         if action.requires_confirmation:
             raise UsageError(
                 f"Refusing to run action '{action.name}'. Re-run with --commit --confirm {action.confirm_token}."
@@ -663,11 +665,15 @@ def _run_action(client: Any, command: Command) -> None:
         # A submit plan is never blocked (dangerous pages are allowed for explicit buttons) and a
         # missing button raises, so the plan is always postable.
         plan = build_submit_plan(
-            action.page, page_result.parsed, action.form_button, [], command.options.include_secrets
+            action.page, page_result.parsed, action.form_button, [], command.options.include_secrets,
+            exact_name=True,
         )
+        # The button and its value are checked again on the page the nonce is read from, so a page
+        # that changed between the two reads (the toggle flipped) posts nothing.
         outcome = _post_and_confirm(
             client, action.page, plan.raw_payload, read_redirect=not action.drops_web_server, evidence=sent,
             follow_warning=action.page.startswith("wconfig"),
+            submit=(action.form_button, plan.raw_payload[action.form_button]),
         )
     elif action.post_path:
         post_path = action.post_path
@@ -709,9 +715,14 @@ def _run_action(client: Any, command: Command) -> None:
                 "so its answer page was not read."
             ),
         )
-        if action.follow_redirect and status_code in _GET_REDIRECT_STATUSES:
+        if action.follow_redirect:
             posted_path = f"/cgi-bin/{action.post_path or action.page + '.ha'}"
-            failed_exit, text, read = _request_redirect_handoff(client, location, posted_path)
+            failed_exit, text, read = (
+                _request_redirect_handoff(client, location, posted_path)
+                if status_code in _GET_REDIRECT_STATUSES
+                else (NO_ANSWER, f"the restart POST was answered HTTP {status_code}, not with a redirect to the "
+                      "gateway's restarting page; the restart is unconfirmed; verify the gateway state", False)
+            )
             if failed_exit is None:
                 result = replace(result, result=text)
             else:
@@ -731,32 +742,62 @@ _GET_REDIRECT_STATUSES = (301, 302, 303)
 _RESTART_HANDOFF_PATH = "/cgi-bin/restarting.ha"
 
 
+def _gateway_went_down(exc: BaseException) -> bool:
+    """True when a hand-off GET failed because the gateway reset, refused or cut the connection (it is
+    going down), as opposed to a failure that says nothing about the gateway (name resolution, TLS,
+    a connect timeout)."""
+    import urllib.error
+
+    from .client import ResponseEndedEarly, ResponseReadTimeout
+
+    down = (ConnectionResetError, ConnectionRefusedError, ConnectionAbortedError, BrokenPipeError,
+            ResponseEndedEarly, ResponseReadTimeout)
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, down):
+            return True
+        if isinstance(current, urllib.error.URLError) and isinstance(current.reason, BaseException):
+            current = current.reason
+            continue
+        current = current.__cause__ or current.__context__
+    return False
+
+
 def _request_redirect_handoff(
     client: Any, location: str | None, posted_path: str
 ) -> tuple[int | None, str, bool]:
     """Load the gateway's restarting page the restart POST redirected to, as the browser does (the
     reboot may belong to that hand-off). Returns (exit code or None, text, answer read).
 
-    Only a same-origin redirect to /cgi-bin/restarting.ha is the hand-off; any other location
-    (including none or a malformed one) is never requested and leaves the restart unconfirmed
-    (exit 2). On restarting.ha a dropped connection, a 2xx or a 5xx is the gateway accepting the
-    request and going down (None: requested, reboot not verified). A rejection banner is a negative
-    answer (exit 1); a Login page, 401/403, another 3xx or 4xx, a full session pool or an
-    unreadable answer leaves the restart unconfirmed (exit 2). Every failure keeps the POST's
-    write evidence (the caller's result carries it)."""
+    Only a same-origin 301/302/303 to exactly /cgi-bin/restarting.ha is the hand-off; any other
+    location (none, malformed, another page or port, a trailing slash) is never requested and leaves
+    the restart unconfirmed (exit 2). On restarting.ha a 2xx or 5xx answer, or the gateway resetting,
+    refusing or cutting the connection, is the gateway accepting the request and going down (None:
+    requested, reboot not verified). A rejection banner is a negative answer (exit 1). A Login page
+    or 401/403 forgets the session; a full session pool raises with the write evidence (the
+    coordinator records the cooldown). Anything else - another 3xx or 4xx, Page not found, "No
+    changes detected", a page past the parser's bounds, a request that failed before the gateway
+    answered - leaves the restart unconfirmed (exit 2). The caller's result keeps the POST's write
+    evidence."""
+    from .fetch import is_page_not_found
+
     unverified = (
         "The reboot itself is not verified; 'Time Since Last Reboot' on sysinfo confirms it once the gateway is back."
     )
     unconfirmed = "the restart is unconfirmed; verify the gateway state"
     try:
         response = client.get_redirect_target(location or "", posted_path, _RESTART_HANDOFF_PATH)
-    except (RouterConnectionError, OSError) as exc:
-        return None, (
-            f"Restart requested: the gateway redirected to {location} and dropped the connection while "
-            f"serving it ({exc}), as it does when it goes down for the reboot. {unverified}"
-        ), False
-    except BgwError as exc:
-        return NO_ANSWER, f"the restart hand-off page {location} could not be read ({exc}); {unconfirmed}", False
+    except RouterSessionPoolFullError:
+        raise
+    except (BgwError, OSError) as exc:
+        if _gateway_went_down(exc):
+            return None, (
+                f"Restart requested: the gateway redirected to {location} and then reset or refused the "
+                f"connection ({exc}), as it does when it goes down for the reboot. {unverified}"
+            ), False
+        return NO_ANSWER, f"the restart hand-off page {location} could not be requested ({exc}); {unconfirmed}", False
     if response is None:
         return NO_ANSWER, (
             f"the restart POST was answered with a redirect to {location or '(no location)'!s}, not to the "
@@ -766,20 +807,35 @@ def _request_redirect_handoff(
     status = response.status_code
     if router_sessions_full(body):
         client.clear_session()
-        return NO_ANSWER, (
-            f"the restart hand-off page {location} answered that all web sessions are in use; {unconfirmed}"
-        ), True
+        error = session_pool_full_error()
+        error.args = (f"{error} The restart POST was sent once and answered HTTP 302; {unconfirmed}.",)
+        error.write_attempted = True
+        error.write_evidence = {**(getattr(error, "write_evidence", None) or {}), "writeResponseReceived": True}
+        raise error
     redirect = _location(response.headers) if 300 <= status < 400 else None
     if status in (401, 403) or looks_like_login(body) or (redirect and "login.ha" in redirect.lower()):
+        client.clear_session()
         return NO_ANSWER, (
             f"the restart hand-off page {location} answered with the login page or HTTP {status}: the "
             f"session was lost and {unconfirmed}"
         ), True
     if 300 <= status < 500:
         return NO_ANSWER, f"the restart hand-off page {location} answered HTTP {status}; {unconfirmed}", True
-    banner = router_error_banner(body)
+    try:
+        parsed = parse_page("restarting", body)
+        banner = router_error_banner(body)
+    except BgwError as exc:
+        return NO_ANSWER, f"the restart hand-off page {location} could not be read ({exc}); {unconfirmed}", True
+    if parsed.truncated:
+        return NO_ANSWER, (
+            f"the restart hand-off page {location} is larger than the parser's bounds; {unconfirmed}"
+        ), True
     if banner and not no_changes_text(banner):
         return NEGATIVE_ANSWER, f"{WRITE_REJECTED_PREFIX}{banner}", True
+    if (banner and no_changes_text(banner)) or no_changes_notice(body):
+        return NO_ANSWER, f"the gateway answered the restart with \"{NO_CHANGES_TEXT}\"; {unconfirmed}", True
+    if is_page_not_found(parsed):
+        return NO_ANSWER, f"the restart hand-off page {location} is a Page-not-found page; {unconfirmed}", True
     return None, (
         f"Restart requested: the gateway redirected to {location} and answered it with HTTP {status}. {unverified}"
     ), False
@@ -790,7 +846,7 @@ def _run_diagnostic(client: Any, command: Command) -> None:
     if len(command.args) < 2 or not command.args[1]:
         raise UsageError(f"Missing target for diagnostics {kind}.")
     target = command.args[1]
-    if command.commit and command.confirm and command.confirm != DIAG_CONFIRM_TOKEN:
+    if command.commit and command.confirm is not None and command.confirm != DIAG_CONFIRM_TOKEN:
         raise UsageError(
             f"Refusing to run diagnostic '{kind}': --confirm {command.confirm} is not its token. "
             f"Re-run with --commit alone (or --confirm {DIAG_CONFIRM_TOKEN})."
@@ -1222,12 +1278,17 @@ def _post_observed(
 
 
 def _post_save(
-    client: Any, page: str, payload: dict[str, str], evidence: PostWriteEvidence | None = None
+    client: Any, page: str, payload: dict[str, str], evidence: PostWriteEvidence | None = None,
+    submit: tuple[str, str] | None = None,
 ) -> Any:
-    """`_post_observed` for a page's own form (authentication and the nonce read happen first)."""
-    return _post_observed(
-        client, page, lambda: client.post_cgi_page(page, payload), describe_raised=True, evidence=evidence
-    )
+    """`_post_observed` for a page's own form (authentication and the nonce read happen first).
+    `submit` (name, value): the button must still be in the target form of the page the nonce is
+    read from, or nothing is sent."""
+    if submit is None:
+        post = lambda: client.post_cgi_page(page, payload)  # noqa: E731
+    else:
+        post = lambda: client.post_cgi_page(page, payload, submit=submit)  # noqa: E731
+    return _post_observed(client, page, post, describe_raised=True, evidence=evidence)
 
 
 def _add_write_attempts(exc: BaseException, attempts: int | None) -> None:
@@ -1277,7 +1338,8 @@ def _confirm_response(
     status_code, location = response.status_code, _location(response.headers)
     # `follow_warning=False` (actions not on a Wi-Fi page): their confirmation token never authorizes the
     # Wi-Fi Warning's Continue POST to wconfig.ha.
-    if follow_warning and is_confirmation_redirect(location):
+    origin = client.session_identity() if callable(getattr(client, "session_identity", None)) else None
+    if follow_warning and is_confirmation_redirect(location, status_code, origin):
         step = _with_attempts(
             confirm_warning_page(client, location, status_code=status_code, page=page, write_attempts=attempts),
             attempts,
@@ -1348,6 +1410,10 @@ def _answer_banner(
     location = _location(response.headers)
     sent = PostWriteEvidence(attempted=True, response_received=True, attempts=attempts)
     try:
+        try:
+            urlsplit(location or "")
+        except ValueError as exc:  # e.g. an unclosed IPv6 bracket: the answer cannot be located
+            raise RouterResponseError(f"malformed redirect Location {location!r} ({exc})") from exc
         target = redirect_answer_page(client, location)
         if target is None:
             return None
@@ -1451,6 +1517,7 @@ def _write_failure_step(page: str, exc: Exception, evidence: PostWriteEvidence) 
 def _post_and_confirm(
     client: Any, page: str, payload: dict[str, str], *, read_redirect: bool = True,
     evidence: PostWriteEvidence | None = None, follow_warning: bool = True,
+    submit: tuple[str, str] | None = None,
 ) -> tuple[int, str | None] | RestoreStepResult:
     """`_confirm_save` for callers that only need an applied write (actions), which have no plan to
     verify against. Returns (status_code, location) for an applied write. Every other outcome is
@@ -1459,7 +1526,7 @@ def _post_and_confirm(
     here) means the router state is unknown, and an explicit rejection banner keeps its
     WRITE_REJECTED_PREFIX message (`_report_failed_write` maps it to exit 1). Pool-full and
     session-wide authentication failures raise."""
-    posted = _post_save(client, page, payload, evidence)
+    posted = _post_save(client, page, payload, evidence, submit)
     if isinstance(posted, RestoreStepResult):
         return posted
     status_code, location, step = _confirm_response(
@@ -3049,7 +3116,7 @@ Global options:
   --wait-for-session        Wait/retry when the router says all web sessions are in use
   --session-wait-timeout <seconds>   Wait timeout in seconds. Default: 120
   --session-wait-interval <seconds>  Wait poll interval in seconds. Default: 10
-  --confirm <token>         Required token for every committed operation
+  --confirm <token>         Confirmation token: set/submit/restore and dangerous or connection-dropping actions
   --strict-tls              Enforce TLS validation. Default router access does not verify its self-signed identity.
   Global options are accepted before or after the command name, except --version, which must come before
   the command. Per-command options: bgwcli help <command> or bgwcli <command> -h.
