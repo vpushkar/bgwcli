@@ -174,12 +174,15 @@ def test_clear_posts_only_its_button_and_nonce_whatever_else_the_page_holds(tmp_
 
 
 def test_restart_from_resets_posts_only_the_live_restart_button(tmp_env, clock, monkeypatch, capsys):
-    handler = _after_post(RESET_FORM, lambda r: html("", 302, {"location": "/cgi-bin/restarting.ha"}))
+    # The rendered value differs from the catalog's {"Restart": "Restart"}: only the live one is posted.
+    page = RESET_FORM.replace('name="Restart" value="Restart"', 'name="Restart" value="Restart Gateway"')
+    assert page != RESET_FORM
+    handler = _after_post(page, lambda r: html("", 302, {"location": "/cgi-bin/restarting.ha"}))
     code, _, posts, gets_after, _, _ = _cli(
         monkeypatch, capsys, ["action", "restart-from-resets", "--commit", "--confirm", "RESTART"], handler
     )
     assert code == 0 and gets_after == ["/cgi-bin/restarting.ha"]
-    assert parse_qs(posts[0].body.decode()) == {"Restart": ["Restart"], "nonce": ["abc123"]}
+    assert parse_qs(posts[0].body.decode()) == {"Restart": ["Restart Gateway"], "nonce": ["abc123"]}
 
 
 def test_generic_submit_still_posts_controls_attached_to_the_form_by_id(tmp_env, clock, monkeypatch, capsys):
@@ -237,11 +240,16 @@ def test_the_button_is_checked_again_on_the_nonce_read_after_a_login_retry(tmp_e
             state["posts"] += 1
             return html(login)  # the first POST is answered with the Login page
         state["reads"] += 1
+        # The reread keeps an ordinary control, so only the button check (not "no form controls")
+        # can refuse the re-send.
         return html(first if state["posts"] == 0 else '<form action="/cgi-bin/devices.ha">'
-                    '<input type="hidden" name="nonce" value="abc123" /></form>')
+                    '<input type="hidden" name="nonce" value="abc123" />'
+                    '<input type="text" name="mode" value="one" /></form>')
 
-    _cli(monkeypatch, capsys, ["action", "clear-device-list", "--commit"], handler)
-    assert state["posts"] == 1
+    code, out, _, _, _, captured = _cli(monkeypatch, capsys, ["action", "clear-device-list", "--commit"], handler)
+    assert state["posts"] == 1 and code != 0
+    reported = json.dumps(out) + captured.err
+    assert "the 'Clear' button" in reported and "re-send was refused" in reported
 
 
 def test_packet_filter_enable_needs_its_token_again():
