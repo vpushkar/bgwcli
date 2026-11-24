@@ -346,7 +346,7 @@
   {
     "name": "find-best-channel-5",
     "page": "wconfig",
-    "description": "Run the 5 GHz 'Find Best Channel' scan on Advanced Wi-Fi (5 GHz clients drop briefly).",
+    "description": "Run the 5 GHz 'Find Best Channel' scan on Advanced Wi-Fi (takes about 20 s; may switch the 5 GHz channel).",
     "confirmToken": "CHANSCAN",
     "payload": {
       "chanscan5": "Find Best Channel"

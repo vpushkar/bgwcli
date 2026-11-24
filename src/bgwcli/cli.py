@@ -726,6 +726,8 @@ def _run_action(client: Any, command: Command) -> None:
         _report_failed_write(command, action_committed(action, None, None), outcome)
         return
     status_code, location = outcome
+    if action.handoff_path and _finish_handoff(command, client, action, status_code, location, resent):
+        return
     result = replace(action_committed(action, status_code, location), write_attempts=resent)
     if action.drops_web_server:
         result = replace(
@@ -855,6 +857,85 @@ def _finish_restart(command: Command, client: Any, action: Any, response: Any, s
         command.exit_code = failed_exit
         result = replace(result, committed=False, outcome="failed", answer_read=read, warning=text, result=None)
     command.output(fmt.operation_output(result), lambda: fmt.print_operation(result))
+
+
+SCAN_UNCERTAIN = "scan may be in progress; check the 5 GHz channel in a minute"
+
+
+def _finish_handoff(
+    command: Command, client: Any, action: Any, status_code: int, location: str | None, attempts: int | None
+) -> bool:
+    """Request the page an accepted write handed off to (`action.handoff_path`), once, as a browser
+    does: the channel scan runs only when wrestart.ha is requested. Returns False, sending nothing, when
+    the answer is not a 301/302/303 to that path on the gateway (the caller then reports the POST's
+    own answer as before); a redirect to another origin is reported unconfirmed (exit 2), never
+    requested. The hand-off counts as done only when it redirects back to the action's own page.
+    A timeout or a dropped connection there leaves the scan possibly running (exit 2)."""
+    posted_path = f"/cgi-bin/{action.page}.ha"
+    kind, target = resolve_gateway_redirect(_gateway_origin(client), posted_path, location)
+    base = replace(
+        action_committed(action, status_code, location), write_attempts=attempts,
+        write_attempted=True, write_response_received=True,
+    )
+
+    def unconfirmed(text: str, *, read: bool, exit_code: int = NO_ANSWER) -> bool:
+        command.exit_code = exit_code
+        result = replace(base, committed=False, outcome="failed", answer_read=read, warning=text, result=None)
+        command.output(fmt.operation_output(result), lambda: fmt.print_operation(result))
+        return True
+
+    if status_code not in _GET_REDIRECT_STATUSES or kind in ("none", "malformed"):
+        return False
+    if kind == "other-origin":
+        return unconfirmed(
+            f"the {action.name} POST redirected to another origin ({location}), which is never requested; "
+            f"{_RESTART_UNCONFIRMED}", read=False,
+        )
+    if target.path != action.handoff_path:
+        return False
+    try:
+        response = client.get_redirect_target(location or "", posted_path, action.handoff_path)
+    except RouterSessionPoolFullError:
+        raise
+    except (BgwError, OSError) as exc:
+        if _timed_out(exc) or _gateway_went_down(exc):
+            return unconfirmed(f"the hand-off page {location} did not answer ({exc}); {SCAN_UNCERTAIN}", read=False)
+        return unconfirmed(f"the hand-off page {location} could not be requested ({exc}); {SCAN_UNCERTAIN}",
+                           read=False)
+    if response is None:
+        return unconfirmed(f"the hand-off page {location} was not requested; {_RESTART_UNCONFIRMED}", read=False)
+    status = response.status_code
+    body = response.body or ""
+    if router_sessions_full(body):
+        client.clear_session()
+        raise session_pool_full_error()
+    back_kind, back = (resolve_gateway_redirect(_gateway_origin(client), action.handoff_path,
+                                                _location(response.headers))
+                       if 300 <= status < 400 else ("none", None))
+    login_redirect = back_kind == "ok" and back.path.lower() == "/cgi-bin/login.ha"
+    if login_redirect or status in (401, 403) or looks_like_login(body):
+        client.clear_session()
+        return unconfirmed(
+            f"the hand-off page {location} answered with the login page or HTTP {status}: the session was "
+            f"lost; {SCAN_UNCERTAIN}", read=True,
+        )
+    if back_kind == "ok" and back.path == posted_path:
+        result = replace(
+            base, answer_read=True,
+            result=(
+                f"Channel scan requested: the gateway ran {location} and returned to {action.page}.ha "
+                f"(HTTP {status}). The channel can stay the same when it is already the best one."
+            ),
+        )
+        command.output(fmt.operation_output(result), lambda: fmt.print_operation(result))
+        return True
+    banner = router_error_banner(body) if status == 200 else None
+    if banner and not no_changes_text(banner):
+        return unconfirmed(f"{WRITE_REJECTED_PREFIX}{banner}", read=True, exit_code=NEGATIVE_ANSWER)
+    return unconfirmed(
+        f"the hand-off page {location} answered HTTP {status}, not with a redirect back to "
+        f"{action.page}.ha; {SCAN_UNCERTAIN}", read=True,
+    )
 
 
 def _inline_restart_answer(page: str, body: str) -> tuple[int | None, str, bool]:

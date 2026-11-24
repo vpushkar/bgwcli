@@ -43,6 +43,11 @@ class RouterAction:
     # A toggle's other button: when only it is on the page, the gateway is already in the requested
     # state (reported as unchanged, nothing posted).
     opposite_button: str | None = field(default=None, metadata={"serialize": False})
+    # The page the POST hands off to and that a browser then requests (same gateway only): the
+    # chanscan5 POST answers 302 -> /cgi-bin/wrestart.ha?22 and the scan runs only when that page is
+    # requested (observed live on fw 6.35.8, 2026-11-24). Only an answer that redirects there leads to
+    # the hand-off.
+    handoff_path: str | None = field(default=None, metadata={"serialize": False})
 
     @property
     def requires_confirmation(self) -> bool:
@@ -332,13 +337,17 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
     RouterAction(
         name="find-best-channel-5",
         page="wconfig",
-        description="Run the 5 GHz 'Find Best Channel' scan on Advanced Wi-Fi (5 GHz clients drop briefly).",
+        description=(
+            "Run the 5 GHz 'Find Best Channel' scan on Advanced Wi-Fi "
+            "(takes about 20 s; may switch the 5 GHz channel)."
+        ),
         confirm_token="CHANSCAN",
         payload={"chanscan5": "Find Best Channel"},
         dangerous=False,
         aliases=("chanscan5", "find-best-channel", "scan-5ghz-channel"),
         drops_web_server=True,
         form_button="chanscan5",
+        handoff_path="/cgi-bin/wrestart.ha",
     ),
 )
 

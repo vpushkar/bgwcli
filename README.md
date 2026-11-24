@@ -466,7 +466,7 @@ Every action, its token and the page it starts from (`bgwcli action -h` prints t
 | `restart-wifi-2.4` | `RESTART-WIFI` | `home` | guarded | Restart the 2.4 GHz Wi-Fi radio (home.ha Restart button; clients on 2.4 GHz drop briefly). (also `restart-wifi-24`, `restart-2.4ghz`, `restart-wifi-2-4`) |
 | `restart-wifi-5` | `RESTART-WIFI` | `home` | guarded | Restart the 5 GHz Wi-Fi radio (home.ha Restart button; clients on 5 GHz drop briefly). (also `restart-wifi-5ghz`, `restart-5ghz`) |
 | `restart-broadband` | `RESTART-BROADBAND` | `home` | dangerous | Restart the broadband connection (home.ha Restart button; drops WAN for a while). (also `restart-wan`) |
-| `find-best-channel-5` | `CHANSCAN` | `wconfig` | guarded | Run the 5 GHz 'Find Best Channel' scan on Advanced Wi-Fi (5 GHz clients drop briefly). (also `chanscan5`, `find-best-channel`, `scan-5ghz-channel`) |
+| `find-best-channel-5` | `CHANSCAN` | `wconfig` | guarded | Run the 5 GHz 'Find Best Channel' scan on Advanced Wi-Fi (takes about 20 s; may switch the 5 GHz channel). (also `chanscan5`, `find-best-channel`, `scan-5ghz-channel`) |
 <!-- actions:end -->
 
 <!-- write-rules:start -->

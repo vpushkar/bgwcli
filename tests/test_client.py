@@ -977,7 +977,7 @@ def test_slow_pages_get_a_longer_default_timeout_unless_the_timeout_was_set_expl
     15 s default made them fail every time. Per-page floors apply only to the implicit default."""
     from bgwcli.client import SLOW_PAGE_TIMEOUT_MS
 
-    assert SLOW_PAGE_TIMEOUT_MS == {"home": 45000, "lanstatistics": 45000, "devices": 45000}
+    assert SLOW_PAGE_TIMEOUT_MS == {"home": 45000, "lanstatistics": 45000, "devices": 45000, "wrestart": 45000}
     seen = {}
 
     def handler(req, n):

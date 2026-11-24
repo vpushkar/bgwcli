@@ -78,7 +78,6 @@ def test_readme_states_the_unit_start_timeout_the_unit_carries():
 
 def test_readme_lists_the_client_radio_actions_with_the_actions_that_skip_the_answer_read():
     readme = (ROOT / "docs" / "REFERENCE.md").read_text()
-    assert (
-        "the actions that take down the client's own radio (`restart-wifi-2.4`, `restart-wifi-5` and "
-        "`find-best-channel-5`)"
-    ) in readme
+    assert "the actions that take down the client's own radio (`restart-wifi-2.4` and `restart-wifi-5`)" in readme
+    # The channel scan is not one of them: it loads its wrestart.ha hand-off (live fw 6.35.8, 2026-11-24).
+    assert "`find-best-channel-5` instead loads the hand-off page its POST redirects to" in readme

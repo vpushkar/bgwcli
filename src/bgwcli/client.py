@@ -478,12 +478,13 @@ class RouterClientOptions:
 
 # Pages that legitimately take longer than the 15 s default on this gateway (measured live
 # 2026-09-20: home.ha 17-18 s, lanstatistics.ha 23-29 s; 2026-11-24: devices.ha 5 s when idle but
-# over 15 s right after a Wi-Fi change or a Clear and Rescan). Used as a floor for the implicit default
+# over 15 s right after a Wi-Fi change or a Clear and Rescan; wrestart.ha?22, the channel-scan hand-off,
+# 20-21 s). Used as a floor for the implicit default
 # only; an explicit --timeout / BGW_TIMEOUT_MS is always honored as-is.
 # Protected page read to tell a live session from a dead one: the login handshake verifies a login
 # that did not answer with the usual 302 -> home.ha with it, and `check` probes the held session.
 SESSION_PROBE_PAGE = "services"
-SLOW_PAGE_TIMEOUT_MS: dict[str, int] = {"home": 45000, "lanstatistics": 45000, "devices": 45000}
+SLOW_PAGE_TIMEOUT_MS: dict[str, int] = {"home": 45000, "lanstatistics": 45000, "devices": 45000, "wrestart": 45000}
 _CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]")
 _CGI_PAGE_IN_PATH = re.compile(r"^/cgi-bin/([a-z0-9_]+)\.ha", re.IGNORECASE)
 
