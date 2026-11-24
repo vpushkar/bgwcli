@@ -17,7 +17,7 @@ import sys
 import textwrap
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, DecimalException
 from pathlib import Path
 from time import sleep
@@ -59,6 +59,7 @@ from .config import (
     resolve_access_code,
     seconds_to_ms,
 )
+from .congestion import congestion_time, parse_congestion
 from .devices import fetch_device_list
 from .diagnostics import (
     DIAG_CONFIRM_TOKEN,
@@ -735,6 +736,7 @@ def _run_action(client: Any, command: Command) -> None:
         _report_fetch_failure(command, page_result)
         return
     sent = PostWriteEvidence()
+    answer_bodies: list[str] = []
     if action.button_only:
         outcome = _post_live_button(client, command, action, page_result.parsed, sent)
         if outcome is None:  # already in the requested state: reported, nothing posted
@@ -754,10 +756,12 @@ def _run_action(client: Any, command: Command) -> None:
         )
         # The button and its value are checked again on the page the nonce is read from, so a page
         # that changed between the two reads (the toggle flipped) posts nothing.
+        answer_started = datetime.now()
         outcome = _post_and_confirm(
             client, action.page, plan.raw_payload, read_redirect=not action.drops_web_server, evidence=sent,
             follow_warning=action.page.startswith("wconfig"),
             submit=(action.form_button, plan.raw_payload[action.form_button]),
+            seen=answer_bodies if action.answer_kind else None,
         )
     elif action.post_path:
         post_path = action.post_path
@@ -771,12 +775,9 @@ def _run_action(client: Any, command: Command) -> None:
             describe_raised=True, evidence=sent,
         )
     resent = _resent_attempts(sent)
-    answer_bodies: list[str] = []
     if not isinstance(outcome, RestoreStepResult | tuple):
         # The gateway's notification decides the action like every other write path: a rejection
         # banner is a structured rejection (exit 1); "No changes detected" is unchanged (exit 0).
-        if action.shows_answer and outcome.status_code == 200:
-            answer_bodies.append(outcome.body or "")
         outcome = _answer_step(
             client, action.page, outcome, read_redirect=not action.drops_web_server, attempts=resent,
             seen=answer_bodies if action.shows_answer else None,
@@ -795,6 +796,10 @@ def _run_action(client: Any, command: Command) -> None:
         return
     status_code, location = outcome
     if action.handoff_path and _finish_handoff(command, client, action, status_code, location, resent):
+        return
+    if action.answer_kind == "congestion" and _finish_congestion(
+        command, action, status_code, location, resent, answer_bodies, answer_started
+    ):
         return
     result = replace(action_committed(action, status_code, location), write_attempts=resent)
     if action.waits_for_speed_result and any(_speed_row_key(row)[0] for row in page_result.parsed.tables):
@@ -1002,6 +1007,55 @@ def _finish_speed_test(command: Command, client: Any, before_page: Any, result: 
         ),
     )
     command.output(fmt.operation_output(done), lambda: fmt.print_operation(done))
+
+
+CONGESTION_FRESHNESS = timedelta(minutes=10)
+
+
+def _finish_congestion(
+    command: Command, action: Any, status_code: int, location: str | None, attempts: int | None,
+    bodies: list[str], started: datetime,
+) -> bool:
+    """Report the Wi-Fi Congestion table the accepted detection left on lanstatistics.ha (the page its
+    statspost.ha hand-off redirects back to, read in the same session). A missing table, or one whose
+    time is more than CONGESTION_FRESHNESS before the run started (another run's results), leaves the
+    detection unconfirmed (exit 2)."""
+    base = replace(action_committed(action, status_code, location), write_attempts=attempts)
+    results = parse_congestion(bodies[-1]) if bodies else None
+    when = congestion_time(results) if results else None
+    if results is None or (when is not None and when < started - CONGESTION_FRESHNESS):
+        command.exit_code = NO_ANSWER
+        reason = "no results table" if results is None else f"only results from {results.get('time')}"
+        result = replace(
+            base, committed=False, outcome="failed", write_attempted=True, write_response_received=True,
+            answer_read=bool(bodies), result=None,
+            warning=(
+                f"the gateway accepted the detection but showed {reason}; congestion results for this run "
+                "were not seen; check `bgwcli page lanstatistics` from the same session or run it again"
+            ),
+        )
+        command.output(fmt.operation_output(result), lambda: fmt.print_operation(result))
+        return True
+    channels = results["channels"]
+    def score(row: dict[str, str]) -> int:
+        value = row.get("Congestion Score") or ""
+        return int(value) if value.isdigit() else 0
+
+    best = max(channels, key=score)
+    result = replace(
+        base,
+        result=(
+            f"Congestion detection finished at {results.get('time') or 'an unknown time'}: "
+            f"{len(channels)} channels scored; best channel {best.get('Channel')} "
+            f"(score {best.get('Congestion Score')}, {best.get('AP Count')} APs). Scores run 1-10, 10 is best."
+        ),
+        answer={
+            "page": "lanstatistics", "title": "Wi-Fi Congestion",
+            "values": {"Time": results.get("time") or ""}, "tables": channels,
+        },
+    )
+    command.output(fmt.operation_output(result), lambda: fmt.print_operation(result))
+    return True
 
 
 SCAN_UNCERTAIN = "scan may be in progress; check the 5 GHz channel in a minute"
@@ -1703,7 +1757,7 @@ def _with_attempts(step: RestoreStepResult, attempts: int | None) -> RestoreStep
 
 def _confirm_response(
     client: Any, page: str, payload: dict[str, str], response: Any, *, read_redirect: bool = True,
-    attempts: int | None = None, follow_warning: bool = True,
+    attempts: int | None = None, follow_warning: bool = True, seen: list[str] | None = None,
 ) -> tuple[int, str | None, Any | None]:
     """The acknowledgement half of `_confirm_save` for a POST the gateway answered 2xx/3xx.
     `attempts` is the POST count of a write re-sent after a Login-page answer (None for one POST):
@@ -1731,7 +1785,7 @@ def _confirm_response(
     # performed." (with or without the error icon) is not a rejection: the write was answered and
     # nothing was saved, so it is an `unchanged` step that save_result decides like on Wi-Fi (a
     # re-read compares requested values; with nothing requested it is unchanged, exit 0).
-    answered = _answer_step(client, page, response, read_redirect=read_redirect, attempts=attempts)
+    answered = _answer_step(client, page, response, read_redirect=read_redirect, attempts=attempts, seen=seen)
     if answered is not None:
         return status_code, location, answered
     # The inline answer carries the whole notification: "Changes saved" is an observed acknowledgement.
@@ -1787,6 +1841,8 @@ def _answer_banner(
     `attempts` is the POST count of a write re-sent after a Login-page answer: the evidence and the
     failure text of this read say how many times the change was sent."""
     if response.status_code == 200:
+        if seen is not None:
+            seen.append(response.body or "")
         return router_error_banner(response.body)
     if not 300 <= response.status_code < 400:
         return None
@@ -1913,7 +1969,7 @@ def _write_failure_step(page: str, exc: Exception, evidence: PostWriteEvidence) 
 def _post_and_confirm(
     client: Any, page: str, payload: dict[str, str], *, read_redirect: bool = True,
     evidence: PostWriteEvidence | None = None, follow_warning: bool = True,
-    submit: tuple[str, str] | None = None,
+    submit: tuple[str, str] | None = None, seen: list[str] | None = None,
 ) -> tuple[int, str | None] | RestoreStepResult:
     """`_confirm_save` for callers that only need an applied write (actions), which have no plan to
     verify against. Returns (status_code, location) for an applied write. Every other outcome is
@@ -1928,6 +1984,7 @@ def _post_and_confirm(
     status_code, location, step = _confirm_response(
         client, page, payload, posted, read_redirect=read_redirect,
         attempts=_resent_attempts(evidence) if evidence is not None else None, follow_warning=follow_warning,
+        seen=seen,
     )
     if step is None or step.status == "applied":
         return status_code, location

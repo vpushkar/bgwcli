@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -25,15 +26,23 @@ CASES = [
 ]
 
 
-def statistics_html(nonce, *, override=None, missing=None):
+def statistics_html(nonce, *, override=None, missing=None, results=False):
     buttons = "".join(
         f'<input type="submit" name="{button}" value="{override or value}"'
         '>'
         for _name, button, value, _token, _aliases, _dangerous in CASES if button != missing
     )
+    # A congestion detection leaves its results table in the cong section (live fw 6.35.8): the
+    # congestion actions report it and treat a run without one as unconfirmed.
+    table = (
+        '<div id="cong"><table><tr><td>Time: ' + datetime.now().strftime("%a %b %d %H:%M:%S %Y") + "</td></tr>"
+        "<tr><th>Channel</th><th>AP Count</th><th>Congestion Score</th></tr>"
+        "<tr><td>36</td><td>1</td><td>10</td></tr></table></div>"
+        if results else ""
+    )
     return (
         '<html><body><form method="post" action="/cgi-bin/lanstatistics.ha">'
-        f'<input type="hidden" name="nonce" value="{nonce}">{buttons}</form></body></html>'
+        f'<input type="hidden" name="nonce" value="{nonce}">{buttons}{table}</form></body></html>'
     )
 
 
@@ -44,7 +53,8 @@ def client_with_transport(*, override=None, missing=None):
         requests.append(request)
         assert urlsplit(request.url).hostname == "synthetic.invalid"
         assert urlsplit(request.url).path == "/cgi-bin/lanstatistics.ha"
-        body = statistics_html(f"a{len(requests)}", override=override, missing=missing)
+        posted = request.method == "POST" and b"Cong" in (request.body or b"")
+        body = statistics_html(f"a{len(requests)}", override=override, missing=missing, results=posted)
         return RawResponse(200, "OK", [], body.encode())
 
     client = BGW320Client("synthetic.invalid", transport=transport)

@@ -7,6 +7,7 @@ transport's write counters decide the write evidence.
 from __future__ import annotations
 
 import json
+from datetime import datetime
 
 import pytest
 from save_helpers import FakeTransport, client_with, html
@@ -96,10 +97,19 @@ def test_connection_error_on_the_write_is_a_structured_failure_with_exit_2(clock
 def test_successful_actions_are_unchanged(clock, tmp_env, capsys, monkeypatch, kind):
     argv, page = CASES[kind]
 
+    state = {"posted": False}
+    # A congestion detection is confirmed by the results table it leaves on the page its answer lands on.
+    results = (
+        '<div id="cong"><table><tr><td>Time: ' + datetime.now().strftime("%a %b %d %H:%M:%S %Y") + "</td></tr>"
+        "<tr><th>Channel</th><th>AP Count</th><th>Congestion Score</th></tr>"
+        "<tr><td>1</td><td>0</td><td>9</td></tr></table></div>"
+    ) if kind == "read_form_button" else ""
+
     def handle(request, n):
         if request.method == "POST":
+            state["posted"] = True
             return html("", status=302, headers={"location": "/cgi-bin/home.ha"})
-        return html(page)
+        return html(page + (results if state["posted"] else ""))
 
     code, output, _ = _run(monkeypatch, capsys, argv, handle)
 

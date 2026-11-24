@@ -52,6 +52,9 @@ class RouterAction:
     # etherdiag.ha / authdiag.ha / ipdiag.ha / dnsdiag.ha for the details buttons): it is reported as
     # the result's `answer` (read once, the same read that looks for a rejection banner).
     shows_answer: bool = field(default=False, metadata={"serialize": False})
+    # A results view read from the page the answer finally lands on (same session): "congestion" =
+    # the Wi-Fi Congestion table on lanstatistics.ha (kept per web session by the gateway).
+    answer_kind: str | None = field(default=None, metadata={"serialize": False})
     # The speed test answers its POST inline (HTTP 200, ~2 s) and then runs ~20 s: its result is the new
     # upstream and downstream rows on speed.ha (which keeps only the last 8, so rows are told apart by
     # Time and Direction, never by count). The action waits for both and reports them.
@@ -117,6 +120,7 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         dangerous=False,
         aliases=("congestion-2.4", "congestion-24"),
         form_button="Congestion",
+        answer_kind="congestion",
     ),
     RouterAction(
         name="detect-wifi-congestion-5",
@@ -127,6 +131,7 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         dangerous=False,
         aliases=("congestion-5", "congestion-5ghz"),
         form_button="CongRadio2",
+        answer_kind="congestion",
     ),
     RouterAction(
         name="clear-connection-statistics",
