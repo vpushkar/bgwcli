@@ -203,3 +203,37 @@ def test_a_page_with_no_controls_and_no_nonce_is_refused():
     error, posts = run("<title>t</title><p>nothing</p>", TARGET, {"Continue": "Continue"})
     assert error is not None
     assert posts == []
+
+
+# home.ha on fw 6.35.8 (captured 2026-11-23): each Wi-Fi Restart form opens a second <form> inside
+# itself. Browsers ignore a <form> start tag while a form is open (HTML5 form-element pointer), so the
+# button and BOTH nonces belong to the outer wrestart.ha?N form and are posted there together.
+LIVE_HOME_WIFI = (
+    "<title>Status</title>"
+    '<form method="post" action="/cgi-bin/crestart.ha?1"><input type="hidden" name="nonce" value="cc0001" />'
+    '<input type="submit" name="Broadband" class="cssbtn" value="Restart" /></form>'
+    + "".join(
+        f'<form method="post" action="/cgi-bin/wrestart.ha?{n}">'
+        f'<input type="hidden" name="nonce" value="{outer}" />'
+        "<!-- This is to avoid error : User should not request this page directly -->"
+        '<form method="post" action="/cgi-bin/wrestart.ha">'
+        f'<input type="hidden" name="nonce" value="{inner}" />'
+        f'<input type="submit" name="WRestart{n}" class="cssbtn" value="Restart" />'
+        "</form></form>"
+        for n, outer, inner in ((1, "aa0001", "aa0002"), (2, "bb0001", "bb0002"))
+    )
+)
+
+
+def test_a_form_opened_inside_an_open_form_is_ignored_like_a_browser_does():
+    actions = [form[0] for form in _scan_forms(LIVE_HOME_WIFI)]
+    assert actions == ["/cgi-bin/crestart.ha?1", "/cgi-bin/wrestart.ha?1", "/cgi-bin/wrestart.ha?2"]
+
+
+def test_live_nested_wifi_restart_form_posts_both_of_its_nonces():
+    error, posts = run(LIVE_HOME_WIFI, "wrestart.ha?1", {"WRestart1": "Restart"})
+    assert error is None
+    assert posts == [{"WRestart1": ["Restart"], "nonce": ["aa0001", "aa0002"]}]
+    error, posts = run(LIVE_HOME_WIFI, "wrestart.ha?2", {"WRestart2": "Restart"})
+    assert error is None
+    assert posts == [{"WRestart2": ["Restart"], "nonce": ["bb0001", "bb0002"]}]

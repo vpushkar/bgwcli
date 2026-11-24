@@ -1164,14 +1164,19 @@ def _nonce_value(raw: str) -> str | None:
 
 def _scan_forms(html: str) -> list[tuple[str, list[str], list[str]]]:
     """(action, nonce values, input/button names, both in document order) of every form, in one
-    pass. A form ends at its closing tag, at the next form opening or at the end of the document."""
+    pass. A form ends at its closing tag or at the end of the document. A <form> start tag met while
+    a form is open is ignored, as browsers do (HTML5 form-element pointer): home.ha's Wi-Fi Restart
+    forms open a second form inside themselves, and the browser posts the button and both nonces
+    to the outer form's action."""
     forms: list[tuple[str, list[str], list[str]]] = []
     current: tuple[str, list[str], list[str]] | None = None
     for match in _TAG.finditer(html):
         closing, tag, raw = match.group(1), match.group(2).lower(), match.group(3)
         if tag == "form":
-            current = None if closing else (_attributes(raw).get("action", "").strip(), [], [])
-            if current is not None:
+            if closing:
+                current = None
+            elif current is None:
+                current = (_attributes(raw).get("action", "").strip(), [], [])
                 forms.append(current)
         elif tag in ("input", "button") and not closing and current is not None:
             name = _attributes(raw).get("name")
