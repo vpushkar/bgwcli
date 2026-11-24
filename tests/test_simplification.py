@@ -15,7 +15,7 @@ import json
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
-from save_helpers import client_with, html
+from save_helpers import SAVED_RED, client_with, html
 
 from bgwcli import cli
 from bgwcli.actions import get_action
@@ -293,19 +293,23 @@ def test_the_wifi_warning_gate_resolves_the_location_like_a_browser(location, st
 
 
 def test_an_absolute_same_origin_warning_with_its_default_port_still_gets_continue(tmp_env, clock, monkeypatch, capsys):
+    state = {"continued": False}
+
     def handler(request, n):
         path = urlsplit(request.url).path
         if request.method == "POST":
             if "wconfig.ha" in path and "Continue" not in request.body.decode():
                 return html("", 302, {"location": "http://router.local:80/cgi-bin/wifiwarn_advanced.ha"})
+            state["continued"] = True
             return html("", 302, {"location": "/cgi-bin/wconfig.ha"})
         if "wifiwarn" in path:
             return html(WARNING_PAGE)
-        return html(SCAN_FORM)
+        return html((SAVED_RED if state["continued"] else "") + SCAN_FORM)
 
     argv = ["action", "find-best-channel-5", "--commit", "--confirm", "CHANSCAN"]
-    _, _, posts, _, _, _ = _cli(monkeypatch, capsys, argv, handler)
+    code, out, posts, _, _, _ = _cli(monkeypatch, capsys, argv, handler)
     assert len(posts) == 2 and "Continue" in posts[1].body.decode()
+    assert code == 0 and out["committed"] is True and out.get("warning") is None
 
 
 @pytest.mark.parametrize(
