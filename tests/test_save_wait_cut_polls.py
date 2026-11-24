@@ -102,7 +102,7 @@ def test_autorestore_reports_verification_unavailable_for_a_cut_poll_without_a_c
     store = RecoveryCheckpoint("router.local", dump, None, root=tmp_path / "recovery")
     fetcher = Fetcher(reset, readable)
     result = run_autorestore(
-        lambda: (router, False), dump, AutorestoreOptions(commit=True, max_passes=3, wait_seconds=1),
+        lambda: (router, True), dump, AutorestoreOptions(commit=True, max_passes=3, wait_seconds=1),
         fetch_pages=fetcher, sleep=lambda _: None, log=lambda _: None, checkpoint=store,
     )
     assert result.status == "error" and result.exit_code == 2, (result.reason, result.passes)
@@ -144,7 +144,7 @@ def _autorestore_with_unanswered_save(tmp_path, body):
     store = RecoveryCheckpoint("router.local", dump, None, root=tmp_path / "recovery")
     fetcher = Fetcher(reset, reset)
     result = run_autorestore(
-        lambda: (router, False), dump, AutorestoreOptions(commit=True, max_passes=3, wait_seconds=1),
+        lambda: (router, True), dump, AutorestoreOptions(commit=True, max_passes=3, wait_seconds=1),
         fetch_pages=fetcher, sleep=lambda _: None, log=lambda _: None, checkpoint=store,
     )
     return result, router, fetcher, store

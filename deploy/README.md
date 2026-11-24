@@ -4,8 +4,9 @@ Goal: after AT&T factory-resets the gateway (firmware update, support call), a P
 notices within 15 minutes and replays `~/bgw-baseline.json`.
 `bgwcli autorestore` only acts when EVERY dumped service, forward and reservation is missing, or
 when an unfinished recovery of the same dump is recorded; ordinary drift is reported as `no-reset`
-and left alone. Needing the fallback sticker code to log in is no reset signal on its own (see
-section 3). It never uses `--prune`.
+and left alone. A baseline with a single entry (or none) needs corroboration: every dumped form page
+differing, or the fallback sticker code having been needed. Needing the fallback code is otherwise no
+reset signal on its own (see section 3). It never uses `--prune`.
 
 Before restore writes, a requested IP held by another MAC's fixed reservation blocks recovery
 until that reservation is released manually. Other ownership conflicts can trigger **Clear and

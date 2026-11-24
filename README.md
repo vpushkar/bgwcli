@@ -308,7 +308,8 @@ new address. Take a fresh dump afterwards as the new baseline.
 `bgwcli autorestore <dumpfile>` is that runbook as a watchdog: run it from a systemd timer on an
 always-on LAN host (a Raspberry Pi) and the configuration comes back by itself within minutes of a reset.
 It acts only on total loss (every dumped service, forward **and** reservation missing, or an unfinished
-recovery of the same dump); ordinary drift is reported as `no-reset` and left alone. It never prunes,
+recovery of the same dump; a dump with a single entry, or none, also needs every form page to differ or
+the sticker code to have been needed: see REFERENCE); ordinary drift is reported as `no-reset` and left alone. It never prunes,
 never reboots the gateway, never changes the access code, and never re-posts a write the gateway
 acknowledged within one run.
 

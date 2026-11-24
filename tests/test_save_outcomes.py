@@ -276,7 +276,8 @@ def test_real_allocation_nonwrite_retries_next_pass_and_saves_only_once(clock):
         return {"ipalloc": ipalloc_page(rows=[(ip, mac, "on", "Fixed Allocation")]) if router.saved else initial}, []
 
     result = run_autorestore(
-        lambda: (router, False),
+        # One dumped entry is a thin reset signal: the fallback access code corroborates it.
+        lambda: (router, True),
         desired,
         AutorestoreOptions(commit=True, pages=("ipalloc",), max_passes=2),
         fetch_pages=fetch,

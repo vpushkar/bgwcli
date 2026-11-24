@@ -3,12 +3,14 @@ it back, without ever acting on ordinary drift.
 
 Designed for a systemd timer (see deploy/): every run fetches the same pages `diff`/`restore` use,
 diffs them against the baseline dump and asks `detect_factory_reset` whether the difference looks
-like a reset (EVERY dumped service, forward and reservation gone) rather than a deliberate manual
-change (some entries gone, values edited). A reset or matching unfinished recovery triggers passes, which never
-prune: router-only entries are always left alone. The access-code fallback (the printed sticker code
-comes back after a reset) lives in cli.py; this module records that it was used and names it in the
-reason when the diff is reset-shaped or a recovery is unfinished; on its own it is no reset signal
-(the result carries a warning to re-set the access code instead).
+like a reset (EVERY dumped service, forward and reservation gone, corroborated when the dump holds a
+single entry or none) rather than a deliberate manual change (some entries gone, values edited). A
+reset or matching unfinished recovery triggers passes, which never prune: router-only entries are
+always left alone. The access-code fallback (the printed sticker code comes back after a reset)
+lives in cli.py; this module records that it was used and names it in the reason when the diff is
+reset-shaped or a recovery is unfinished, and it corroborates a thin signal (a dump with a single
+entry, or a dump without entries whose form pages differ); otherwise it is no reset signal (the
+result carries a warning to re-set the access code instead).
 
 Exit-code contract (AutorestoreResult.exit_code): 0 when there was nothing to do or the restore
 converged or the router is unreachable (timers must stay quiet), 1 when a restore is needed
@@ -120,7 +122,10 @@ class ResetSignature:
         for label, dump_attr, diff_attr in _SECTIONS:
             selected = pages is None or _SECTION_PAGE[label] in pages
             totals[label] = len(getattr(dump, dump_attr)) if selected else 0
-            missing[label] = len(getattr(diff, diff_attr).missing) if selected else 0
+            gone = getattr(diff, diff_attr).missing
+            if label == "services":
+                gone = _services_missing_by_name(diff)
+            missing[label] = len(gone) if selected else 0
         dumped_forms = [page for page in dump.forms if pages is None or page in pages]
         totals["forms"] = len(dumped_forms)
         # Only a difference restore can act on votes: a live-only control (newer firmware) or one
@@ -135,15 +140,39 @@ class ResetSignature:
         return [label for label, _, _ in _SECTIONS if self.totals[label] > 0]
 
 
+def _service_name(service: Any) -> str:
+    return str(service.name).strip().casefold()
+
+
+def _services_missing_by_name(diff: SnapshotDiff) -> list[Any]:
+    """Dumped services the router lacks BY NAME: a service still there under its name with another
+    port or protocol was edited, not lost, so it is drift (diff and restore still compare it fully)."""
+    live_names = {_service_name(service) for service in diff.services.extra}
+    return [service for service in diff.services.missing if _service_name(service) not in live_names]
+
+
+# A section or form signal resting on fewer items than this is thin: one deleted entry or one edited
+# page also looks like that, so it counts only with a second, independent signal.
+MIN_SIGNAL_ITEMS = 2
+
+
 def detect_factory_reset(
     diff: SnapshotDiff,
     dump: Snapshot,
     *,
     on_any_diff: bool = False,
     pages: Sequence[str] | None = None,
+    used_fallback_code: bool = False,
 ) -> tuple[bool, str]:
-    """(detected, reason). A reset means EVERY dumped entry of EVERY non-empty section is missing;
-    a dump with no sections falls back to every dumped form page differing. Partial loss is drift."""
+    """(detected, reason). Partial loss is always drift. The rule, in order:
+
+    - sections (services, forwards, reservations; services matched by name) signal a reset when EVERY
+      dumped entry of EVERY non-empty section is missing. That signal stands alone only when the dump
+      holds 2+ entries across those sections; a thin one (a single dumped entry) needs a second
+      signal: every dumped form page differs (2+ pages), or the fallback access code was needed;
+    - a dump without entries falls back to every dumped form page differing, or to the fallback
+      access code having been needed while anything restorable differs.
+    The fallback code alone never signals a reset of a dump that holds entries."""
     if diff.identical:
         return False, "no differences"
     # Router-only entries (autorestore never prunes), live-only controls and controls the live page
@@ -155,12 +184,27 @@ def detect_factory_reset(
         return True, "differences found (on-any-diff)"
     signature = ResetSignature.from_diff(diff, dump, pages=pages)
     voting = signature.voting_sections()
+    forms_total, forms_missing = signature.totals["forms"], signature.missing["forms"]
+    forms_reason = f"{forms_missing}/{forms_total} form pages differ"
+    every_form_differs = forms_total > 0 and forms_missing == forms_total
     if voting:
         reason = "; ".join(f"{label} {signature.missing[label]}/{signature.totals[label]} missing" for label in voting)
-        return all(signature.missing[label] == signature.totals[label] for label in voting), reason
-    if signature.totals["forms"] > 0:
-        reason = f"{signature.missing['forms']}/{signature.totals['forms']} form pages differ"
-        return signature.missing["forms"] == signature.totals["forms"], reason
+        if not all(signature.missing[label] == signature.totals[label] for label in voting):
+            return False, reason
+        entries = sum(signature.totals[label] for label in voting)
+        if entries >= MIN_SIGNAL_ITEMS:
+            return True, reason
+        if used_fallback_code:
+            return True, f"{reason}; corroborated by the fallback access code"
+        if every_form_differs and forms_total >= MIN_SIGNAL_ITEMS:
+            return True, f"{reason}; corroborated by {forms_reason}"
+        return False, f"{reason}; too thin to be a reset on its own and not corroborated ({forms_reason})"
+    if forms_total > 0:
+        if every_form_differs:
+            return True, forms_reason
+        if used_fallback_code:
+            return True, f"{forms_reason}; corroborated by the fallback access code"
+        return False, forms_reason
     return False, "dump has nothing to compare (no sections, no form pages)"
 
 
@@ -411,7 +455,9 @@ def run_autorestore(
         return AutorestoreResult(status="router-unreachable", reason=reason)
 
     diff = snapshot(parsed)
-    detected, reason = detect_factory_reset(diff, dump, on_any_diff=options.on_any_diff, pages=options.pages)
+    detected, reason = detect_factory_reset(
+        diff, dump, on_any_diff=options.on_any_diff, pages=options.pages, used_fallback_code=used_fallback
+    )
     try:
         recovering = checkpoint is not None and checkpoint.is_active()
     except OSError as exc:

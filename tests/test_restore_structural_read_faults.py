@@ -113,7 +113,7 @@ def test_autorestore_ends_the_run_when_an_acknowledged_save_cannot_be_verified(c
     fetcher = Fetcher(reset, readable)
     sleeps: list[float] = []
     result = run_autorestore(
-        lambda: (router, False), dump, AutorestoreOptions(commit=True, max_passes=3, wait_seconds=1),
+        lambda: (router, True), dump, AutorestoreOptions(commit=True, max_passes=3, wait_seconds=1),
         fetch_pages=fetcher, sleep=sleeps.append, log=lambda _: None, checkpoint=store,
     )
     assert result.status == "error" and result.exit_code == 2, (result.reason, result.passes)
