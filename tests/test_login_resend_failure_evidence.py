@@ -286,7 +286,7 @@ def _config_post_count(wire):
     return len(posts)
 
 
-@pytest.mark.parametrize("page,token", [("wconfig", "WCONFIG"), ("etherlan", "ETHERLAN")])
+@pytest.mark.parametrize("page,token", [("wconfig", "WCONFIG"), ("wconfig_unified", "WCONFIG-UNIFIED")])
 @pytest.mark.parametrize(
     "save_resend,continue_modes,after,total",
     [
@@ -327,7 +327,7 @@ def test_a_continue_answered_with_the_login_page_is_re_sent_and_reports_two_atte
     assert out["writeAttempts"] == 2
 
 
-@pytest.mark.parametrize("page,token", [("wconfig", "WCONFIG"), ("etherlan", "ETHERLAN")])
+@pytest.mark.parametrize("page,token", [("wconfig", "WCONFIG"), ("wconfig_unified", "WCONFIG-UNIFIED")])
 @pytest.mark.parametrize("continue_modes", [("500",), ("ok",)])
 def test_warning_confirmation_with_single_posts_keeps_the_once_text(
     tmp_env, clock, monkeypatch, capsys, page, token, continue_modes

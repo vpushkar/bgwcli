@@ -39,6 +39,7 @@ from .client import (
     PostWriteEvidence,
     ResponseReadTimeout,
     RouterResponseError,
+    gateway_cgi_redirect,
     observe_post,
     pool_full_metadata,
     resolve_gateway_redirect,
@@ -1549,11 +1550,16 @@ def _answer_banner(
         return None
     location = _location(response.headers)
     sent = PostWriteEvidence(attempted=True, response_received=True, attempts=attempts)
-    kind, _target = resolve_gateway_redirect(_gateway_origin(client), f"/cgi-bin/{page}.ha", location)
-    if kind == "malformed":
+    posted_path = f"/cgi-bin/{page}.ha"
+    kind, _page, _query = gateway_cgi_redirect(_gateway_origin(client), posted_path, location)
+    if kind == "malformed" or (kind == "other-origin" and read_redirect):
         # The answer cannot even be located (an unclosed IPv6 bracket, a non-numeric port): unknown,
-        # whether or not this action reads its answer page.
-        failure = RouterResponseError(f"malformed redirect Location {location!r}")
+        # whether or not this action reads its answer page. An answer on another origin is never
+        # read (nothing is sent anywhere but the gateway), so it is unknown as well.
+        failure = RouterResponseError(
+            f"malformed redirect Location {location!r}" if kind == "malformed"
+            else f"redirect to another origin {location!r} is not read"
+        )
         return replace(
             _write_failure_step(page, failure, sent),
             status_code=response.status_code, location=location,
@@ -1562,7 +1568,7 @@ def _answer_banner(
     if not read_redirect:
         return None
     try:
-        target = redirect_answer_page(client, location)
+        target = redirect_answer_page(client, location, posted_path=posted_path)
         if target is None:
             return None
         if seen is not None:

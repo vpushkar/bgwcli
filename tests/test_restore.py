@@ -438,7 +438,7 @@ class FakeClient:
         self.posted.append((page, dict(fields)))
         return self._post(page, fields)
 
-    def post_form(self, nonce_page, post_path, fields):
+    def post_form(self, nonce_page, post_path, fields, **_kwargs):
         # The warning page's Continue: nonce read from `nonce_page`, POST to its owning form's action.
         self.forms.append((nonce_page, post_path))
         return self.post_cgi_page(post_path.removesuffix(".ha"), fields)

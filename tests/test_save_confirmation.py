@@ -196,7 +196,7 @@ class WifiRouter:
         self.events.append("later-post")
         return response(page, SAVED_RED)
 
-    def post_form(self, nonce_page: str, post_path: str, fields: Mapping[str, str]) -> HttpResponse:
+    def post_form(self, nonce_page: str, post_path: str, fields: Mapping[str, str], **_kwargs) -> HttpResponse:
         assert nonce_page == "wifiwarn_advanced"  # Continue's nonce is the warning page's own
         return self.post_cgi_page(post_path.removesuffix(".ha"), fields)
 

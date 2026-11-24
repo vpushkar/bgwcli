@@ -664,13 +664,13 @@ class BGW320Client:
         """The raw answer to an unauthenticated read (nothing is checked, nothing is logged in)."""
         return self._request(f"/cgi-bin/{canonical_cgi_page(page)}.ha", "GET")
 
-    def get_cgi_page(self, page: str, *, auth: bool = True) -> HttpResponse:
+    def get_cgi_page(self, page: str, *, auth: bool = True, query: str = "") -> HttpResponse:
         """GET a CGI page. ``auth=False`` is a public read: it returns the raw answer, but the pool-full
-        page is never data (a full session pool raises, so callers record the cooldown)."""
+        page is never data (a full session pool raises, so callers record the cooldown). ``query`` is
+        the query of the redirect that named the page, sent as is."""
         from .parser import looks_like_login
 
-        page = canonical_cgi_page(page)
-        path = f"/cgi-bin/{page}.ha"
+        path = _cgi_path(page, query)
         response = self._request(path, "GET")
         if not auth:
             if router_sessions_full(response.body):
@@ -743,7 +743,8 @@ class BGW320Client:
         return self.post_form(page, f"{page}.ha", fields, submit=submit)
 
     def post_form(
-        self, nonce_page: str, post_path: str, fields: Mapping[str, str], *, submit: tuple[str, str] | None = None
+        self, nonce_page: str, post_path: str, fields: Mapping[str, str], *, submit: tuple[str, str] | None = None,
+        nonce_query: str = "",
     ) -> HttpResponse:
         """POST to an arbitrary CGI path (e.g. ``wrestart.ha?1``) with the nonces read from
         ``nonce_page``. home.ha hosts several Restart forms whose actions are other CGI scripts
@@ -756,9 +757,10 @@ class BGW320Client:
         from .parser import looks_like_login
 
         nonce_page = canonical_cgi_page(nonce_page)
+        _cgi_path(nonce_page, nonce_query)  # validated before anything is sent
         if not self.has_authenticated_session():
             self.login()
-        response = self._post_form_once(nonce_page, post_path, fields, submit)
+        response = self._post_form_once(nonce_page, post_path, fields, submit, nonce_query)
         if router_sessions_full(response.body) and not self._can_wait_and_relogin():
             # A full pool is the answer, whatever credentials are held: classify it before any
             # credential-dependent forced login so the cooldown is recorded and the error is not
@@ -768,7 +770,7 @@ class BGW320Client:
         if looks_like_login(response.body):
             self.login(response.body, force=True)
             try:
-                response = self._post_form_once(nonce_page, post_path, fields, submit)
+                response = self._post_form_once(nonce_page, post_path, fields, submit, nonce_query)
             except NoncePageRefusedError as refusal:
                 # The first POST went out and was answered with the Login page, so the refusal's own
                 # "nothing was sent" clause is untrue here: it only covers the re-send.
@@ -793,12 +795,14 @@ class BGW320Client:
         return response
 
     def _post_form_once(
-        self, nonce_page: str, post_path: str, fields: Mapping[str, str], submit: tuple[str, str] | None = None
+        self, nonce_page: str, post_path: str, fields: Mapping[str, str], submit: tuple[str, str] | None = None,
+        nonce_query: str = "",
     ) -> HttpResponse:
         from .fetch import is_page_not_found
         from .parser import looks_like_login, parse_page
 
-        current = self.get_cgi_page(nonce_page)
+        # The nonce page is read with the query of the redirect that named it (the Wi-Fi Warning's).
+        current = self.get_cgi_page(nonce_page, query=nonce_query) if nonce_query else self.get_cgi_page(nonce_page)
         path = f"/cgi-bin/{post_path}"
         # The page this POST's nonce is read from must be a real, whole form page: a Login, Page-not-
         # found, "Please wait" or parser-cut answer would yield a POST the gateway cannot accept (or
@@ -823,7 +827,7 @@ class BGW320Client:
         if submit is not None:
             _require_submit_on_page(current.body, nonce_page, post_path, submit)
         pairs = [(k, v) for k, v in fields.items() if k != "nonce"] + [("nonce", n) for n in nonces]
-        referer = f"{self._origin}/cgi-bin/{nonce_page}.ha"
+        referer = f"{self._origin}{_cgi_path(nonce_page, nonce_query)}"
         return self._request(
             path,
             "POST",
@@ -1408,6 +1412,34 @@ def resolve_gateway_redirect(origin: str, posted_path: str, location: str | None
     if _normalized_origin(target) != _normalized_origin(gateway):
         return "other-origin", target
     return "ok", target
+
+
+_CGI_PATH = re.compile(r"/cgi-bin/([a-z0-9_]+)\.ha", re.IGNORECASE)
+_UNSAFE_QUERY = re.compile(r"[\x00-\x20\x7f#]")
+
+
+def gateway_cgi_redirect(origin: str, posted_path: str, location: str | None) -> tuple[str, str, str]:
+    """Where a write's ``Location`` leads, as what ``get_cgi_page`` reads exactly: ("ok", page, query)
+    only for a same-origin ``/cgi-bin/<page>.ha`` path (the resolved path, never a page named inside
+    the query); ("none" | "malformed" | "other-origin" | "not-cgi", "", "") otherwise. A query that
+    cannot be sent in a request line is malformed."""
+    kind, target = resolve_gateway_redirect(origin, posted_path, location)
+    if kind != "ok":
+        return kind, "", ""
+    match = _CGI_PATH.fullmatch(target.path)
+    if match is None:
+        return "not-cgi", "", ""
+    if _UNSAFE_QUERY.search(target.query):
+        return "malformed", "", ""
+    return "ok", match.group(1).lower(), target.query
+
+
+def _cgi_path(page: str, query: str = "") -> str:
+    """``/cgi-bin/<page>.ha`` for a validated page id, with the query of the redirect that named it
+    (the Wi-Fi Warning answers ``wifiwarn_advanced.ha?tx=42``). Page ids never carry a query."""
+    if _UNSAFE_QUERY.search(query):
+        raise UsageError(f"Invalid CGI page query: {query!r}.")
+    return f"/cgi-bin/{canonical_cgi_page(page)}.ha" + (f"?{query}" if query else "")
 
 
 def _normalized_origin(parts) -> tuple[str, str, int | None]:

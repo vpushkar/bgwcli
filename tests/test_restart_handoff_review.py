@@ -76,8 +76,9 @@ def test_a_wifi_warning_redirect_never_adds_a_second_post(tmp_env, clock, monkey
     assert len(posts) == 1
     assert all("wconfig" not in post.url for post in posts)
     # The Wi-Fi Warning flow (read the warning twice, post Continue) belongs to the Wi-Fi pages. restart
-    # requests only the gateway's restarting page (never this one); clear reads its answer page once.
-    expected_reads = 0 if name == "restart" else 1
+    # requests only the gateway's restarting page (never this one); clear reads its answer page once,
+    # and only on the gateway's own origin (an answer on another origin is never read).
+    expected_reads = 0 if name == "restart" or location.startswith("https://") else 1
     assert len([g for g in gets_after if "wifiwarn" in g.path]) == expected_reads
 
 

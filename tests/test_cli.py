@@ -117,7 +117,7 @@ class FakeClient:
         body = self.post_body(page) if callable(self.post_body) else self.post_body
         return HttpResponse(self.post_status, "OK", headers, body, f"{self.origin}/cgi-bin/{page}.ha")
 
-    def post_form(self, nonce_page, post_path, fields):
+    def post_form(self, nonce_page, post_path, fields, **_kwargs):
         # Reached by the Wi-Fi Warning's Continue: nonce read from `nonce_page`, POST to its action.
         self.form_nonce_pages.append(nonce_page)
         return self.post_cgi_page(post_path.removesuffix(".ha"), fields)

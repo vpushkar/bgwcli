@@ -174,7 +174,7 @@ class FakeRouter:
             return self._answer(page, body)
         return Post(302, {"location": f"/cgi-bin/{page}.ha"})
 
-    def post_form(self, nonce_page: str, post_path: str, fields: Mapping[str, str]) -> Post:
+    def post_form(self, nonce_page: str, post_path: str, fields: Mapping[str, str], **_kwargs) -> Post:
         return self.post_cgi_page(post_path.removesuffix(".ha"), fields)
 
     def get_cgi_page(self, page: str) -> Get:

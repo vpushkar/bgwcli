@@ -949,7 +949,10 @@ class RestorePoster(Protocol):
 
     def post_cgi_page(self, page: str, fields: Mapping[str, str]) -> PostResponse: ...
 
-    def post_form(self, nonce_page: str, post_path: str, fields: Mapping[str, str]) -> PostResponse: ...
+    def post_form(
+        self, nonce_page: str, post_path: str, fields: Mapping[str, str], *, submit: tuple[str, str] | None = None,
+        nonce_query: str = "",
+    ) -> PostResponse: ...
 
     def get_cgi_page(self, page: str) -> GetResponse: ...
 
@@ -1035,17 +1038,25 @@ def router_error_banner(html: str) -> str | None:
     return save_notification("", html).error
 
 
-def redirect_answer_page(client: Any, location: str | None) -> Any | None:
+def redirect_answer_page(client: Any, location: str | None, *, posted_path: str) -> Any | None:
     """The page a write's 3xx answer redirects to, read once: it carries the gateway's rejection
-    banner. None only for a location that is no CGI page. A lost connection, an HTTP error, a
-    refused session or a full session pool propagates: the write's answer is then unknown and the
-    caller reports it with the write evidence."""
-    if not location:
+    banner. The Location is resolved against the POST URL (``posted_path``) like a browser does, and
+    only a same-origin ``/cgi-bin/<page>.ha`` is read, with its path and query exactly (a page named
+    inside a query, e.g. ``/?next=/cgi-bin/restarting.ha``, is never read). None, reading nothing,
+    for any other location (callers report malformed and other-origin locations themselves). A lost
+    connection, an HTTP error, a refused session or a full session pool propagates: the write's answer
+    is then unknown and the caller reports it with the write evidence."""
+    from .client import gateway_cgi_redirect
+
+    kind, page, query = gateway_cgi_redirect(_client_origin(client) or _NO_ORIGIN, posted_path, location)
+    if kind != "ok":
         return None
-    match = _CGI_PAGE.search(location)
-    if match is None:
-        return None
-    return client.get_cgi_page(match.group(1))
+    return _get_page(client, page, query)
+
+
+def _get_page(client: Any, page: str, query: str = "") -> Any:
+    """GET ``page``, with the query of the redirect that named it when it has one."""
+    return client.get_cgi_page(page, query=query) if query else client.get_cgi_page(page)
 
 
 def _accepted(status_code: int) -> bool:
@@ -1081,6 +1092,9 @@ def execute_restore(
                         **base, status="failed", status_code=response.status_code, location=location,
                         error=write_guidance(f"unexpected HTTP {response.status_code}", base),
                     )
+                elif (malformed := _malformed_redirect(client, step.page, response, base)) is not None:
+                    # Nothing more is read or posted for an answer that cannot even be located.
+                    result = malformed
                 elif step.follow_up is not None:
                     result = _run_follow_up(client, step.follow_up, base)
                 elif warning := confirmation_target(
@@ -1114,9 +1128,12 @@ def _post_with_write_evidence(
     base: dict[str, Any],
     *,
     nonce_page: str | None = None,
+    submit: tuple[str, str] | None = None,
+    nonce_query: str = "",
 ) -> PostResponse:
     """Use optional public transport evidence without guessing legacy poster delivery. With
-    `nonce_page` the POST goes to `page` carrying the nonce of the form `nonce_page` serves for it."""
+    `nonce_page` the POST goes to `page` carrying the nonce of the form `nonce_page` serves for it;
+    `submit` (name, value) must then still be an enabled submit of that form on the nonce read."""
     final_write = base.get("write_attempted") is not False
     evidence = PostWriteEvidence()
     try:
@@ -1124,7 +1141,10 @@ def _post_with_write_evidence(
             if nonce_page is None:
                 response = client.post_cgi_page(page, payload)
             else:
-                response = client.post_form(nonce_page, f"{page}.ha", payload)
+                extra: dict[str, Any] = {"submit": submit} if submit is not None else {}
+                if nonce_query:
+                    extra["nonce_query"] = nonce_query
+                response = client.post_form(nonce_page, f"{page}.ha", payload, **extra)
             evidence.attempted = evidence.response_received = True
         # The observation closes with the block above: only now is the attempt count known.
         if final_write and evidence.attempts is not None and evidence.attempts > 1:
@@ -1289,6 +1309,31 @@ def _run_deferred_forward(client: RestorePoster, step: RestoreStep, base: dict[s
 # Continue/Cancel; without Continue the change is discarded (observed live 2026-09-19).
 _CONFIRMATION_PAGE = re.compile(r"/cgi-bin/wifiwarn[a-z_]*\.ha", re.IGNORECASE)
 _CGI_PAGE = re.compile(r"/cgi-bin/([a-z0-9_]+)\.ha", re.IGNORECASE)
+# The pages whose Save the gateway answers with the Wi-Fi Warning: only their Save is confirmed.
+_WIFI_PAGE = re.compile(r"wconfig(?:_[a-z0-9_]+)?", re.IGNORECASE)
+_NO_ORIGIN = "http://gateway.invalid"
+
+
+def _malformed_redirect(
+    client: Any, page: str, response: PostResponse, base: dict[str, Any]
+) -> RestoreStepResult | None:
+    """A failed step when a write's 3xx answer carries a Location that cannot be parsed (a non-numeric
+    port, an unclosed IPv6 bracket): the answer cannot be located, so nothing is polled, followed or
+    confirmed from it. The step keeps the POST's own evidence. None for any other answer."""
+    from .client import gateway_cgi_redirect
+
+    if not 300 <= response.status_code < 400:
+        return None
+    location = _location(response.headers)
+    kind, _, _ = gateway_cgi_redirect(_client_origin(client) or _NO_ORIGIN, f"/cgi-bin/{page}.ha", location)
+    if kind != "malformed":
+        return None
+    return RestoreStepResult(
+        **{**base, "status_code": response.status_code, "location": location}, status="failed",
+        error=write_guidance(
+            f"could not read the gateway's answer at {location}: malformed redirect Location {location!r}", base
+        ),
+    )
 
 
 # The only Continue form actions that resolve: the `pages.form_target` rule (the part after
@@ -1313,12 +1358,22 @@ def _confirm_warning_page(
             **base, status="failed", error=write_guidance(append_sentence(message, CONTINUE_NOT_POSTED), base)
         )
 
-    match = _CGI_PAGE.search(location)
+    source = str(base.get("page") or "")
+    if _WIFI_PAGE.fullmatch(source) is None:
+        # Only a Wi-Fi page's Save is answered with the Wi-Fi Warning: Continue is never posted on
+        # behalf of another page's Save (it would commit a pending Wi-Fi change nobody asked for).
+        return not_confirmed(
+            f"the Save of {source or 'the page'} redirected to the Wi-Fi Warning {location}, but only a Wi-Fi "
+            "page's Save (wconfig, wconfig_unified) is confirmed"
+        )
+    path, _, query = location.partition("?")
+    match = _CGI_PAGE.fullmatch(path)
     if match is None:
         return not_confirmed(f"cannot derive confirmation page from {location}")
-    page = match.group(1)
+    page = match.group(1).lower()
     try:
-        warn = client.get_cgi_page(page)
+        # Both warning reads (this one and the nonce read for Continue) keep the redirect's query.
+        warn = _get_page(client, page, query)
     except Exception as exc:  # noqa: BLE001 - keeps the save POST's evidence; callers re-raise coordination
         return _execution_error(base, exc, note=CONTINUE_NOT_POSTED)
     if warn.status_code != 200:
@@ -1339,15 +1394,25 @@ def _confirm_warning_page(
             f"{page}: the Continue button's form posts to {shown}, not to a page this tool can confirm, "
             "so the change is not confirmed and the gateway discards an unconfirmed Wi-Fi change"
         )
-    target_page = target.group(1)
+    target_page = target.group(1).lower()
+    if target_page != source.lower():
+        shown = sanitize_terminal_text(action, single_line=True)[:200]
+        return not_confirmed(
+            f"{page}: the Continue button's form posts to {shown}, not to {source}.ha whose Save was redirected "
+            "here, so the change is not confirmed and the gateway discards an unconfirmed Wi-Fi change"
+        )
+    value = cont.value or cont.label or cont.name
     try:
-        # Continue carries the nonce of the warning page's own Continue form (never the target page's).
+        # Continue carries the nonce of the warning page's own Continue form (never the target page's),
+        # and the Continue button must still be in that form on the page the nonce is read from.
         response = _post_with_write_evidence(
             client,
             target_page,
-            {cont.name: cont.value or cont.label or cont.name},
+            {cont.name: value},
             base,
             nonce_page=page,
+            nonce_query=query,
+            submit=(cont.name, value),
         )
     except Exception as exc:  # noqa: BLE001 - the save POST stays sent whatever happened to Continue
         continue_sent = base["write_attempted"] is not False
@@ -1627,11 +1692,24 @@ def _wait_for_save(
     step: RestoreStep | None = None,
 ) -> RestoreStepResult:
     """Collect acknowledgement, state, and real failures without repeating a write."""
+    from .client import gateway_cgi_redirect
+
     base = {**base, "write_attempted": True, "write_response_received": True}
     location = _location(response.headers)
+    malformed = _malformed_redirect(client, page_name, response, base)
+    if malformed is not None:
+        # The answer cannot be located: no poll reads a page it might (or might not) have named.
+        return malformed
     deadline = monotonic() + SAVE_CONFIRMATION_TIMEOUT_SECONDS
-    redirect = _CGI_PAGE.search(location or "") if 300 <= response.status_code < 400 else None
-    first_read_page = redirect.group(1) if redirect is not None else page_name
+    first_read_page, first_read_query = page_name, ""
+    if 300 <= response.status_code < 400:
+        # The first read is the page the redirect resolves to (same origin, /cgi-bin/, path and query
+        # exactly); any other location is never read and the poll starts on the saved page.
+        kind, redirected, redirected_query = gateway_cgi_redirect(
+            _client_origin(client) or _NO_ORIGIN, f"/cgi-bin/{page_name}.ha", location
+        )
+        if kind == "ok":
+            first_read_page, first_read_query = redirected, redirected_query
     known_state = bool(reservations) or bool(releases) or (
         step is not None and (step.postcondition is not None or step.reconnect_required)
     )
@@ -1704,11 +1782,11 @@ def _wait_for_save(
             if monotonic() >= deadline:
                 observed.timed_out = True
                 break
-        read_page = page_name if polled else first_read_page
+        read_page, read_query = (page_name, "") if polled else (first_read_page, first_read_query)
         polled = True
         html = ""
         try:
-            page = client.get_cgi_page(read_page)
+            page = _get_page(client, read_page, read_query)
             if page.status_code != 200:
                 raise RouterResponseError(
                     f"unexpected HTTP {page.status_code} confirming the change on {page_name}",
@@ -1779,14 +1857,17 @@ def confirmation_target(
     Only a GET redirect (301/302/303, when ``status_code`` is given) whose Location, resolved against
     the POST URL like a browser, stays on the gateway's origin (port defaults made explicit) and IS
     a wifiwarn page (not merely mentions one) authorizes Continue."""
-    from .client import resolve_gateway_redirect
+    from .client import gateway_cgi_redirect, resolve_gateway_redirect
 
     if status_code is not None and status_code not in (301, 302, 303):
         return None
     kind, target = resolve_gateway_redirect(origin or "http://gateway.invalid", posted_path, location)
     if kind != "ok" or _CONFIRMATION_PAGE.fullmatch(target.path) is None:
         return None
-    return target.path
+    if gateway_cgi_redirect(origin or _NO_ORIGIN, posted_path, location)[0] != "ok":
+        return None  # a query that cannot be sent in a request line
+    # The warning's query (``?tx=42``) is part of the page to read: it is kept on both warning reads.
+    return target.path + (f"?{target.query}" if target.query else "")
 
 
 def is_confirmation_redirect(
