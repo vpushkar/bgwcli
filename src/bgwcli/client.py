@@ -860,6 +860,13 @@ class BGW320Client:
         access_code = self.options.access_code
         if not access_code:
             raise RouterAuthError("Access code required. Set BGW_ACCESS_CODE or pass --access-code-stdin.")
+        if initial_login_html is None:
+            # The code is verified with a fresh cookie jar: a session cookie still held from an earlier
+            # login (a cached session) would otherwise let the protected-page probe below "verify" a code
+            # the gateway rejected with an ordinary 200 page. A login page handed in by the caller keeps
+            # the cookies it was served with (its nonce belongs to them).
+            self._cookies.clear()
+            self._authenticated = False
 
         nonce = extract_nonce(initial_login_html) if initial_login_html else None
         if not nonce and initial_login_html and router_sessions_full(initial_login_html):
@@ -925,7 +932,9 @@ class BGW320Client:
         probe = self._request(f"/cgi-bin/{SESSION_PROBE_PAGE}.ha", "GET")
         self._require_successful_response(probe)
         # A probe redirected to login.ha was refused even when that page carries no Login markup.
-        if looks_like_login(probe.body) or _is_login_url(probe.url):
+        # Not being the login page is not enough: an empty or untitled answer proves nothing about the
+        # code, so the probe must show a recognisable page (a title) before the session is trusted.
+        if looks_like_login(probe.body) or _is_login_url(probe.url) or not title_of(probe.body):
             self.clear_session()
             raise RouterAuthError("Login failed. Check the device access code.")
         self._authenticated = True
