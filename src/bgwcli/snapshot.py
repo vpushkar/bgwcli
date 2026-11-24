@@ -296,6 +296,16 @@ def truncated_page_problem(page: str, parsed: ParsedPage | None) -> str | None:
     return f"the {page} page is larger than the parser's bounds and was only partly read; it is not used"
 
 
+def cut_table_problem(page: str, parsed: ParsedPage | None) -> str | None:
+    """Why a table section's page read cannot be taken as the whole section: the document ended while
+    a table was still open (an answer cut short inside the table, e.g. without Content-Length), so
+    the rows read are not all the rows. A dump built from it would miss entries, and a prune would
+    remove the live entries the dump never saw."""
+    if parsed is None or page not in _TABLE_SECTIONS or not getattr(parsed, "_table_cut", False):
+        return None
+    return f"the {page} page ended inside its table (the answer was cut short); its rows are not all the rows"
+
+
 def extract_snapshot(
     pages: Mapping[str, ParsedPage],
     *,
@@ -315,7 +325,7 @@ def extract_snapshot(
     if selected_pages is not None:
         pages = {page: parsed for page, parsed in pages.items() if page in selected_pages}
     for page, parsed in pages.items():
-        problem = truncated_page_problem(page, parsed)
+        problem = truncated_page_problem(page, parsed) or cut_table_problem(page, parsed)
         if problem is not None:
             raise SnapshotExtractionError(problem)
     included = set(include)

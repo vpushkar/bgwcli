@@ -106,6 +106,9 @@ class Element:
     form_pointer: Element | None = field(default=None, repr=False)
     # A <form> start tag read while another form was open: a browser ignores it (no form element).
     form_ignored: bool = field(default=False, repr=False)
+    # Still open when the document ended: closed only by the end of input, never by its own end tag or
+    # an enclosing one (a response cut short inside this element).
+    closed_at_eof: bool = field(default=False, repr=False)
 
     def attr(self, name: str) -> str | None:
         return self.attrs.get(name)
@@ -360,6 +363,8 @@ class _TreeBuilder(RawTextHTMLParser):
 
     def finish(self) -> Element:
         self.close()
+        for element in self._stack[1:]:
+            element.closed_at_eof = True
         self._pop_to(1)
         self.root.end = self._tick()
         by_tag: dict[str, list[Element]] = {}
@@ -1001,6 +1006,7 @@ def parse_page(page: str, html: str, include_secrets: bool = False) -> ParsedPag
         links=links,
         truncated=True if doc.is_truncated() else None,
         _form_owners_known=True,
+        _table_cut=any(table.closed_at_eof for table in doc.root.find_all("table")),
     )
 
 

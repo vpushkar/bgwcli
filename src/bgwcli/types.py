@@ -173,6 +173,9 @@ class ParsedPage:
     # True when the controls' ``_form_index`` was read from live HTML by the parser (a form-less control
     # then has None); False for a page rebuilt from JSON, where form ownership is unknown.
     _form_owners_known: bool = field(default=False, repr=False, compare=False, metadata={"serialize": False})
+    # A <table> was still open when the document ended (a response cut short inside a table): its rows
+    # are not the whole table. Provenance only, never serialized; pages rebuilt from JSON keep False.
+    _table_cut: bool = field(default=False, repr=False, compare=False, metadata={"serialize": False})
 
 
 @dataclass(frozen=True)
