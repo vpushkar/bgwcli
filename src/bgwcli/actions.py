@@ -52,6 +52,10 @@ class RouterAction:
     # etherdiag.ha / authdiag.ha / ipdiag.ha / dnsdiag.ha for the details buttons): it is reported as
     # the result's `answer` (read once, the same read that looks for a rejection banner).
     shows_answer: bool = field(default=False, metadata={"serialize": False})
+    # The speed test answers its POST inline (HTTP 200, ~2 s) and then runs ~20 s: its result is the new
+    # upstream and downstream rows on speed.ha (which keeps only the last 8, so rows are told apart by
+    # Time and Direction, never by count). The action waits for both and reports them.
+    waits_for_speed_result: bool = field(default=False, metadata={"serialize": False})
 
     @property
     def requires_confirmation(self) -> bool:
@@ -102,6 +106,7 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         payload={"run": "Run Speed Test"},
         dangerous=False,
         aliases=("speed-test",),
+        waits_for_speed_result=True,
     ),
     RouterAction(
         name="detect-wifi-congestion-2.4",

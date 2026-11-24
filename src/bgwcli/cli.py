@@ -797,6 +797,11 @@ def _run_action(client: Any, command: Command) -> None:
     if action.handoff_path and _finish_handoff(command, client, action, status_code, location, resent):
         return
     result = replace(action_committed(action, status_code, location), write_attempts=resent)
+    if action.waits_for_speed_result and any(_speed_row_key(row)[0] for row in page_result.parsed.tables):
+        # Only a page that showed its result history can show which rows are new; without one (an
+        # empty history, e.g. after a factory reset) the POST's own answer is reported as before.
+        _finish_speed_test(command, client, page_result.parsed, result)
+        return
     if action.shows_answer and answer_bodies:
         result = replace(result, answer=_answer_page(
             location if status_code != 200 else None, action.page, answer_bodies[-1], command.options.include_secrets
@@ -938,6 +943,65 @@ def _answer_page(location: str | None, page: str, body: str, include_secrets: bo
     name = match.group(1).lower() if match else page
     parsed = parse_page(name, body, include_secrets=include_secrets)
     return {"page": name, "title": parsed.title, "values": parsed.values, "tables": parsed.tables}
+
+
+SPEED_TEST_WAIT_SECONDS = 90.0
+SPEED_TEST_POLL_SECONDS = 5.0
+SPEED_UNCERTAIN = "speed test may still be running; check `bgwcli page speed`"
+
+
+def _speed_row_key(row: dict[str, str]) -> tuple[str, str]:
+    return (row.get("Time", ""), row.get("Direction", "").lower())
+
+
+def _finish_speed_test(command: Command, client: Any, before_page: Any, result: OperationResult) -> None:
+    """Wait (bounded) for the speed test's new upstream and downstream rows on speed.ha and report
+    them as `answer`. Rows present before the POST are never reported; a read that fails while the
+    test runs is retried until the deadline. No new pair in time: exit 2, the test may still run."""
+    from . import restore as restore_module
+
+    before = {_speed_row_key(row) for row in (before_page.tables if before_page is not None else [])}
+    deadline = restore_module.monotonic() + SPEED_TEST_WAIT_SECONDS
+    new_rows: list[dict[str, str]] = []
+    finished = False
+    while not finished and restore_module.monotonic() < deadline:
+        restore_module.sleep(SPEED_TEST_POLL_SECONDS)
+        try:
+            page = parse_page("speed", client.get_cgi_page("speed").body or "")
+            new_rows = [row for row in page.tables if _speed_row_key(row) not in before]
+        except RouterSessionPoolFullError:
+            raise
+        except BgwError:
+            continue  # the gateway can be busy while the test runs: read again until the deadline
+        finished = {"upstream", "downstream"} <= {_speed_row_key(row)[1] for row in new_rows}
+    if not finished:
+        command.exit_code = NO_ANSWER
+        failed = replace(
+            result, committed=False, outcome="failed", warning=SPEED_UNCERTAIN, result=None,
+            answer={"page": "speed", "title": "Speed Test", "values": {}, "tables": new_rows} if new_rows else None,
+        )
+        command.output(fmt.operation_output(failed), lambda: fmt.print_operation(failed))
+        return
+    latest = {}
+    for row in new_rows:
+        latest.setdefault(_speed_row_key(row)[1], row)
+    down, up = latest["downstream"], latest["upstream"]
+
+    def mbps(row: dict[str, str]) -> str:
+        try:
+            return f"{float(row.get('Mbps', '')):.2f} Mbps"
+        except ValueError:
+            return row.get("Mbps", "?")
+
+    done = replace(
+        result, answer_read=True,
+        answer={"page": "speed", "title": "Speed Test", "values": {}, "tables": [down, up]},
+        result=(
+            f"Speed test finished: downstream {mbps(down)} ({down.get('Result', '?')}), "
+            f"upstream {mbps(up)} ({up.get('Result', '?')})."
+        ),
+    )
+    command.output(fmt.operation_output(done), lambda: fmt.print_operation(done))
 
 
 SCAN_UNCERTAIN = "scan may be in progress; check the 5 GHz channel in a minute"
