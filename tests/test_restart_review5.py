@@ -112,6 +112,43 @@ def test_a_clear_restart_post_failure_is_not_called_in_progress(tmp_env, clock, 
     assert UNCERTAIN not in out["warning"]
 
 
+def test_the_restart_post_timeout_is_recognised_by_type_not_wording(tmp_env, clock, monkeypatch, capsys):
+    # An error that only reads like a timeout (no ResponseReadTimeout behind it) is not one...
+    lookalike = _raise(lambda: cli.RouterConnectionError("Timed out reading response from somewhere"))
+    code, out, _, _, _ = _cli(monkeypatch, capsys, _handler(lookalike))
+    assert code == 2 and UNCERTAIN not in out["warning"]
+
+    # ...and a real one is, whatever its message says.
+    reworded = _raise(lambda: ResponseReadTimeout("the gateway went quiet"))
+    code, out, _, _, _ = _cli(monkeypatch, capsys, _handler(reworded))
+    assert code == 2 and UNCERTAIN in out["warning"]
+
+
+def test_a_timeout_on_the_relogin_after_an_answered_post_is_not_called_in_progress(
+    tmp_env, clock, monkeypatch, capsys
+):
+    # The POST is answered with the Login page (the gateway did not act on it); the re-login then
+    # times out. The restart POST itself was answered, so this is a plain failure, not "in progress".
+    login_page = (
+        '<html><head><title>Login</title></head><body><form method="post" action="/cgi-bin/login.ha">'
+        '<input type="hidden" name="nonce" value="abc123" /><input type="password" name="password" />'
+        '<input type="submit" name="Continue" value="Continue" /></form></body></html>'
+    )
+    state = {"posted": False}
+
+    def handler(request, n):
+        if request.method == "POST" and "/login.ha" not in request.url:
+            state["posted"] = True
+            return html(login_page)
+        if state["posted"] and "/login.ha" in request.url:
+            raise ResponseReadTimeout("timed out waiting for response headers")
+        return html(RESTART_FORM)
+
+    code, out, posts, _, _ = _cli(monkeypatch, capsys, handler)
+    assert len(posts) == 1 and code == 2
+    assert UNCERTAIN not in json.dumps(out)
+
+
 # --- 1b: the hand-off is served only as a 2xx page ------------------------------------------------------
 
 

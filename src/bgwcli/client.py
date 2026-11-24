@@ -98,12 +98,15 @@ class WriteObserver(Protocol):
 class PostWriteEvidence:
     """What the transport saw of one write: whether any configuration POST went out, whether the
     LAST one sent was answered (a Login-page answer re-sends once, so there can be two), how many
-    were sent and the HTTP status of the last answered one."""
+    were sent and the HTTP status of the last answered one. ``read_timed_out``: the write failed
+    because a response did not arrive in time after its request went out (a ResponseReadTimeout
+    behind the error), as opposed to a refused or failed connection."""
 
     attempted: bool | None = None
     response_received: bool | None = None
     attempts: int | None = None
     status_code: int | None = None
+    read_timed_out: bool = False
 
 
 def _write_observation(client: Any) -> WriteObservation | None:
@@ -175,10 +178,6 @@ class RawResponse:
 
 
 Transport = Callable[[HttpRequest], RawResponse]
-
-
-# The start of the error a response-read timeout becomes: the request went out, its answer did not come.
-READ_TIMEOUT_TEXT = "Timed out reading response from"
 
 
 class ResponseReadTimeout(TimeoutError):
@@ -1020,7 +1019,7 @@ class BGW320Client:
         except BgwError:
             raise
         except ResponseReadTimeout as exc:
-            raise RouterConnectionError(f"{READ_TIMEOUT_TEXT} {url}") from exc
+            raise RouterConnectionError(f"Timed out reading response from {url}") from exc
         except ResponseEndedEarly as exc:
             raise RouterConnectionError(f"Response from {url} ended early: {exc}") from exc
         except TimeoutError as exc:

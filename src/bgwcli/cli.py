@@ -35,9 +35,9 @@ from .allocation_preflight import (
 from .audit import build_audit, capture_fixture_pack, preflight_fixture_root
 from .autorestore import AutorestoreOptions, result_output, run_autorestore
 from .client import (
-    READ_TIMEOUT_TEXT,
     BGW320Client,
     PostWriteEvidence,
+    ResponseReadTimeout,
     RouterResponseError,
     observe_post,
     pool_full_metadata,
@@ -672,7 +672,7 @@ def _run_action(client: Any, command: Command) -> None:
         if outcome is None:  # already in the requested state: reported, nothing posted
             return
         if action.follow_redirect and isinstance(outcome, RestoreStepResult):
-            outcome = _ambiguous_restart_post(outcome)
+            outcome = _ambiguous_restart_post(outcome, sent)
         if action.follow_redirect and not isinstance(outcome, RestoreStepResult):
             _finish_restart(command, client, action, outcome, sent)
             return
@@ -810,12 +810,14 @@ def _post_live_button(
     )
 
 
-def _ambiguous_restart_post(step: RestoreStepResult) -> RestoreStepResult:
+def _ambiguous_restart_post(step: RestoreStepResult, sent: PostWriteEvidence) -> RestoreStepResult:
     """A restart POST answered 5xx, or sent and then not answered in time, may have started the
-    reboot: its failed step (exit 2) says so. Other failures keep their own wording."""
+    reboot: its failed step (exit 2) says so. Other failures keep their own wording. The timeout is
+    recognised by its type (`sent.read_timed_out`), never by the error's wording, and only while the
+    last POST sent is unanswered (a timeout on the re-login after a Login-page answer is not one)."""
     error = step.error or ""
     server_error = step.write_response_received is True and (step.status_code or 0) >= 500
-    read_timeout = step.write_attempted is not False and error.startswith(READ_TIMEOUT_TEXT)
+    read_timeout = sent.read_timed_out and sent.attempted is not False and sent.response_received is not True
     if step.status != "failed" or not (server_error or read_timeout):
         return step
     return replace(step, error=append_sentence(error, f"The {RESTART_UNCERTAIN}"))
@@ -1398,6 +1400,9 @@ def _post_observed(
                     exc.write_evidence = {**(getattr(exc, "write_evidence", None) or {}), "writeResponseReceived": True}
             _add_write_attempts(exc, _resent_attempts(evidence))
             raise
+        # Typed, not worded: a response-read timeout anywhere behind the error (the client wraps it in
+        # a RouterConnectionError) means the request went out and its answer did not come in time.
+        evidence.read_timed_out = any(isinstance(item, ResponseReadTimeout) for item in _cause_chain(exc))
         return _write_failure_step(page, exc, evidence)
     return response
 
