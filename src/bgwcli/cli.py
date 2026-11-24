@@ -702,12 +702,40 @@ def _run_action(client: Any, command: Command) -> None:
                 "so its answer page was not read."
             ),
         )
+        if action.follow_redirect:
+            handoff = _request_redirect_handoff(client, location)
+            if handoff is not None:
+                result = replace(result, result=handoff)
     if action.opener:
         result = replace(
             result, committed=False, outcome="opened", write_attempted=True, write_response_received=True,
             write_performed=False, acknowledgement_observed=False, result=OPENED_TEXT,
         )
     command.output(fmt.operation_output(result), lambda: fmt.print_operation(result))
+
+
+def _request_redirect_handoff(client: Any, location: str | None) -> str | None:
+    """Load the page a restart POST redirected to, as the browser does (the reboot belongs to that
+    hand-off). Returns the result text, or None when nothing was requested (no location, or one that
+    leaves the gateway). Its answer is never parsed: the gateway is going down, so a dropped
+    connection or an error status is the expected end, not a failure of the action."""
+    try:
+        response = client.get_redirect_target(location or "")
+    except RouterSessionPoolFullError:
+        raise
+    except (BgwError, OSError) as exc:
+        return (
+            f"Restart requested: the gateway redirected to {location} and dropped the connection while "
+            f"serving it ({exc}), as it does when it goes down for the reboot. Expect it back in a few "
+            "minutes; 'Time Since Last Reboot' on sysinfo confirms the restart."
+        )
+    if response is None:
+        return None
+    return (
+        f"Restart requested: the gateway redirected to {location} and answered it with HTTP "
+        f"{response.status_code}. It should go down for the reboot now; 'Time Since Last Reboot' on "
+        "sysinfo confirms the restart once it is back."
+    )
 
 
 def _run_diagnostic(client: Any, command: Command) -> None:

@@ -33,6 +33,10 @@ class RouterAction:
     drops_web_server: bool = field(default=False, metadata={"serialize": False})
     # The button only opens an editor on the gateway; nothing is saved until the editor's own Save.
     opener: bool = field(default=False, metadata={"serialize": False})
+    # Request the page the POST redirects to (once, same gateway only), as a browser does: the
+    # restart POST answers 302 -> restarting.ha and the reboot belongs to that hand-off. A failure
+    # there is the gateway going down, not an error.
+    follow_redirect: bool = field(default=False, metadata={"serialize": False})
 
 
 ROUTER_ACTIONS: tuple[RouterAction, ...] = (
@@ -41,10 +45,15 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         page="restart",
         description="Restart the gateway.",
         confirm_token="RESTART",
-        payload={"Restart": "Restart Device"},
+        # restart.ha renders <input type="submit" name="Restart" value="Restart"> (fw 6.35.8). The
+        # button is read from the live form, so the posted value is always the one the page renders;
+        # "Restart Device" was answered 302 and ignored (no reboot).
+        payload={"Restart": "Restart"},
         dangerous=True,
         drops_web_server=True,
         aliases=("restart-device", "reboot"),
+        form_button="Restart",
+        follow_redirect=True,
     ),
     RouterAction(
         name="clear-device-list",
@@ -212,6 +221,7 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         payload={"Restart": "Restart"},
         dangerous=True,
         drops_web_server=True,
+        follow_redirect=True,
     ),
     RouterAction(
         name="reset-wifi-config",

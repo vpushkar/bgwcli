@@ -511,7 +511,7 @@ def test_print_operation_dry_run_and_committed():
     assert "Dangerous       yes" in output
     assert "Confirmation    RESTART" in output
     assert "Commit command  action restart --commit --confirm RESTART" in output
-    assert 'Payload         {"Restart":"Restart Device"}' in output
+    assert 'Payload         {"Restart":"Restart"}' in output
 
     committed = action_committed(action, 302, "/cgi-bin/home.ha")
     output = capture(fmt.print_operation, committed)

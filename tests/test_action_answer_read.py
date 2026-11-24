@@ -18,6 +18,10 @@ SCAN_FORM = (
     '<input type="text" name="setting" value="old">'
     '<input type="submit" name="chanscan5" value="Find Best Channel"></form>'
 )
+RESTART_FORM = (
+    '<form method="post" action="/cgi-bin/restart.ha"><input type="hidden" name="nonce" value="abc123" />'
+    '<input type="submit" name="Restart" value="Restart" /><input type="submit" name="Cancel" value="Cancel" /></form>'
+)
 
 
 def _run(monkeypatch, capsys, name, handler):
@@ -45,6 +49,8 @@ def _handler(action, answer):
                 f'<form action="/cgi-bin/{action.post_path}"><input name="nonce" value="abc123">'
                 '<input type="submit" name="Restart" value="Restart"></form>'
             )
+        if action.name == "restart":
+            return html(RESTART_FORM)
         return html(SCAN_FORM if action.form_button else form(action.page, "old"))
 
     handler.state = state
@@ -65,21 +71,22 @@ def test_dropping_action_reports_committed_without_reading_the_answer(
             raise RouterConnectionError("connection reset")
         return html("<title>Unavailable</title>", 503)
 
-    handler = _handler(get_action(name), unreadable)
+    action = get_action(name)
+    handler = _handler(action, unreadable)
     code, out, posts, _ = _run(monkeypatch, capsys, name, handler)
     assert code == 0 and len(posts) == 1
     assert out["committed"] is True and out["answerRead"] is False
     assert out["statusCode"] == 302 and out["writeAttempted"] is True
-    assert handler.state["reads_after_post"] == 0
+    # The answer page is never parsed; the restart actions only hand off to the redirect target once
+    # (test_restart_action), whatever it answers.
+    assert handler.state["reads_after_post"] == (1 if action.follow_redirect else 0)
 
 
 def test_dropping_action_still_honours_an_inline_rejection(tmp_env, clock, monkeypatch, capsys):
-    action = get_action("restart")
-
     def handler(request, n):
         if request.method == "POST":
-            return html(form(action.page, "old", banner=ERROR))
-        return html(form(action.page, "old"))
+            return html(ERROR + RESTART_FORM)
+        return html(RESTART_FORM)
 
     code, out, posts, _ = _run(monkeypatch, capsys, "restart", handler)
     assert code == 1 and len(posts) == 1 and out["committed"] is False

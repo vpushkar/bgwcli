@@ -715,6 +715,22 @@ class BGW320Client:
         to log in with; otherwise it is the final answer."""
         return self.options.wait_for_session is True and bool(self.options.access_code)
 
+    def get_redirect_target(self, location: str) -> HttpResponse | None:
+        """GET, once and without following further redirects, the /cgi-bin/ page an unfollowed POST
+        redirected to (``location`` as the gateway sent it). Returns None, sending nothing, when the
+        location is empty, leaves this gateway's origin, or is not a /cgi-bin/ path. Transport
+        failures raise like any other request (a restart drops the connection here)."""
+        if not location:
+            return None
+        target = urlsplit(urljoin(self._origin + "/", location))
+        origin = urlsplit(self._origin)
+        if (target.scheme, target.netloc) != (origin.scheme, origin.netloc):
+            return None
+        if not target.path.startswith("/cgi-bin/"):
+            return None
+        path = target.path + (f"?{target.query}" if target.query else "")
+        return self._request(path, "GET", follow_redirects=False)
+
     def post_cgi_page(self, page: str, fields: Mapping[str, str]) -> HttpResponse:
         """POST a page's own form: nonce from GET <page>.ha, POST to /cgi-bin/<page>.ha."""
         page = canonical_cgi_page(page)

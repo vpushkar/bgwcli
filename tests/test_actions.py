@@ -40,7 +40,7 @@ def test_router_actions_includes_observed_button_style_operations():
 def test_confirm_tokens_pages_payloads_and_dangerous_flags_preserved():
     by_name = {a.name: a for a in ROUTER_ACTIONS}
     expected = {
-        "restart": ("restart", "RESTART", {"Restart": "Restart Device"}, True),
+        "restart": ("restart", "RESTART", {"Restart": "Restart"}, True),
         "clear-device-list": ("devices", "CLEAR-DEVICES", {"Clear": "Clear Device List"}, False),
         "run-speed-test": ("speed", "SPEED", {"run": "Run Speed Test"}, False),
         "detect-wifi-congestion-2.4": (
@@ -114,7 +114,7 @@ def test_display_action_payload_redacts_sensitive_names():
     )
     assert display_action_payload(action) == {"password": "[redacted]"}
     assert display_action_payload(action, include_secrets=True) == {"password": "secret"}
-    assert display_action_payload(get_action("restart")) == {"Restart": "Restart Device"}
+    assert display_action_payload(get_action("restart")) == {"Restart": "Restart"}
 
 
 def test_router_action_json_shape_matches_typescript():
@@ -124,9 +124,10 @@ def test_router_action_json_shape_matches_typescript():
         "page": "restart",
         "description": "Restart the gateway.",
         "confirmToken": "RESTART",
-        "payload": {"Restart": "Restart Device"},
+        "payload": {"Restart": "Restart"},
         "dangerous": True,
         "aliases": ["restart-device", "reboot"],
+        "formButton": "Restart",
     }
     # Actions without aliases omit the key, as the TS object literal does.
     assert "aliases" not in to_json_dict(get_action("reset-ip"))

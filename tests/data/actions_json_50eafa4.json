@@ -5,13 +5,14 @@
     "description": "Restart the gateway.",
     "confirmToken": "RESTART",
     "payload": {
-      "Restart": "Restart Device"
+      "Restart": "Restart"
     },
     "dangerous": true,
     "aliases": [
       "restart-device",
       "reboot"
-    ]
+    ],
+    "formButton": "Restart"
   },
   {
     "name": "clear-device-list",
