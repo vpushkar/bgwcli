@@ -6,8 +6,12 @@ one of those pages is returned `blocked` unless the caller explicitly asks for a
 
 from __future__ import annotations
 
+import os
 import re
+import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from typing import Any
 
 from .actions import is_opener_button
 from .errors import UsageError
@@ -298,6 +302,52 @@ def _plan_from_payload(
         display_changes=safe_changes,
         sensitive_names=sensitive_names,
     )
+
+
+def _drop_trailing_newline(text: str) -> str:
+    return text[:-2] if text.endswith("\r\n") else text[:-1] if text.endswith("\n") else text
+
+
+def resolve_assignment_values(
+    assignments: list[str], *, stdin: Any = None, warn: Callable[[str], None] | None = None
+) -> tuple[list[str], bool]:
+    """KEY=VALUE assignments with their value sources resolved, so a secret never has to be in argv:
+    `KEY=@-` reads the value from stdin (one per invocation), `KEY=@<path>` reads it from that file,
+    `KEY=@@text` is the literal `@text`; one trailing newline is dropped from a read value. Returns
+    (assignments, whether stdin was read). A file readable by group or others gets a warning (its
+    contents are never shown); a file that cannot be read is a UsageError naming only the path."""
+    resolved: list[str] = []
+    used_stdin = False
+    for assignment in assignments:
+        index = assignment.find("=")
+        if index <= 0:
+            resolved.append(assignment)  # parse_assignments reports it
+            continue
+        key, value = assignment[:index], assignment[index + 1 :]
+        if value.startswith("@@"):
+            value = value[1:]
+        elif value == "@-":
+            if used_stdin:
+                raise UsageError("Only one KEY=@- may read its value from stdin per command.")
+            used_stdin = True
+            value = _drop_trailing_newline((stdin if stdin is not None else sys.stdin).read())
+        elif value.startswith("@"):
+            path = value[1:]
+            if not path:
+                raise UsageError(f"{key}=@ needs a file path (KEY=@<path>), or KEY=@- for stdin.")
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    mode = os.fstat(handle.fileno()).st_mode
+                    value = _drop_trailing_newline(handle.read())
+            except (OSError, UnicodeDecodeError) as exc:
+                reason = exc.strerror if isinstance(exc, OSError) and exc.strerror else "not readable UTF-8 text"
+                raise UsageError(f"Cannot read the value for {key} from {path}: {reason}.") from None
+            if mode & 0o077 and warn is not None:
+                warn(f"warning: {path} (value for {key}) is readable by group or others; chmod 600 it.")
+            elif mode & 0o077:
+                sys.stderr.write(f"warning: {path} (value for {key}) is readable by group or others; chmod 600 it.\n")
+        resolved.append(f"{key}={value}")
+    return resolved, used_stdin
 
 
 def parse_assignments(assignments: list[str]) -> dict[str, str]:

@@ -475,6 +475,9 @@ def write_pages_epilog(command: str) -> str:
         checks = [
             "set posts the page's current form values plus your KEY=VALUE overrides with the page's Save button,",
             "and refuses a Save button the page renders disabled; a page with no Save button only gets a warning.",
+            "Keep a secret out of argv and shell history: KEY=@- reads the value from stdin (one per command;",
+            "not with --access-code-stdin), KEY=@<path> reads it from a file (chmod 600 it), KEY=@@text is the",
+            "literal @text. One trailing newline is dropped.",
         ]
     else:
         rule = "submit previews a button on these pages but refuses --commit"

@@ -429,11 +429,19 @@ need `--confirm TOKEN`; the token is derived from the target page (`WCONFIG-UNIF
 ```bash
 bgwcli set wconfig maxclients=80                                  # dry run: plan + token
 bgwcli set wconfig maxclients=80 --commit --confirm WCONFIG
+read -rs KEY && printf '%s' "$KEY" | bgwcli set wconfig key11=@- --commit --confirm WCONFIG
+bgwcli set wconfig key11=@"$HOME/.wifi-key" --commit --confirm WCONFIG   # value from a 0600 file
 bgwcli submit "Diagnostics/Troubleshoot" Ping WebAddress=example.com --commit --confirm DIAG
 bgwcli actions                                                    # every guarded action and its token
 bgwcli action run-speed-test --commit --confirm SPEED
 bgwcli action restart-wifi-2.4 --commit --confirm RESTART-WIFI --timeout 45
 ```
+
+A secret value never has to be on the command line, where `ps` and the shell history see it: `KEY=@-`
+reads the value from stdin (one per command, and not together with `--access-code-stdin`),
+`KEY=@<path>` reads it from a file (a file readable by group or others gets a warning), and `KEY=@@text`
+is the literal value `@text`. One trailing newline is dropped from a value that was read. This works for
+`set` and for the assignments of `submit`; the dry run and JSON keep secret fields redacted as usual.
 
 Every action, its token and the page it starts from (`bgwcli action -h` prints the same list):
 

@@ -93,6 +93,7 @@ from .mutations import (
     confirm_token_for_page,
     own_submit_button,
     require_own_form,
+    resolve_assignment_values,
 )
 from .operations import (
     OperationResult,
@@ -262,12 +263,29 @@ class Command:
 # entry points
 
 
+def _resolve_value_sources(command: Command) -> None:
+    """`set`/`submit` KEY=@- / KEY=@<path> / KEY=@@text values, read before any client exists so a
+    secret never has to be in argv. --access-code-stdin and KEY=@- cannot both read stdin."""
+    first = {"set": 1, "submit": 2}.get(command.name)
+    if first is None or len(command.args) <= first:
+        return
+    head, assignments = command.args[:first], command.args[first:]
+    if command.options.access_code_stdin and any(a.partition("=")[2] == "@-" for a in assignments):
+        raise UsageError(
+            "--access-code-stdin and KEY=@- both read stdin; export BGW_ACCESS_CODE or use the configuration "
+            "file for the access code, or read the value from a file with KEY=@<path>."
+        )
+    resolved, _ = resolve_assignment_values(assignments)
+    command.args = [*head, *resolved]
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     json_mode = "--json" in args
     try:
         command = parse_args(args)
         json_mode = command.options.json  # BGW_JSON=true (environment or configuration file) also selects JSON
+        _resolve_value_sources(command)
         if command.name == "help":
             target = command_help(command.args[0]) if command.args else None
             sys.stdout.write(target or help_text())
