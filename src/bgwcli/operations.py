@@ -54,6 +54,9 @@ class OperationResult:
     answer_read: bool | None = None
     # Number of post-save verification re-reads performed (1 = first try); absent when none ran.
     verify_attempts: int | None = None
+    # The results page an action's answer redirected to (diagnostics): {page, title, values, tables},
+    # redacted like `page` output; absent for every other action.
+    answer: dict[str, Any] | None = None
 
 
 _SAFE_ARG = re.compile(r"^[a-z0-9_.:-]+$", re.IGNORECASE)

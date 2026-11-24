@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import math
 import os
+import re
 import sys
 import textwrap
 from collections.abc import Callable, Sequence
@@ -707,11 +708,15 @@ def _run_action(client: Any, command: Command) -> None:
             describe_raised=True, evidence=sent,
         )
     resent = _resent_attempts(sent)
+    answer_bodies: list[str] = []
     if not isinstance(outcome, RestoreStepResult | tuple):
         # The gateway's notification decides the action like every other write path: a rejection
         # banner is a structured rejection (exit 1); "No changes detected" is unchanged (exit 0).
+        if action.shows_answer and outcome.status_code == 200:
+            answer_bodies.append(outcome.body or "")
         outcome = _answer_step(
-            client, action.page, outcome, read_redirect=not action.drops_web_server, attempts=resent
+            client, action.page, outcome, read_redirect=not action.drops_web_server, attempts=resent,
+            seen=answer_bodies if action.shows_answer else None,
         ) or (outcome.status_code, _location(outcome.headers))
     if isinstance(outcome, RestoreStepResult):
         if resent is not None and outcome.write_attempts is None:
@@ -729,6 +734,10 @@ def _run_action(client: Any, command: Command) -> None:
     if action.handoff_path and _finish_handoff(command, client, action, status_code, location, resent):
         return
     result = replace(action_committed(action, status_code, location), write_attempts=resent)
+    if action.shows_answer and answer_bodies:
+        result = replace(result, answer=_answer_page(
+            location if status_code != 200 else None, action.page, answer_bodies[-1], command.options.include_secrets
+        ))
     if action.drops_web_server:
         result = replace(
             result, answer_read=False, write_attempted=True, write_response_received=True,
@@ -857,6 +866,15 @@ def _finish_restart(command: Command, client: Any, action: Any, response: Any, s
         command.exit_code = failed_exit
         result = replace(result, committed=False, outcome="failed", answer_read=read, warning=text, result=None)
     command.output(fmt.operation_output(result), lambda: fmt.print_operation(result))
+
+
+def _answer_page(location: str | None, page: str, body: str, include_secrets: bool) -> dict[str, Any]:
+    """The results page an action's answer led to, as reported in `answer`: its page name (from the
+    redirect, else the action's own page), title, values and tables, redacted like `page` output."""
+    match = re.search(r"/cgi-bin/([a-z0-9_]+)\.ha", location or "", re.IGNORECASE)
+    name = match.group(1).lower() if match else page
+    parsed = parse_page(name, body, include_secrets=include_secrets)
+    return {"page": name, "title": parsed.title, "values": parsed.values, "tables": parsed.tables}
 
 
 SCAN_UNCERTAIN = "scan may be in progress; check the 5 GHz channel in a minute"
@@ -1597,14 +1615,15 @@ def _confirm_response(
 
 
 def _answer_step(
-    client: Any, page: str, response: Any, *, read_redirect: bool = True, attempts: int | None = None
+    client: Any, page: str, response: Any, *, read_redirect: bool = True, attempts: int | None = None,
+    seen: list[str] | None = None,
 ) -> RestoreStepResult | None:
     """The step for a write the gateway answered with a notification (inline in a 200 body, or on
     the page a 3xx redirects to): a rejection banner is a failed step (exit 1); "No changes detected.
     Save not performed." (with or without the error icon) is an `unchanged` step, decided by
     save_result like the Wi-Fi notification. None when the answer carries neither."""
     status_code, location = response.status_code, _location(response.headers)
-    banner = _answer_banner(client, page, response, read_redirect=read_redirect, attempts=attempts)
+    banner = _answer_banner(client, page, response, seen, read_redirect=read_redirect, attempts=attempts)
     if isinstance(banner, RestoreStepResult):
         return banner
     if banner and not no_changes_text(banner):

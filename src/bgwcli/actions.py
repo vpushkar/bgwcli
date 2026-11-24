@@ -48,6 +48,10 @@ class RouterAction:
     # requested (observed live on fw 6.35.8, 2026-11-24). Only an answer that redirects there leads to
     # the hand-off.
     handoff_path: str | None = field(default=None, metadata={"serialize": False})
+    # The page the POST redirects to holds the action's results (diagnostics: diag.ha after a full run,
+    # etherdiag.ha / authdiag.ha / ipdiag.ha / dnsdiag.ha for the details buttons): it is reported as
+    # the result's `answer` (read once, the same read that looks for a rejection banner).
+    shows_answer: bool = field(default=False, metadata={"serialize": False})
 
     @property
     def requires_confirmation(self) -> bool:
@@ -147,6 +151,7 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         payload={"RunFullDiagnostics": "Run Full Diagnostics"},
         dangerous=False,
         aliases=("full-diagnostics",),
+        shows_answer=True,
     ),
     RouterAction(
         name="send-diagnostics",
@@ -165,6 +170,7 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         payload={"EthDetails": "Details"},
         dangerous=False,
         aliases=("ethernet-details",),
+        shows_answer=True,
     ),
     RouterAction(
         name="diagnostics-authentication-details",
@@ -174,6 +180,7 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         payload={"AuthDetails": "Details"},
         dangerous=False,
         aliases=("authentication-details",),
+        shows_answer=True,
     ),
     RouterAction(
         name="diagnostics-ip-details",
@@ -183,6 +190,7 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         payload={"IPDetails": "Details"},
         dangerous=False,
         aliases=("ip-details",),
+        shows_answer=True,
     ),
     RouterAction(
         name="diagnostics-dns-details",
@@ -192,6 +200,7 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         payload={"DNSDetails": "Details"},
         dangerous=False,
         aliases=("dns-details",),
+        shows_answer=True,
     ),
     RouterAction(
         name="packet-filter-enable",

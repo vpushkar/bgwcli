@@ -430,6 +430,14 @@ def print_operation(result: OperationResult, stream: TextIO | None = None) -> No
     if result.result:
         out.write("\nResult\n")
         out.write(f"{sanitize_terminal_text(result.result)}\n")
+    if result.answer:
+        answer = result.answer
+        out.write(f"\n{_line(answer.get('title') or answer.get('page') or '')}\n")
+        if answer.get("values"):
+            print_key_values(answer["values"], out)
+        tables = answer.get("tables") or []
+        if tables:
+            print_rows(tables, _table_keys(tables), out)
 
 
 # TS builders that take `location: string | null` and always assign it (operations.ts actionCommitted /
