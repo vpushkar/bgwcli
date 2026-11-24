@@ -239,6 +239,8 @@ def test_a_restart_redirect_whose_query_names_login_keeps_the_session_and_hands_
 
 
 def test_a_restart_redirected_to_the_login_page_still_loses_the_session(tmp_env, clock, monkeypatch, capsys):
-    code, out, _, gets_after, client = _cli(monkeypatch, capsys, _handler(_redirect("/cgi-bin/login.ha?x=1")))
-    assert code != 0 and gets_after == []
+    code, out, posts, gets_after, client = _cli(monkeypatch, capsys, _handler(_redirect("/cgi-bin/login.ha?x=1")))
+    assert code == 2 and len(posts) == 1 and gets_after == []
     assert client.has_authenticated_session() is False
+    # The bounce is the POST's own answer: its observed status stays in the JSON evidence.
+    assert out["statusCode"] == 302 and out["writeResponseReceived"] is True

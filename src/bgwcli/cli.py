@@ -1402,7 +1402,11 @@ def _post_observed(
                 if evidence.attempted is False:
                     exc.write_evidence = presend_write_evidence()
                 elif evidence.response_received is True:
-                    exc.write_evidence = {**(getattr(exc, "write_evidence", None) or {}), "writeResponseReceived": True}
+                    # The POST was answered (e.g. bounced 302 to login.ha): its observed status is evidence.
+                    status = {"statusCode": evidence.status_code} if type(evidence.status_code) is int else {}
+                    exc.write_evidence = {
+                        **(getattr(exc, "write_evidence", None) or {}), "writeResponseReceived": True, **status,
+                    }
             _add_write_attempts(exc, _resent_attempts(evidence))
             raise
         # Typed, not worded: a response-read timeout anywhere behind the error (the client wraps it in
