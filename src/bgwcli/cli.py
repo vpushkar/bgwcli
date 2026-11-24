@@ -41,6 +41,7 @@ from .client import (
     ResponseReadTimeout,
     RouterResponseError,
     gateway_cgi_redirect,
+    normalize_origin,
     observe_post,
     pool_full_metadata,
     resolve_gateway_redirect,
@@ -99,6 +100,7 @@ from .operations import (
     action_dry_run,
     diagnostic_committed,
     diagnostic_dry_run,
+    quote_arg,
     restore_committed,
     restore_dry_run,
     set_committed,
@@ -242,6 +244,8 @@ class Command:
     max_passes: int = 3
     wait_seconds: int = 120
     on_any_diff: bool = False
+    # --config as given on the command line (None when absent): printed commit commands repeat it.
+    config_path: str | None = None
     exit_code: int = field(default=0, compare=False)
     # Clients other than the one `run` built that performed (part of) the command: autorestore's
     # fallback-code client. An interrupt reads the write evidence of all of them.
@@ -642,6 +646,47 @@ def _fetch_form_page(client: Any, page: str) -> ParsedPageResult:
     return result
 
 
+def _target_args(command: Command) -> str:
+    """The non-secret arguments that select which gateway a printed commit command reaches: the
+    resolved host unless it is the default (an explicit --host, or one from BGW_HOST/ROUTER_IP/the
+    configuration file, so the command is self-contained) and an explicit --config. Never an access
+    code. Empty for the default gateway and no --config."""
+    parts: list[str] = []
+    host = command.options.host
+    try:
+        default = normalize_origin(host) == normalize_origin(DEFAULT_HOST)
+    except UsageError:
+        default = False
+    if not default:
+        parts.append(f"--host {quote_arg(host)}")
+    if command.config_path:
+        parts.append(f"--config {quote_arg(command.config_path)}")
+    return "".join(f" {part}" for part in parts)
+
+
+def _with_target(result: OperationResult, command: Command, scope: str = "") -> OperationResult:
+    """`result` whose commit command also carries `scope` (flags selecting what it commits) and the
+    gateway it was previewed against, so running it as printed commits the same thing there."""
+    if not result.commit_command:
+        return result
+    return replace(result, commit_command=f"{result.commit_command}{scope}{_target_args(command)}")
+
+
+def _restore_preview(steps: Any, command: Command) -> OperationResult:
+    """The restore dry run, whose commit command names this dump file, the --include/--prune scope it
+    was planned with and the gateway it was planned against."""
+    result = restore_dry_run(steps, RESTORE_CONFIRM_TOKEN)
+    path = command.args[0] if command.args and command.args[0] else "<dumpfile>"
+    scope = f" --include {quote_arg(','.join(command.include))}" if command.include else ""
+    scope += " --prune" if command.prune else ""
+    return replace(
+        result,
+        commit_command=(
+            f"bgwcli restore {quote_arg(path)}{scope} --commit --confirm {RESTORE_CONFIRM_TOKEN}{_target_args(command)}"
+        ),
+    )
+
+
 def _run_action(client: Any, command: Command) -> None:
     name = _require_arg(command, "action name")
     action = get_action(name)
@@ -650,7 +695,7 @@ def _run_action(client: Any, command: Command) -> None:
     payload = display_action_payload(action, command.options.include_secrets)
 
     if not command.commit:
-        result = action_dry_run(action, payload)
+        result = _with_target(action_dry_run(action, payload), command)
         command.output(fmt.operation_output(result), lambda: fmt.print_operation(result))
         return
 
@@ -1097,7 +1142,10 @@ def _run_diagnostic(client: Any, command: Command) -> None:
     )
 
     if not command.commit:
-        result = diagnostic_dry_run(kind, target, plan.display_payload, diagnostic_button(kind))
+        protocol = {"IPv4": " --ipv4", "IPv6": " --ipv6"}.get(command.protocol or "", "")
+        result = _with_target(
+            diagnostic_dry_run(kind, target, plan.display_payload, diagnostic_button(kind)), command, protocol
+        )
         command.output(fmt.operation_output(result), lambda: fmt.print_operation(result))
         return
 
@@ -1236,7 +1284,7 @@ def _run_set(client: Any, command: Command) -> None:
         raise UsageError(plan.reason or "Mutation blocked.")
 
     if not command.commit:
-        result = set_dry_run(plan, confirmation)
+        result = _with_target(set_dry_run(plan, confirmation), command)
         command.output(fmt.operation_output(result), lambda: fmt.print_operation(result))
         return
 
@@ -2064,7 +2112,7 @@ def _run_submit(client: Any, command: Command) -> None:
     plan = build_submit_plan(page, page_result.parsed, button, assignments, command.options.include_secrets)
 
     if not command.commit:
-        result = submit_dry_run(plan, button, token)
+        result = _with_target(submit_dry_run(plan, button, token), command)
         command.output(fmt.operation_output(result), lambda: fmt.print_operation(result))
         return
 
@@ -2249,7 +2297,7 @@ def _run_restore(client: Any, command: Command) -> dict[str, Any] | None:
                 preflight_report = allocation_preflight_report(preflight)
         if preflight_report is not None:
             if not command.commit:
-                operation = replace(restore_dry_run([], RESTORE_CONFIRM_TOKEN), result=preflight_report["reason"])
+                operation = replace(_restore_preview([], command), result=preflight_report["reason"])
 
                 def print_preflight() -> None:
                     for conflict in preflight_report["conflicts"]:
@@ -2307,7 +2355,7 @@ def _run_restore(client: Any, command: Command) -> dict[str, Any] | None:
 
     warnings = _warn_skipped_forwards(diff)
     if not command.commit:
-        plan = restore_dry_run(steps, RESTORE_CONFIRM_TOKEN)
+        plan = _restore_preview(steps, command)
 
         def print_plan() -> None:
             fmt.print_restore_plan(steps)
@@ -3223,6 +3271,7 @@ def parse_args(argv: list[str]) -> Command:
             else _env_int("BGW_AUTORESTORE_WAIT", 120, 0)
         ),
         on_any_diff=opt("on_any_diff", False) or env_flag("BGW_AUTORESTORE_ON_ANY_DIFF", False),
+        config_path=opt("config"),
     )
 
 

@@ -742,7 +742,8 @@ def test_diagnostic_dry_run_and_commit(capsys, fake):
     assert code == 0
     assert payload["operation"] == "diagnostic" and payload["dryRun"] is True
     assert payload["payload"]["WebAddress"] == "example.com" and payload["payload"]["protopref"] == "IPv6"
-    assert "confirmation" not in payload and payload["commitCommand"].endswith(" --commit")
+    # The preview's protocol flag is part of what commits (and the default host adds nothing).
+    assert "confirmation" not in payload and payload["commitCommand"].endswith(" --commit --ipv6")
     assert fake["client"].posts == []
 
     code, payload, _ = run_json(capsys, ["diagnostics", "traceroute", "example.com", "--commit", "--confirm", "DIAG",
