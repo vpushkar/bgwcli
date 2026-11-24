@@ -177,6 +177,21 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         payload={"Enable": "Enable Packet Filters"},
         dangerous=False,
         aliases=("enable-packet-filter", "enable-packet-filters"),
+        # The page shows Enable only while filters are disabled (Disable while enabled): reading the
+        # button from the live form refuses a request for the state the gateway is already in.
+        form_button="Enable",
+    ),
+    RouterAction(
+        name="packet-filter-disable",
+        page="packetfilter",
+        description="Disable packet filters (the gateway stops applying every packet-filter rule).",
+        confirm_token="PACKETFILTER",
+        # packetfilter.ha renders <input type="submit" name="Disable" value="Disable Packet Filters">
+        # while filters are enabled (fw 6.35.8).
+        payload={"Disable": "Disable Packet Filters"},
+        dangerous=True,
+        aliases=("disable-packet-filter", "disable-packet-filters"),
+        form_button="Disable",
     ),
     RouterAction(
         name="packet-filter-add-drop-rule",

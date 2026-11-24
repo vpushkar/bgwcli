@@ -450,6 +450,7 @@ Every action, its token and the page it starts from (`bgwcli action -h` prints t
 | `diagnostics-ip-details` | `DIAG` | `diag` | guarded | Show IP diagnostic details. (also `ip-details`) |
 | `diagnostics-dns-details` | `DIAG` | `diag` | guarded | Show DNS diagnostic details. (also `dns-details`) |
 | `packet-filter-enable` | `PACKETFILTER` | `packetfilter` | guarded | Enable packet filters. (also `enable-packet-filter`, `enable-packet-filters`) |
+| `packet-filter-disable` | `PACKETFILTER` | `packetfilter` | dangerous | Disable packet filters (the gateway stops applying every packet-filter rule). (also `disable-packet-filter`, `disable-packet-filters`) |
 | `packet-filter-add-drop-rule` | `PACKETFILTER` | `packetfilter` | guarded | Open/add a packet-filter drop rule. (also `add-drop-rule`) |
 | `packet-filter-add-pass-rule` | `PACKETFILTER` | `packetfilter` | guarded | Open/add a packet-filter pass rule. (also `add-pass-rule`) |
 | `reset-ip` | `RESET-IP` | `reset` | dangerous | Reset the router IP stack. |

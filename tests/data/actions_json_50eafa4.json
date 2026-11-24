@@ -187,7 +187,23 @@
     "aliases": [
       "enable-packet-filter",
       "enable-packet-filters"
-    ]
+    ],
+    "formButton": "Enable"
+  },
+  {
+    "name": "packet-filter-disable",
+    "page": "packetfilter",
+    "description": "Disable packet filters (the gateway stops applying every packet-filter rule).",
+    "confirmToken": "PACKETFILTER",
+    "payload": {
+      "Disable": "Disable Packet Filters"
+    },
+    "dangerous": true,
+    "aliases": [
+      "disable-packet-filter",
+      "disable-packet-filters"
+    ],
+    "formButton": "Disable"
   },
   {
     "name": "packet-filter-add-drop-rule",
