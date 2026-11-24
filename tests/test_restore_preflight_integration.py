@@ -99,7 +99,7 @@ class Router:
             return response(page_id, entry_page_html(TARGET_MAC, [TARGET_IP]))
         raise AssertionError(f"unexpected HTTP GET {page_id}")
 
-    def post_cgi_page(self, page_id, fields):
+    def post_cgi_page(self, page_id, fields, rebind=None):
         fields = dict(fields)
         self.posts.append((page_id, fields))
         self.events.append("clear" if page_id == "devices" else f"post:{page_id}")

@@ -56,7 +56,7 @@ class MutationRouter:
         self.polls = 0
         self.events: list[str] = []
 
-    def post_cgi_page(self, page: str, fields: Mapping[str, str]) -> HttpResponse:
+    def post_cgi_page(self, page: str, fields: Mapping[str, str], rebind=None) -> HttpResponse:
         self.posts.append((page, dict(fields)))
         self.events.append("first-post" if len(self.posts) == 1 else "later-post")
         if len(self.posts) == 1:

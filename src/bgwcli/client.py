@@ -738,15 +738,20 @@ class BGW320Client:
         return self._request(expected_path + query, "GET", follow_redirects=False)
 
     def post_cgi_page(
-        self, page: str, fields: Mapping[str, str], *, submit: tuple[str, str] | None = None
+        self, page: str, fields: Mapping[str, str], *, submit: tuple[str, str] | None = None,
+        rebind: Callable[[str], Mapping[str, str]] | None = None,
     ) -> HttpResponse:
-        """POST a page's own form: nonce from GET <page>.ha, POST to /cgi-bin/<page>.ha."""
+        """POST a page's own form: nonce from GET <page>.ha, POST to /cgi-bin/<page>.ha. `rebind`, when
+        given, receives the body of the page read for the write nonce and returns the fields to post
+        (or raises NoncePageRefusedError, sending nothing): a positional button is re-resolved there."""
         page = canonical_cgi_page(page)
-        return self.post_form(page, f"{page}.ha", fields, submit=submit)
+        if rebind is None:
+            return self.post_form(page, f"{page}.ha", fields, submit=submit)
+        return self.post_form(page, f"{page}.ha", fields, submit=submit, rebind=rebind)
 
     def post_form(
         self, nonce_page: str, post_path: str, fields: Mapping[str, str], *, submit: tuple[str, str] | None = None,
-        nonce_query: str = "",
+        nonce_query: str = "", rebind: Callable[[str], Mapping[str, str]] | None = None,
     ) -> HttpResponse:
         """POST to an arbitrary CGI path (e.g. ``wrestart.ha?1``) with the nonces read from
         ``nonce_page``. home.ha hosts several Restart forms whose actions are other CGI scripts
@@ -762,7 +767,7 @@ class BGW320Client:
         _cgi_path(nonce_page, nonce_query)  # validated before anything is sent
         if not self.has_authenticated_session():
             self.login()
-        response = self._post_form_once(nonce_page, post_path, fields, submit, nonce_query)
+        response = self._post_form_once(nonce_page, post_path, fields, submit, nonce_query, rebind)
         if router_sessions_full(response.body) and not self._can_wait_and_relogin():
             # A full pool is the answer, whatever credentials are held: classify it before any
             # credential-dependent forced login so the cooldown is recorded and the error is not
@@ -772,7 +777,7 @@ class BGW320Client:
         if looks_like_login(response.body):
             self.login(response.body, force=True)
             try:
-                response = self._post_form_once(nonce_page, post_path, fields, submit, nonce_query)
+                response = self._post_form_once(nonce_page, post_path, fields, submit, nonce_query, rebind)
             except NoncePageRefusedError as refusal:
                 # The first POST went out and was answered with the Login page, so the refusal's own
                 # "nothing was sent" clause is untrue here: it only covers the re-send.
@@ -798,7 +803,7 @@ class BGW320Client:
 
     def _post_form_once(
         self, nonce_page: str, post_path: str, fields: Mapping[str, str], submit: tuple[str, str] | None = None,
-        nonce_query: str = "",
+        nonce_query: str = "", rebind: Callable[[str], Mapping[str, str]] | None = None,
     ) -> HttpResponse:
         from .fetch import is_page_not_found
         from .parser import looks_like_login, parse_page
@@ -824,6 +829,10 @@ class BGW320Client:
             or parsed.selects or parsed.textareas or parsed.buttons
         ):
             raise NoncePageRefusedError(f"{nonce_page}: the page read for the write nonce has no form controls")
+        if rebind is not None:
+            # The fields are resolved against this very page: a positional button (Remove_<n>) is bound
+            # to the row it addresses now, or the write is refused before anything is sent.
+            fields = rebind(current.body)
         # A page can host several forms, each with its own nonce (home.ha's Restart forms carry two).
         nonces = _select_write_nonces(current.body, nonce_page, post_path, fields)
         if submit is not None:

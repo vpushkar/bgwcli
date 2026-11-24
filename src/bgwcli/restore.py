@@ -737,6 +737,86 @@ def _reserve_step(
 _REMOVE_BUTTON = re.compile(r"^Remove_\d+$")
 
 
+def _resolve_remove_button(
+    kind: RestoreStepKind, live: ParsedPage, name: str, label: str | None
+) -> tuple[str | None, str | None, bool]:
+    """``(button, problem, absent)`` for removing entry ``name`` (and device ``label`` for a forward) on
+    ``live``: the Remove_<n> button of its row, else why there is none. ``absent`` is True when no row
+    carries the entry at all (nothing to remove). Shared by planning and by the re-check on the page
+    read for the write nonce, so a removal always addresses the row its entry has there."""
+    name_aliases = SERVICE_COLUMNS["name"] if kind == "remove-service" else FORWARD_COLUMNS["service"]
+    label_aliases = FORWARD_COLUMNS["deviceLabel"] if kind == "remove-forward" else None
+
+    candidate_rows: list[dict[str, str]] = []
+    for row in live.tables:
+        col = find_column(row, name_aliases)
+        if col is not None and row.get(col, "").strip():
+            candidate_rows.append(row)
+
+    matching_indexes: list[int] = []
+    for index, row in enumerate(candidate_rows):
+        name_col = find_column(row, name_aliases)
+        assert name_col is not None
+        if row.get(name_col, "").strip() != name:
+            continue
+        if label_aliases is not None:
+            label_col = find_column(row, label_aliases)
+            if label_col is None or row.get(label_col, "").strip() != label:
+                continue
+        matching_indexes.append(index)
+    if not matching_indexes:
+        return None, f"no Remove button found for row '{name}'", True
+
+    remove_buttons = sorted(
+        (b for b in live.buttons if _REMOVE_BUTTON.match(b.name)),
+        key=lambda b: int(b.name[len("Remove_") :]),
+    )
+    if len(remove_buttons) != len(candidate_rows):
+        return None, (
+            "cannot map table rows to Remove buttons safely "
+            f"({len(candidate_rows)} rows, {len(remove_buttons)} buttons)"
+        ), False
+    if len(matching_indexes) > 1:
+        return None, f"ambiguous: {len(matching_indexes)} rows match '{name}'", False
+    return remove_buttons[matching_indexes[0]].name, None, False
+
+
+class RemoveTargetGone(NoncePageRefusedError):
+    """The entry a removal was planned for is no longer on the page read for the write nonce: there is
+    nothing to remove, and nothing was sent."""
+
+
+def _rebind_remove(step: RestoreStep) -> Callable[[str], dict[str, str]] | None:
+    """The `rebind` a removal POST carries: on the page read for its write nonce, the planned entry's
+    row is found again by identity. Its current Remove_<n> is posted (the planned one when the page did
+    not change); an entry that is gone raises RemoveTargetGone, an unmappable page NoncePageRefusedError."""
+    if step.kind not in ("remove-service", "remove-forward") or step.postcondition is None or not step.button:
+        return None
+    absent_row = step.postcondition.absent_row
+    if absent_row is None or step.raw_payload is None:
+        return None
+    name, label = absent_row
+    planned, payload = step.button, dict(step.raw_payload)
+
+    def rebind(body: str) -> dict[str, str]:
+        live = _parse_page(step.page, body)
+        button, problem, absent = _resolve_remove_button(step.kind, live, name, label)
+        if absent:
+            raise RemoveTargetGone(
+                f"{step.page}: '{name}' is no longer on the page read for the write nonce, so there is nothing "
+                "to remove; nothing was sent"
+            )
+        if button is None:
+            raise NoncePageRefusedError(
+                f"{step.page}: {problem} on the page read for the write nonce; nothing was sent"
+            )
+        if button == planned:
+            return payload
+        return {(button if key == planned else key): value for key, value in payload.items()}
+
+    return rebind
+
+
 # Remove_<id> button names are positional against the table rows that carry a name/service value —
 # NOT against every row of every >=3-column table on the page (parse_page flattens all such tables
 # together, so a second unrelated table would otherwise shift the mapping). We only trust the
@@ -756,47 +836,9 @@ def _remove_step(
     if live is None:
         return _blocked(kind, page, description, f"live page {page} not fetched")
 
-    name_aliases = SERVICE_COLUMNS["name"] if kind == "remove-service" else FORWARD_COLUMNS["service"]
-    label_aliases = FORWARD_COLUMNS["deviceLabel"] if kind == "remove-forward" else None
-
-    candidate_rows: list[dict[str, str]] = []
-    for row in live.tables:
-        col = find_column(row, name_aliases)
-        if col is not None and row.get(col, "").strip():
-            candidate_rows.append(row)
-
-    remove_buttons = sorted(
-        (b for b in live.buttons if _REMOVE_BUTTON.match(b.name)),
-        key=lambda b: int(b.name[len("Remove_") :]),
-    )
-
-    if len(remove_buttons) != len(candidate_rows):
-        return _blocked(
-            kind,
-            page,
-            description,
-            "cannot map table rows to Remove buttons safely "
-            f"({len(candidate_rows)} rows, {len(remove_buttons)} buttons)",
-        )
-
-    matching_indexes: list[int] = []
-    for index, row in enumerate(candidate_rows):
-        name_col = find_column(row, name_aliases)
-        assert name_col is not None
-        if row.get(name_col, "").strip() != name:
-            continue
-        if label_aliases is not None:
-            label_col = find_column(row, label_aliases)
-            if label_col is None or row.get(label_col, "").strip() != label:
-                continue
-        matching_indexes.append(index)
-
-    if len(matching_indexes) > 1:
-        return _blocked(kind, page, description, f"ambiguous: {len(matching_indexes)} rows match '{name}'")
-    if not matching_indexes:
-        return _blocked(kind, page, description, f"no Remove button found for row '{name}'")
-
-    button = remove_buttons[matching_indexes[0]].name
+    button, problem, _absent = _resolve_remove_button(kind, live, name, label)
+    if button is None:
+        return _blocked(kind, page, description, problem or f"no Remove button found for row '{name}'")
     step = _planned(page, kind, description, button, [], live_pages, options)
     return replace(step, postcondition=RestorePostcondition(absent_row=(name, label)))
 
@@ -947,7 +989,10 @@ class GetResponse(Protocol):
 class RestorePoster(Protocol):
     """The slice of the router client execute_restore needs (client.BGW320Client satisfies it)."""
 
-    def post_cgi_page(self, page: str, fields: Mapping[str, str]) -> PostResponse: ...
+    # `rebind` is passed only for a removal (see _rebind_remove), so a poster that never removes may omit it.
+    def post_cgi_page(
+        self, page: str, fields: Mapping[str, str], *, rebind: Callable[[str], Mapping[str, str]] | None = None
+    ) -> PostResponse: ...
 
     def post_form(
         self, nonce_page: str, post_path: str, fields: Mapping[str, str], *, submit: tuple[str, str] | None = None,
@@ -1087,7 +1132,9 @@ def execute_restore(
             try:
                 # Allocate opens an editor; every other POST could be the final write.
                 base["write_attempted"] = step.follow_up is None
-                response = _post_with_write_evidence(client, step.page, step.raw_payload, base)
+                response = _post_with_write_evidence(
+                    client, step.page, step.raw_payload, base, rebind=_rebind_remove(step)
+                )
                 location = _location(response.headers)
                 if not _accepted(response.status_code):
                     result = RestoreStepResult(
@@ -1109,6 +1156,10 @@ def execute_restore(
                     result = _confirm_warning_page(client, warning, base, step=step)
                 else:
                     result = _wait_for_save(client, step.page, response, base, step=step)
+            except RemoveTargetGone as exc:
+                # The entry was already removed (by hand, between planning and this write): nothing was
+                # sent and nothing is left to do; the closing read confirms the section.
+                result = RestoreStepResult(**{**base, "write_attempted": False}, status="skipped", warning=str(exc))
             except Exception as exc:  # noqa: BLE001 - preserve execution evidence on every failure
                 if (step.reconnect_required and isinstance(exc, RouterConnectionError)
                         and base["write_attempted"] is not False):
@@ -1132,6 +1183,7 @@ def _post_with_write_evidence(
     nonce_page: str | None = None,
     submit: tuple[str, str] | None = None,
     nonce_query: str = "",
+    rebind: Callable[[str], Mapping[str, str]] | None = None,
 ) -> PostResponse:
     """Use optional public transport evidence without guessing legacy poster delivery. With
     `nonce_page` the POST goes to `page` carrying the nonce of the form `nonce_page` serves for it;
@@ -1140,7 +1192,9 @@ def _post_with_write_evidence(
     evidence = PostWriteEvidence()
     try:
         with observe_post(client, evidence):
-            if nonce_page is None:
+            if nonce_page is None and rebind is not None:
+                response = client.post_cgi_page(page, payload, rebind=rebind)
+            elif nonce_page is None:
                 response = client.post_cgi_page(page, payload)
             else:
                 extra: dict[str, Any] = {"submit": submit} if submit is not None else {}
