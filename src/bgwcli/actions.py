@@ -37,6 +37,12 @@ class RouterAction:
     # restart POST answers 302 -> restarting.ha and the reboot belongs to that hand-off. A failure
     # there is the gateway going down, not an error.
     follow_redirect: bool = field(default=False, metadata={"serialize": False})
+    # Post exactly {form_button: the value the page renders} plus the form's nonce, nothing else (the
+    # page's form holds no other control a browser would submit with this button).
+    button_only: bool = field(default=False, metadata={"serialize": False})
+    # A toggle's other button: when only it is on the page, the gateway is already in the requested
+    # state (reported as unchanged, nothing posted).
+    opposite_button: str | None = field(default=None, metadata={"serialize": False})
 
     @property
     def requires_confirmation(self) -> bool:
@@ -65,6 +71,7 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         aliases=("restart-device", "reboot"),
         form_button="Restart",
         follow_redirect=True,
+        button_only=True,
     ),
     RouterAction(
         name="clear-device-list",
@@ -76,6 +83,7 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         payload={"Clear": "Clear and Rescan for Devices"},
         dangerous=False,
         form_button="Clear",
+        button_only=True,
     ),
     RouterAction(
         name="run-speed-test",
@@ -186,11 +194,14 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         description="Enable packet filters.",
         confirm_token="PACKETFILTER",
         payload={"Enable": "Enable Packet Filters"},
-        dangerous=False,
+        # Enabling filters that hold drop rules can cut the operator's own traffic: keep its token.
+        dangerous=True,
         aliases=("enable-packet-filter", "enable-packet-filters"),
         # The page shows Enable only while filters are disabled (Disable while enabled): reading the
         # button from the live form refuses a request for the state the gateway is already in.
         form_button="Enable",
+        button_only=True,
+        opposite_button="Disable",
     ),
     RouterAction(
         name="packet-filter-disable",
@@ -203,6 +214,8 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         dangerous=True,
         aliases=("disable-packet-filter", "disable-packet-filters"),
         form_button="Disable",
+        button_only=True,
+        opposite_button="Enable",
     ),
     RouterAction(
         name="packet-filter-add-drop-rule",
@@ -250,7 +263,9 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         payload={"Restart": "Restart"},
         dangerous=True,
         drops_web_server=True,
+        form_button="Restart",
         follow_redirect=True,
+        button_only=True,
     ),
     RouterAction(
         name="reset-wifi-config",

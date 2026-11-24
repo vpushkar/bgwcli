@@ -83,11 +83,13 @@ def test_dropping_action_reports_committed_without_reading_the_answer(
     action = get_action(name)
     handler = _handler(action, unreadable)
     code, out, posts, _ = _run(monkeypatch, capsys, name, handler)
-    assert code == 0 and len(posts) == 1
-    assert out["committed"] is True and out["answerRead"] is False
+    # The answer page is never parsed; the restart actions hand off to restarting.ha once. A 503 there
+    # is ambiguous for a restart (exit 2, "restart may be in progress"); a reset connection is the
+    # gateway going down (exit 0).
+    ambiguous = action.follow_redirect and answer_kind == "http"
+    assert code == (2 if ambiguous else 0) and len(posts) == 1
+    assert out["committed"] is (not ambiguous) and out["answerRead"] is ambiguous
     assert out["statusCode"] == 302 and out["writeAttempted"] is True
-    # The answer page is never parsed; the restart actions only hand off to the redirect target once
-    # (test_restart_action), whatever it answers.
     assert handler.state["reads_after_post"] == (1 if action.follow_redirect else 0)
 
 

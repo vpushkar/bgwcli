@@ -24,6 +24,7 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from email.utils import parsedate_to_datetime
+from html.parser import HTMLParser
 from typing import Any, Protocol, runtime_checkable
 from urllib.parse import urlencode, urljoin, urlsplit
 
@@ -722,16 +723,10 @@ class BGW320Client:
         None, sending nothing, when the location is empty or malformed, resolves to another origin
         (scheme, host and port compared normalized) or to any path but ``expected_path``. Transport
         failures raise like any other request (a restart drops the connection here)."""
-        if not location:
-            return None
-        try:
-            target = urlsplit(urljoin(urljoin(self._origin + "/", posted_path), location))
-            same_origin = _normalized_origin(target) == _normalized_origin(urlsplit(self._origin))
-        except ValueError:
-            return None
-        # The path is compared as sent: a trailing slash, dot segments or encoded variants are not the
-        # gateway's restarting page, so nothing is normalized into it.
-        if not same_origin or target.path != expected_path:
+        kind, target = resolve_gateway_redirect(self._origin, posted_path, location)
+        # The path is compared as resolved: a trailing slash or an encoded variant is not the gateway's
+        # restarting page, so nothing is normalized into it.
+        if kind != "ok" or target.path != expected_path:
             return None
         query = f"?{target.query}" if target.query else ""
         return self._request(expected_path + query, "GET", follow_redirects=False)
@@ -1175,127 +1170,89 @@ def _nonce_value(raw: str) -> str | None:
     return None
 
 
-_NON_MARKUP_OPENER = re.compile(r"<!--|<(script|style)\b")
+class _FormScanner(HTMLParser):
+    """Forms as a browser reads them, in one linear pass of the stdlib HTML tokenizer (the same family
+    of parser parse_page uses): attribute values are entity-decoded and may hold any markup,
+    comments are skipped, script/style/textarea/title text is raw text, a <form> opened inside an
+    open form is ignored (HTML5 form-element pointer), and controls inside a disabled fieldset are
+    disabled."""
 
+    CDATA_CONTENT_ELEMENTS = ("script", "style", "textarea", "title")
 
-def _strip_non_markup(html: str) -> str:
-    """``html`` without comments and script/style text, which are not markup to a browser. One
-    left-to-right pass (each search starts where the previous one ended), so hostile input stays
-    linear. ``<!-->`` and ``<!--->`` are empty comments; an unterminated comment or script/style
-    element runs to the end of the document."""
-    lower = html.lower()
-    kept: list[str] = []
-    index = 0
-    while True:
-        match = _NON_MARKUP_OPENER.search(lower, index)
-        if match is None:
-            kept.append(html[index:])
-            break
-        kept.append(html[index : match.start()])
-        if match.group(1) is None:  # a comment
-            after = match.end()
-            if lower.startswith(">", after):
-                index = after + 1
-                continue
-            if lower.startswith("->", after):
-                index = after + 2
-                continue
-            close = lower.find("-->", after)
-            if close < 0:
-                break
-            index = close + 3
-            continue
-        opener_end = lower.find(">", match.end())
-        if opener_end < 0:  # an unterminated opener is not an element: keep the rest as text
-            kept.append(html[match.start() :])
-            break
-        close = lower.find("</" + match.group(1), opener_end + 1)
-        if close < 0:
-            break
-        close_end = lower.find(">", close)
-        if close_end < 0:
-            break
-        index = close_end + 1
-    return "".join(kept)
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.forms: list[tuple[str, list[str], list[str], dict[str, str]]] = []
+        self.page_nonces: list[str] = []
+        self._current: tuple[str, list[str], list[str], dict[str, str]] | None = None
+        self._fieldsets: list[bool] = []
+        self._button: tuple[str, str | None, list[str]] | None = None  # name, value attribute, text
 
-
-_TAG_START = re.compile(r"<(/?)([a-zA-Z][a-zA-Z0-9]*)")
-_RCDATA = ("textarea", "title")
-
-
-def _iter_tags(html: str):
-    """(closing, lowercased name, raw attribute text) of every tag, read the way a browser tokenizes:
-    a quoted attribute value may hold ``<`` and ``>`` without ending the tag, and the text of a
-    <textarea> or <title> is never markup. One left-to-right pass: every search starts where the
-    previous one ended, so hostile input stays linear. A tag whose quote or ``>`` never comes ends
-    the scan (the rest of the document is not markup)."""
-    lower = html.lower()
-    length = len(html)
-    index = 0
-    while True:
-        match = _TAG_START.search(html, index)
-        if match is None:
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes: dict[str, str] = {}
+        for key, value in attrs:
+            attributes.setdefault(key.lower(), "" if value is None else value)
+        if tag == "form":
+            if self._current is None:
+                self._current = (attributes.get("action", "").strip(), [], [], {})
+                self.forms.append(self._current)
             return
-        cursor = match.end()
-        quote: str | None = None
-        previous = ""
-        while cursor < length:
-            char = html[cursor]
-            if quote is not None:
-                if char == quote:
-                    quote = None
-                    previous = char
-            elif char in "\"'" and previous == "=":
-                quote = char
-            elif char == ">" or char == "<":
-                break
-            elif not char.isspace():
-                previous = char
-            cursor += 1
-        if cursor >= length:
+        if tag == "fieldset":
+            self._fieldsets.append("disabled" in attributes)
             return
-        if html[cursor] == "<":  # an unterminated tag is text; scan on from the next "<"
-            index = cursor
-            continue
-        closing, name = match.group(1), match.group(2).lower()
-        yield closing, name, html[match.end() : cursor]
-        index = cursor + 1
-        if not closing and name in _RCDATA:
-            close = lower.find("</" + name, index)
-            if close < 0:
-                return
-            index = close
+        if tag not in ("input", "button", "select", "textarea"):
+            return
+        name = attributes.get("name")
+        if tag == "input" and (name or "").lower() == "nonce" and _HEX.fullmatch(attributes.get("value", "")):
+            self.page_nonces.append(attributes["value"])
+            if self._current is not None:
+                self._current[1].append(attributes["value"])
+        if self._current is None or not name:
+            return
+        self._current[2].append(name)
+        disabled = "disabled" in attributes or any(self._fieldsets)
+        kind = attributes.get("type", "submit" if tag == "button" else "").lower()
+        if disabled or kind not in ("submit", "image"):
+            return
+        if tag == "button":
+            self._button = (name, attributes.get("value"), [])
+        else:
+            self._current[3].setdefault(name, attributes.get("value") or name)
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.handle_starttag(tag, attrs)
+        if tag == "button":
+            self.handle_endtag(tag)
+
+    def handle_data(self, data: str) -> None:
+        if self._button is not None:
+            self._button[2].append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "form":
+            self._current = None
+        elif tag == "fieldset" and self._fieldsets:
+            self._fieldsets.pop()
+        elif tag == "button" and self._button is not None:
+            name, value, text = self._button
+            self._button = None
+            # What the planner posts for a <button>: its value attribute, else its caption, else its name.
+            if self._current is not None:
+                self._current[3].setdefault(name, value or " ".join("".join(text).split()) or name)
+
+
+def _scan(html: str) -> _FormScanner:
+    scanner = _FormScanner()
+    # <!--> and <!---> are empty comments to a browser; older stdlib tokenizers read them as the start
+    # of a comment that hides the rest of the page.
+    scanner.feed(html.replace("<!--->", "<!---->").replace("<!-->", "<!---->"))
+    scanner.close()
+    return scanner
 
 
 def _scan_forms(html: str) -> list[tuple[str, list[str], list[str], dict[str, str]]]:
-    """(action, nonce values, control names, submit name -> value) of every form, in one pass, names
-    and nonces in document order. A form ends at its closing tag or at the end of the document. A
-    <form> start tag met while a form is open is ignored, as browsers do (HTML5 form-element
-    pointer): home.ha's Wi-Fi Restart forms open a second form inside themselves, and the browser
-    posts the button and both nonces to the outer form's action. Comments, script/style text,
-    <textarea>/<title> text and quoted attribute values are not markup (see _iter_tags)."""
-    forms: list[tuple[str, list[str], list[str], dict[str, str]]] = []
-    current: tuple[str, list[str], list[str], dict[str, str]] | None = None
-    for closing, tag, raw in _iter_tags(_strip_non_markup(html)):
-        if tag == "form":
-            if closing:
-                current = None
-            elif current is None:
-                current = (_attributes(raw).get("action", "").strip(), [], [], {})
-                forms.append(current)
-        elif tag in ("input", "button", "select", "textarea") and not closing and current is not None:
-            attributes = _attributes(raw)
-            name = attributes.get("name")
-            if name:
-                current[2].append(name)
-                kind = (attributes.get("type") or ("submit" if tag == "button" else "")).lower()
-                if kind in ("submit", "image") and "disabled" not in attributes:
-                    current[3].setdefault(name, attributes.get("value") or "")
-            if tag == "input":
-                nonce = _nonce_value(raw)
-                if nonce is not None:
-                    current[1].append(nonce)
-    return forms
+    """(action, nonce values, control names, enabled submit name -> the value a planner posts) of
+    every form, names and nonces in document order. See _FormScanner for how markup is read."""
+    return _scan(html).forms
 
 
 def _require_submit_on_page(html: str, nonce_page: str, post_path: str, submit: tuple[str, str]) -> None:
@@ -1304,10 +1261,8 @@ def _require_submit_on_page(html: str, nonce_page: str, post_path: str, submit: 
     the page changed between the planning read and this one, and nothing is sent."""
     name, value = submit
     target = form_target(post_path)
-    forms = _scan_forms(html)
-    if not forms:  # a form-less page: nothing to tie the button to
-        return
-    owners = [form for form in forms if form_target(form[0]) == target]
+    # A named action's button always comes from a form: a form-less page means the page changed.
+    owners = [form for form in _scan_forms(html) if form_target(form[0]) == target]
     if not any(form[3].get(name) == value for form in owners):
         raise NoncePageRefusedError(
             f"{nonce_page}: the '{name}' button ({value!r}) is not on the page read for the write nonce "
@@ -1340,7 +1295,7 @@ def _select_write_nonces(html: str, nonce_page: str, post_path: str, fields: Map
     forms = _scan_forms(html)
     target = form_target(post_path)
     matching = [form for form in forms if form_target(form[0]) == target]
-    page_nonce = extract_nonce(_strip_non_markup(html))
+    page_nonce = extract_nonce(html)
     no_nonce = f"{nonce_page}: no write nonce found for {post_path}; nothing was sent"
 
     # A posted control that only another form holds belongs to that form (a browser would post it
@@ -1368,7 +1323,7 @@ def _select_write_nonces(html: str, nonce_page: str, post_path: str, fields: Map
         )
     if matching:
         posted = [name for name in fields if name not in ("nonce", "hashpassword")]
-        owners = [form for form in matching if any(name in form[2] for name in posted)]
+        owners = [form for form in matching if not posted_set.isdisjoint(form[2])]
         candidates = owners if len(owners) == 1 else (owners or matching)
         if len(owners) == 1 or all(form[1] == candidates[0][1] for form in candidates):
             if candidates[0][1]:
@@ -1390,13 +1345,27 @@ def _select_write_nonces(html: str, nonce_page: str, post_path: str, fields: Map
 
 
 def extract_nonce(html: str) -> str | None:
-    """The first nonce input on the page, attributes in either order."""
-    for closing, tag, raw in _iter_tags(_strip_non_markup(html)):
-        if not closing and tag == "input":
-            nonce = _nonce_value(raw)
-            if nonce is not None:
-                return nonce
-    return None
+    """The first nonce input on the page (comments and raw text skipped, attributes in any order)."""
+    nonces = _scan(html).page_nonces
+    return nonces[0] if nonces else None
+
+
+def resolve_gateway_redirect(origin: str, posted_path: str, location: str | None) -> tuple[str, Any]:
+    """Where a write's ``Location`` points, resolved like a browser against the POST URL
+    (``origin`` + ``posted_path``): ("none", None) without a location, ("malformed", None) when it
+    cannot be parsed (an unclosed IPv6 bracket, a non-numeric port), ("other-origin", parts) when
+    scheme, host or port (defaults made explicit) differ from the gateway's, else ("ok", parts)."""
+    if not location:
+        return "none", None
+    try:
+        target = urlsplit(urljoin(urljoin(origin + "/", posted_path), location))
+        _ = target.port  # urlsplit accepts a non-numeric port; reading it validates it
+        gateway = urlsplit(origin)
+    except ValueError:
+        return "malformed", None
+    if _normalized_origin(target) != _normalized_origin(gateway):
+        return "other-origin", target
+    return "ok", target
 
 
 def _normalized_origin(parts) -> tuple[str, str, int | None]:

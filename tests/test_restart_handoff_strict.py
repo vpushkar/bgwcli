@@ -87,8 +87,9 @@ def test_a_restarting_page_answer_that_is_not_the_gateway_going_down_is_unconfir
 
 @pytest.mark.parametrize(
     "answer",
-    [lambda r: html("<title>Restarting</title>"), lambda r: html("", 503)],
-    ids=["200", "503"],
+    # A 5xx is ambiguous (exit 2, "restart may be in progress"): see test_simplification.
+    [lambda r: html("<title>Restarting</title>")],
+    ids=["200"],
 )
 def test_the_restarting_page_answered_or_going_down_is_a_requested_unverified_restart(
     tmp_env, clock, monkeypatch, capsys, answer

@@ -183,7 +183,7 @@
     "payload": {
       "Enable": "Enable Packet Filters"
     },
-    "dangerous": false,
+    "dangerous": true,
     "aliases": [
       "enable-packet-filter",
       "enable-packet-filters"
@@ -259,7 +259,8 @@
     "payload": {
       "Restart": "Restart"
     },
-    "dangerous": true
+    "dangerous": true,
+    "formButton": "Restart"
   },
   {
     "name": "reset-wifi-config",

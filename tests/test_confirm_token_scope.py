@@ -39,7 +39,9 @@ def test_the_token_is_required_exactly_for_dangerous_and_connection_dropping_act
     required = {a.name for a in ROUTER_ACTIONS if a.requires_confirmation}
     assert required == {a.name for a in ROUTER_ACTIONS} - TOKEN_FREE
     assert {"restart", "factory-reset", "restart-wifi-2.4", "restart-wifi-5", "find-best-channel-5"} <= required
-    assert {"run-speed-test", "clear-device-list", "packet-filter-enable"} <= TOKEN_FREE
+    assert {"run-speed-test", "clear-device-list"} <= TOKEN_FREE
+    # Enabling filters that hold drop rules can cut the operator off: it keeps its token.
+    assert "packet-filter-enable" in required
 
 
 def test_a_token_free_action_commits_with_commit_alone(tmp_env, clock, monkeypatch, capsys):

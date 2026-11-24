@@ -21,7 +21,6 @@ from decimal import Decimal, DecimalException
 from pathlib import Path
 from time import sleep
 from typing import Any
-from urllib.parse import urlsplit
 
 from . import __version__, helpdoc
 from . import format as fmt
@@ -41,6 +40,7 @@ from .client import (
     RouterResponseError,
     observe_post,
     pool_full_metadata,
+    resolve_gateway_redirect,
     router_sessions_full,
     session_pool_full_error,
 )
@@ -82,7 +82,13 @@ from .errors import (
 )
 from .exit_codes import INTERRUPTED, NEGATIVE_ANSWER, NO_ANSWER, fatal_exit_code
 from .fetch import LOGIN_PAGE_ERROR, ParsedPageResult, fetch_parsed_page, is_page_not_found
-from .mutations import DANGEROUS_PAGES, build_mutation_plan, build_submit_plan, confirm_token_for_page
+from .mutations import (
+    DANGEROUS_PAGES,
+    build_mutation_plan,
+    build_submit_plan,
+    confirm_token_for_page,
+    require_own_form,
+)
 from .operations import (
     OperationResult,
     action_committed,
@@ -118,8 +124,8 @@ from .restore import (
     build_restore_plan,
     confirm_saved_page,
     confirm_warning_page,
+    confirmation_target,
     execute_restore,
-    is_confirmation_redirect,
     is_transient_verification_status,
     pending_allocation_requests,
     reconnect_verification_reason,
@@ -660,7 +666,14 @@ def _run_action(client: Any, command: Command) -> None:
         _report_fetch_failure(command, page_result)
         return
     sent = PostWriteEvidence()
-    if action.form_button:
+    if action.button_only:
+        outcome = _post_live_button(client, command, action, page_result.parsed, sent)
+        if outcome is None:  # already in the requested state: reported, nothing posted
+            return
+        if action.follow_redirect and not isinstance(outcome, RestoreStepResult):
+            _finish_restart(command, client, action, outcome, sent)
+            return
+    elif action.form_button:
         # The button lives inside the page's main form: post the live base payload + the button.
         # A submit plan is never blocked (dangerous pages are allowed for explicit buttons) and a
         # missing button raises, so the plan is always postable.
@@ -715,21 +728,6 @@ def _run_action(client: Any, command: Command) -> None:
                 "so its answer page was not read."
             ),
         )
-        if action.follow_redirect:
-            posted_path = f"/cgi-bin/{action.post_path or action.page + '.ha'}"
-            failed_exit, text, read = (
-                _request_redirect_handoff(client, location, posted_path)
-                if status_code in _GET_REDIRECT_STATUSES
-                else (NO_ANSWER, f"the restart POST was answered HTTP {status_code}, not with a redirect to the "
-                      "gateway's restarting page; the restart is unconfirmed; verify the gateway state", False)
-            )
-            if failed_exit is None:
-                result = replace(result, result=text)
-            else:
-                command.exit_code = failed_exit
-                result = replace(
-                    result, committed=False, outcome="failed", answer_read=read, warning=text, result=None
-                )
     if action.opener:
         result = replace(
             result, committed=False, outcome="opened", write_attempted=True, write_response_received=True,
@@ -742,51 +740,136 @@ _GET_REDIRECT_STATUSES = (301, 302, 303)
 _RESTART_HANDOFF_PATH = "/cgi-bin/restarting.ha"
 
 
-def _gateway_went_down(exc: BaseException) -> bool:
-    """True when a hand-off GET failed because the gateway reset, refused or cut the connection (it is
-    going down), as opposed to a failure that says nothing about the gateway (name resolution, TLS,
-    a connect timeout)."""
+def _cause_chain(exc: BaseException):
+    """``exc`` and every exception behind it (cause, context, a URLError's reason)."""
     import urllib.error
 
-    from .client import ResponseEndedEarly, ResponseReadTimeout
-
-    down = (ConnectionResetError, ConnectionRefusedError, ConnectionAbortedError, BrokenPipeError,
-            ResponseEndedEarly, ResponseReadTimeout)
     seen: set[int] = set()
     current: BaseException | None = exc
     while current is not None and id(current) not in seen:
         seen.add(id(current))
-        if isinstance(current, down):
-            return True
+        yield current
         if isinstance(current, urllib.error.URLError) and isinstance(current.reason, BaseException):
             current = current.reason
-            continue
-        current = current.__cause__ or current.__context__
-    return False
+        else:
+            current = current.__cause__ or current.__context__
+
+
+def _gateway_went_down(exc: BaseException) -> bool:
+    """The hand-off GET failed because the gateway reset, refused or cut the connection (an answer
+    already in progress ended): it is going down for the reboot."""
+    import http.client
+
+    from .client import ResponseEndedEarly
+
+    down = (ConnectionResetError, ConnectionRefusedError, ConnectionAbortedError, BrokenPipeError,
+            ResponseEndedEarly, http.client.IncompleteRead)
+    return any(isinstance(item, down) for item in _cause_chain(exc))
+
+
+def _timed_out(exc: BaseException) -> bool:
+    return any(isinstance(item, TimeoutError) for item in _cause_chain(exc))
+
+
+RESTART_UNCERTAIN = "restart may be in progress, check uptime"
+_RESTART_UNVERIFIED = (
+    "The reboot itself is not verified; 'Time Since Last Reboot' on sysinfo confirms it once the gateway is back."
+)
+_RESTART_UNCONFIRMED = "the restart is unconfirmed; verify the gateway state"
+
+
+def _post_live_button(
+    client: Any, command: Command, action: Any, parsed: Any, sent: PostWriteEvidence
+) -> Any | None:
+    """POST exactly {button: the value the page renders} plus the nonce for a button-only action.
+    The button is resolved by its exact HTML name and checked again on the page read for the nonce.
+    None when only the toggle's opposite button is on the page (already in that state: reported as
+    unchanged, nothing posted)."""
+    name = action.form_button
+    buttons = [b for b in parsed.buttons if b.name == name and not b.disabled]
+    if not buttons:
+        opposite = action.opposite_button
+        if opposite and any(b.name == opposite and not b.disabled for b in parsed.buttons):
+            result = replace(
+                action_committed(action, None, None), committed=False, outcome="unchanged",
+                result=f"Nothing posted: the gateway is already in that state ({action.page} offers '{opposite}').",
+            )
+            command.output(fmt.operation_output(result), lambda: fmt.print_operation(result))
+            return None
+        raise UsageError(f"Button '{name}' was not found on {action.page}.")
+    button = buttons[0]
+    require_own_form(action.page, parsed, button)
+    value = button.value or button.label or button.name
+    return _post_observed(
+        client, action.page,
+        lambda: client.post_cgi_page(action.page, {name: value}, submit=(name, value)),
+        describe_raised=True, evidence=sent,
+    )
+
+
+def _finish_restart(command: Command, client: Any, action: Any, response: Any, sent: PostWriteEvidence) -> None:
+    """Report a restart POST the gateway answered. Only a 301/302/303 to its restarting page leads to
+    the hand-off; any other answer (inline 200, another status) leaves the restart unconfirmed."""
+    resent = _resent_attempts(sent)
+    status_code, location = response.status_code, _location(response.headers)
+    result = replace(
+        action_committed(action, status_code, location), write_attempts=resent,
+        answer_read=False, write_attempted=True, write_response_received=True,
+    )
+    posted_path = f"/cgi-bin/{action.post_path or action.page + '.ha'}"
+    if status_code in _GET_REDIRECT_STATUSES:
+        failed_exit, text, read = _request_redirect_handoff(client, location, posted_path, status_code, resent)
+    elif status_code == 200:
+        failed_exit, text, read = _inline_restart_answer(action.page, response.body or "")
+    else:
+        failed_exit, text, read = NO_ANSWER, (
+            f"the restart POST was answered HTTP {status_code}, not with a redirect to the gateway's "
+            f"restarting page; {_RESTART_UNCONFIRMED}"
+        ), False
+    if failed_exit is None:
+        result = replace(result, result=text)
+    else:
+        command.exit_code = failed_exit
+        result = replace(result, committed=False, outcome="failed", answer_read=read, warning=text, result=None)
+    command.output(fmt.operation_output(result), lambda: fmt.print_operation(result))
+
+
+def _inline_restart_answer(page: str, body: str) -> tuple[int | None, str, bool]:
+    """A restart POST answered inline (HTTP 200): a rejection banner is a negative answer (exit 1);
+    anything else - "No changes detected", a plain page, a page past the parser's bounds - means the
+    gateway did not hand off to its restarting page: unconfirmed (exit 2)."""
+    try:
+        parsed = parse_page(page, body)
+        banner = router_error_banner(body)
+    except BgwError as exc:
+        return NO_ANSWER, f"the restart POST's answer could not be read ({exc}); {_RESTART_UNCONFIRMED}", True
+    if not parsed.truncated and banner and not no_changes_text(banner):
+        return NEGATIVE_ANSWER, f"{WRITE_REJECTED_PREFIX}{banner}", True
+    detail = (
+        "a page larger than the parser's bounds" if parsed.truncated
+        else f'"{NO_CHANGES_TEXT}"' if (banner or no_changes_notice(body)) else "a page"
+    )
+    return NO_ANSWER, (
+        f"the restart POST was answered inline (HTTP 200) with {detail}, not with a redirect to the "
+        f"gateway's restarting page; {_RESTART_UNCONFIRMED}"
+    ), True
 
 
 def _request_redirect_handoff(
-    client: Any, location: str | None, posted_path: str
+    client: Any, location: str | None, posted_path: str, post_status: int, attempts: int | None
 ) -> tuple[int | None, str, bool]:
-    """Load the gateway's restarting page the restart POST redirected to, as the browser does (the
-    reboot may belong to that hand-off). Returns (exit code or None, text, answer read).
+    """Load the gateway's restarting page the restart POST redirected to (301/302/303), as the browser
+    does. Returns (exit code or None, text, answer read).
 
-    Only a same-origin 301/302/303 to exactly /cgi-bin/restarting.ha is the hand-off; any other
-    location (none, malformed, another page or port, a trailing slash) is never requested and leaves
-    the restart unconfirmed (exit 2). On restarting.ha a 2xx or 5xx answer, or the gateway resetting,
-    refusing or cutting the connection, is the gateway accepting the request and going down (None:
-    requested, reboot not verified). A rejection banner is a negative answer (exit 1). A Login page
-    or 401/403 forgets the session; a full session pool raises with the write evidence (the
-    coordinator records the cooldown). Anything else - another 3xx or 4xx, Page not found, "No
-    changes detected", a page past the parser's bounds, a request that failed before the gateway
-    answered - leaves the restart unconfirmed (exit 2). The caller's result keeps the POST's write
-    evidence."""
+    Exit 0 (restart requested, reboot not verified) only when the gateway clearly went down or served
+    the page: a 2xx restarting page without a refusal, or the connection reset, refused or cut
+    mid-answer. A 5xx or a timeout is ambiguous: exit 2, "restart may be in progress, check uptime".
+    A rejection banner is a negative answer (exit 1). A Login page or 401/403 forgets the session; a
+    full session pool raises with the write evidence. Anything else - a redirect elsewhere (never
+    requested), another 3xx/4xx, Page not found, "No changes detected", a page past the parser's
+    bounds, a request that failed before the gateway answered - is unconfirmed (exit 2)."""
     from .fetch import is_page_not_found
 
-    unverified = (
-        "The reboot itself is not verified; 'Time Since Last Reboot' on sysinfo confirms it once the gateway is back."
-    )
-    unconfirmed = "the restart is unconfirmed; verify the gateway state"
     try:
         response = client.get_redirect_target(location or "", posted_path, _RESTART_HANDOFF_PATH)
     except RouterSessionPoolFullError:
@@ -794,50 +877,67 @@ def _request_redirect_handoff(
     except (BgwError, OSError) as exc:
         if _gateway_went_down(exc):
             return None, (
-                f"Restart requested: the gateway redirected to {location} and then reset or refused the "
-                f"connection ({exc}), as it does when it goes down for the reboot. {unverified}"
+                f"Restart requested: the gateway redirected to {location} and then reset, refused or cut "
+                f"the connection ({exc}), as it does when it goes down for the reboot. {_RESTART_UNVERIFIED}"
             ), False
-        return NO_ANSWER, f"the restart hand-off page {location} could not be requested ({exc}); {unconfirmed}", False
+        if _timed_out(exc):
+            return NO_ANSWER, (
+                f"the restart hand-off page {location} did not answer in time; {RESTART_UNCERTAIN}"
+            ), False
+        return NO_ANSWER, (
+            f"the restart hand-off page {location} could not be requested ({exc}); {_RESTART_UNCONFIRMED}"
+        ), False
     if response is None:
         return NO_ANSWER, (
             f"the restart POST was answered with a redirect to {location or '(no location)'!s}, not to the "
-            f"gateway's restarting page; {unconfirmed}"
+            f"gateway's restarting page; {_RESTART_UNCONFIRMED}"
         ), False
     body = response.body or ""
     status = response.status_code
     if router_sessions_full(body):
         client.clear_session()
+        sent = "once" if not attempts or attempts == 1 else f"{attempts} times"
         error = session_pool_full_error()
-        error.args = (f"{error} The restart POST was sent once and answered HTTP 302; {unconfirmed}.",)
+        error.args = (
+            f"{error} The restart POST was sent {sent} and answered HTTP {post_status}; {_RESTART_UNCONFIRMED}.",
+        )
         error.write_attempted = True
         error.write_evidence = {**(getattr(error, "write_evidence", None) or {}), "writeResponseReceived": True}
         raise error
-    redirect = _location(response.headers) if 300 <= status < 400 else None
-    if status in (401, 403) or looks_like_login(body) or (redirect and "login.ha" in redirect.lower()):
+    login_redirect = False
+    if 300 <= status < 400:
+        kind, target = resolve_gateway_redirect(_gateway_origin(client), _RESTART_HANDOFF_PATH,
+                                                _location(response.headers))
+        login_redirect = kind == "ok" and target.path.lower() == "/cgi-bin/login.ha"
+    if status in (401, 403) or looks_like_login(body) or login_redirect:
         client.clear_session()
         return NO_ANSWER, (
             f"the restart hand-off page {location} answered with the login page or HTTP {status}: the "
-            f"session was lost and {unconfirmed}"
+            f"session was lost and {_RESTART_UNCONFIRMED}"
         ), True
+    if status >= 500:
+        return NO_ANSWER, f"the restart hand-off page {location} answered HTTP {status}; {RESTART_UNCERTAIN}", True
     if 300 <= status < 500:
-        return NO_ANSWER, f"the restart hand-off page {location} answered HTTP {status}; {unconfirmed}", True
+        return NO_ANSWER, f"the restart hand-off page {location} answered HTTP {status}; {_RESTART_UNCONFIRMED}", True
     try:
         parsed = parse_page("restarting", body)
         banner = router_error_banner(body)
     except BgwError as exc:
-        return NO_ANSWER, f"the restart hand-off page {location} could not be read ({exc}); {unconfirmed}", True
+        return NO_ANSWER, (
+            f"the restart hand-off page {location} could not be read ({exc}); {_RESTART_UNCONFIRMED}"
+        ), True
     if parsed.truncated:
         return NO_ANSWER, (
-            f"the restart hand-off page {location} is larger than the parser's bounds; {unconfirmed}"
+            f"the restart hand-off page {location} is larger than the parser's bounds; {_RESTART_UNCONFIRMED}"
         ), True
     if banner and not no_changes_text(banner):
         return NEGATIVE_ANSWER, f"{WRITE_REJECTED_PREFIX}{banner}", True
     if (banner and no_changes_text(banner)) or no_changes_notice(body):
-        return NO_ANSWER, f"the gateway answered the restart with \"{NO_CHANGES_TEXT}\"; {unconfirmed}", True
+        return NO_ANSWER, f'the gateway answered the restart with "{NO_CHANGES_TEXT}"; {_RESTART_UNCONFIRMED}', True
     if is_page_not_found(parsed):
-        return NO_ANSWER, f"the restart hand-off page {location} is a Page-not-found page; {unconfirmed}", True
+        return NO_ANSWER, f"the restart hand-off page {location} is a Page-not-found page; {_RESTART_UNCONFIRMED}", True
     return None, (
-        f"Restart requested: the gateway redirected to {location} and answered it with HTTP {status}. {unverified}"
+        f"Restart requested: the gateway redirected to {location} and served it (HTTP {status}). {_RESTART_UNVERIFIED}"
     ), False
 
 
@@ -1338,10 +1438,10 @@ def _confirm_response(
     status_code, location = response.status_code, _location(response.headers)
     # `follow_warning=False` (actions not on a Wi-Fi page): their confirmation token never authorizes the
     # Wi-Fi Warning's Continue POST to wconfig.ha.
-    origin = client.session_identity() if callable(getattr(client, "session_identity", None)) else None
-    if follow_warning and is_confirmation_redirect(location, status_code, origin):
+    warning = confirmation_target(location, status_code, _gateway_origin(client), f"/cgi-bin/{page}.ha")
+    if follow_warning and warning:
         step = _with_attempts(
-            confirm_warning_page(client, location, status_code=status_code, page=page, write_attempts=attempts),
+            confirm_warning_page(client, warning, status_code=status_code, page=page, write_attempts=attempts),
             attempts,
         )
         _raise_if_coordination_failure(step)
@@ -1390,6 +1490,12 @@ def _answer_step(
     return None
 
 
+def _gateway_origin(client: Any) -> str:
+    """The gateway origin a write's redirect is resolved against (a placeholder for test doubles)."""
+    identity = getattr(client, "session_identity", None)
+    return identity() if callable(identity) else "http://gateway.invalid"
+
+
 def _answer_banner(
     client: Any, page: str, response: Any, seen: list[str] | None = None, *, read_redirect: bool = True,
     attempts: int | None = None,
@@ -1405,15 +1511,23 @@ def _answer_banner(
     failure text of this read say how many times the change was sent."""
     if response.status_code == 200:
         return router_error_banner(response.body)
-    if not 300 <= response.status_code < 400 or not read_redirect:
+    if not 300 <= response.status_code < 400:
         return None
     location = _location(response.headers)
     sent = PostWriteEvidence(attempted=True, response_received=True, attempts=attempts)
+    kind, _target = resolve_gateway_redirect(_gateway_origin(client), f"/cgi-bin/{page}.ha", location)
+    if kind == "malformed":
+        # The answer cannot even be located (an unclosed IPv6 bracket, a non-numeric port): unknown,
+        # whether or not this action reads its answer page.
+        failure = RouterResponseError(f"malformed redirect Location {location!r}")
+        return replace(
+            _write_failure_step(page, failure, sent),
+            status_code=response.status_code, location=location,
+            error=_write_evidence_guidance(f"could not read the gateway's answer at {location}: {failure}", sent),
+        )
+    if not read_redirect:
+        return None
     try:
-        try:
-            urlsplit(location or "")
-        except ValueError as exc:  # e.g. an unclosed IPv6 bracket: the answer cannot be located
-            raise RouterResponseError(f"malformed redirect Location {location!r} ({exc})") from exc
         target = redirect_answer_page(client, location)
         if target is None:
             return None
@@ -2732,7 +2846,7 @@ _SUBCOMMANDS: tuple[tuple[str, str], ...] = (
     ("tabs", "Print the CLI's router tab map."),
     ("actions", "List guarded router actions and confirmation tokens."),
     ("session", "session [status|clear-cache]: inspect or clear local session coordination state."),
-    ("action", "action <name>: dry-run a guarded router action; --commit --confirm TOKEN to POST."),
+    ("action", "action <name>: dry-run a guarded router action; --commit to POST (plus --confirm TOKEN where shown)."),
     ("sweep", "Traverse every mapped tab; compact status/count metadata by default."),
     ("scan", "Compatibility alias for compact sweep metadata."),
     ("schema", "Sweep with parsed/form detail enabled."),
@@ -3007,10 +3121,10 @@ Operations are dry-run by default:
     Show the payload and required commit command. Does not POST.
     Example: bgwcli action run-speed-test
 
-  bgwcli action <name> --commit --confirm TOKEN
-    POST an explicit action only after the confirmation token matches.
+  bgwcli action <name> --commit [--confirm TOKEN]
+    POST an explicit action. Dangerous and connection-dropping actions also need their token.
     Examples:
-      bgwcli action run-speed-test --commit --confirm SPEED
+      bgwcli action run-speed-test --commit
       bgwcli action restart --commit --confirm RESTART
       bgwcli action restart-wifi-2.4 --commit --confirm RESTART-WIFI   (also restart-wifi-5, restart-broadband)
       bgwcli action find-best-channel-5 --commit --confirm CHANSCAN     (5 GHz channel scan; 5 GHz clients drop briefly)

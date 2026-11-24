@@ -1083,12 +1083,14 @@ def execute_restore(
                     )
                 elif step.follow_up is not None:
                     result = _run_follow_up(client, step.follow_up, base)
-                elif is_confirmation_redirect(location, response.status_code, _client_origin(client)):
+                elif warning := confirmation_target(
+                    location, response.status_code, _client_origin(client), f"/cgi-bin/{step.page}.ha"
+                ):
                     # The gateway explicitly requires Continue before committing this Save. The
                     # save POST's answer is how far the write got: every failure produced while
                     # confirming it (warning GET, missing Continue, Continue POST) keeps it.
                     base["status_code"], base["location"] = response.status_code, location
-                    result = _confirm_warning_page(client, location, base, step=step)
+                    result = _confirm_warning_page(client, warning, base, step=step)
                 else:
                     result = _wait_for_save(client, step.page, response, base, step=step)
             except Exception as exc:  # noqa: BLE001 - preserve execution evidence on every failure
@@ -1769,28 +1771,31 @@ def _client_origin(client: Any) -> str | None:
     return identity() if callable(identity) else None
 
 
-def is_confirmation_redirect(location: str | None, status_code: int | None = None, origin: str | None = None) -> bool:
-    """True when a POST answered with a GET redirect (301/302/303, when ``status_code`` is given) to the
-    gateway's Wi-Fi Warning confirmation page on the gateway itself: a relative Location, or an
-    absolute one on ``origin`` (when given). Only then may Continue be posted."""
-    if not location or _CONFIRMATION_PAGE.search(location) is None:
-        return False
-    if status_code is not None and status_code not in (301, 302, 303):
-        return False
-    if origin is not None:
-        from urllib.parse import urlsplit
+def confirmation_target(
+    location: str | None, status_code: int | None = None, origin: str | None = None,
+    posted_path: str = "/cgi-bin/wconfig.ha",
+) -> str | None:
+    """The gateway's Wi-Fi Warning page a save POST redirected to, as the path to fetch, or None.
+    Only a GET redirect (301/302/303, when ``status_code`` is given) whose Location, resolved against
+    the POST URL like a browser, stays on the gateway's origin (port defaults made explicit) and IS
+    a wifiwarn page (not merely mentions one) authorizes Continue."""
+    from .client import resolve_gateway_redirect
 
-        try:
-            target = urlsplit(location)
-            gateway = urlsplit(origin)
-        except ValueError:
-            return False
-        absolute = bool(target.scheme or target.netloc)
-        if absolute and (target.scheme.lower(), (target.hostname or "").lower(), target.port) != (
-            gateway.scheme.lower(), (gateway.hostname or "").lower(), gateway.port
-        ):
-            return False
-    return True
+    if status_code is not None and status_code not in (301, 302, 303):
+        return None
+    kind, target = resolve_gateway_redirect(origin or "http://gateway.invalid", posted_path, location)
+    if kind != "ok" or _CONFIRMATION_PAGE.fullmatch(target.path) is None:
+        return None
+    return target.path
+
+
+def is_confirmation_redirect(
+    location: str | None, status_code: int | None = None, origin: str | None = None,
+    posted_path: str = "/cgi-bin/wconfig.ha",
+) -> bool:
+    """True when a POST answered with a GET redirect to the gateway's Wi-Fi Warning page (see
+    confirmation_target)."""
+    return confirmation_target(location, status_code, origin, posted_path) is not None
 
 
 def confirm_warning_page(

@@ -151,9 +151,8 @@ def test_hand_off_answered_by_a_full_session_pool_is_not_a_reboot(tmp_env, clock
     "answer",
     [
         lambda request: html("<title>Restarting</title>"),
-        lambda request: html("<title>Unavailable</title>", 503),
     ],
-    ids=["http-200", "http-503"],
+    ids=["http-200"],  # a 5xx is ambiguous (exit 2): see test_simplification
 )
 def test_hand_off_answered_without_a_refusal_is_a_requested_unverified_restart(
     tmp_env, clock, monkeypatch, capsys, answer

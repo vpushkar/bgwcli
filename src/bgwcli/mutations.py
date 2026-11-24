@@ -94,7 +94,7 @@ def build_submit_plan(
     button = resolve(page, parsed, button_name)
     if button.disabled:
         raise UsageError(f"Button '{button_name}' is disabled on {page}; nothing was posted.")
-    _require_own_form(page, parsed, button)
+    require_own_form(page, parsed, button)
     if assignments and is_opener_button(page, button.name or ""):
         # The opener and an assignment in one POST has an unknown effect on the gateway, and a dry run
         # showing such a payload would be misleading: the documented flow is two steps.
@@ -105,8 +105,7 @@ def build_submit_plan(
             f"`set {page} KEY=VALUE --commit --confirm {token}`. Nothing was posted."
         )
     changes = parse_assignments(assignments)
-    base = _without_foreign_allocations(page, base_payload(parsed), changes)
-    payload = _owning_form_payload(page, parsed, button, base)
+    payload = _without_foreign_allocations(page, base_payload(parsed), changes)
     payload.update(changes)
     if button.name:
         payload[button.name] = button.value or button.label or button.name
@@ -134,26 +133,7 @@ def _resolve_exact_button(page: str, parsed: ParsedPage, button_name: str) -> Pa
     return matches[0]
 
 
-def _owning_form_payload(
-    page: str, parsed: ParsedPage, button: ParsedButton, payload: dict[str, str]
-) -> dict[str, str]:
-    """The page's base payload cut to the controls of the button's own form, as a browser submits it:
-    a sibling form's fields are never posted with this button. Unchanged when the page has no form
-    holding the button (a page-level form-less control set)."""
-    if not button.name:
-        return payload
-    owners = [form for form in parsed.forms if button.name in form.button_names and _is_own_form(page, form.action)]
-    if not owners:
-        return payload
-    allowed = {
-        name
-        for form in owners
-        for name in (*form.field_names, *form.select_names, *form.textarea_names)
-    }
-    return {key: value for key, value in payload.items() if key in allowed or key.lower() in ("nonce", "hashpassword")}
-
-
-def _require_own_form(page: str, parsed: ParsedPage, button: ParsedButton) -> None:
+def require_own_form(page: str, parsed: ParsedPage, button: ParsedButton) -> None:
     """Generic submit posts the page's own payload to the page's own CGI. A button that lives in a
     form with a different action (the Wi-Fi restart forms on the home page) is refused before any
     POST: sending this page's fields to that form is a write nobody asked for."""

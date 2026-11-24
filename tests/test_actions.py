@@ -60,7 +60,7 @@ def test_confirm_tokens_pages_payloads_and_dangerous_flags_preserved():
         "diagnostics-authentication-details": ("diag", "DIAG", {"AuthDetails": "Details"}, False),
         "diagnostics-ip-details": ("diag", "DIAG", {"IPDetails": "Details"}, False),
         "diagnostics-dns-details": ("diag", "DIAG", {"DNSDetails": "Details"}, False),
-        "packet-filter-enable": ("packetfilter", "PACKETFILTER", {"Enable": "Enable Packet Filters"}, False),
+        "packet-filter-enable": ("packetfilter", "PACKETFILTER", {"Enable": "Enable Packet Filters"}, True),
         "packet-filter-disable": ("packetfilter", "PACKETFILTER", {"Disable": "Disable Packet Filters"}, True),
         "packet-filter-add-drop-rule": ("packetfilter", "PACKETFILTER", {"AddDropRule": "Add a 'Drop' Rule"}, False),
         "packet-filter-add-pass-rule": ("packetfilter", "PACKETFILTER", {"AddPassRule": "Add a 'Pass' Rule"}, False),

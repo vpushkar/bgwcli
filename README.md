@@ -133,7 +133,7 @@ The full contract, including validation messages and how an unreadable file is r
 | `sweep`, `scan`, `schema`, `audit` / `readiness` | Walk the mapped pages in one session and keep going through hangs; `audit` summarizes failed/fallback/empty/useful pages. |
 | `device` / `broadband` / `home-network` / `voice` / `firewall` / `diagnostics` `<tab>` | Section commands, one per router tab (see [Router command tree](#router-command-tree)). |
 | `dump`, `diff`, `restore`, `autorestore` | Backup, drift detection, restore and unattended factory-reset recovery (below). |
-| `set <page> KEY=VALUE...`, `submit <page> <button> KEY=VALUE...`, `action <name>`, `actions` | Writes: dry-run by default, `--commit --confirm TOKEN` to post (see [Writing to the router](#writing-to-the-router)). |
+| `set <page> KEY=VALUE...`, `submit <page> <button> KEY=VALUE...`, `action <name>`, `actions` | Writes: dry-run by default, `--commit` to post; `set`, `submit` and dangerous or connection-dropping actions also need `--confirm TOKEN` (see [Writing to the router](#writing-to-the-router)). |
 | `session status` / `session clear-cache` | The local session cache shared by bursts of commands. |
 
 Full per-command behaviour, including what each one does on a hung, truncated, login-bounced or
@@ -450,7 +450,7 @@ Every action, its token and the page it starts from (`bgwcli action -h` prints t
 | `diagnostics-authentication-details` | — | `diag` | guarded | Show authentication diagnostic details. (also `authentication-details`) |
 | `diagnostics-ip-details` | — | `diag` | guarded | Show IP diagnostic details. (also `ip-details`) |
 | `diagnostics-dns-details` | — | `diag` | guarded | Show DNS diagnostic details. (also `dns-details`) |
-| `packet-filter-enable` | — | `packetfilter` | guarded | Enable packet filters. (also `enable-packet-filter`, `enable-packet-filters`) |
+| `packet-filter-enable` | `PACKETFILTER` | `packetfilter` | dangerous | Enable packet filters. (also `enable-packet-filter`, `enable-packet-filters`) |
 | `packet-filter-disable` | `PACKETFILTER` | `packetfilter` | dangerous | Disable packet filters (the gateway stops applying every packet-filter rule). (also `disable-packet-filter`, `disable-packet-filters`) |
 | `packet-filter-add-drop-rule` | — | `packetfilter` | guarded | Open/add a packet-filter drop rule. (also `add-drop-rule`) |
 | `packet-filter-add-pass-rule` | — | `packetfilter` | guarded | Open/add a packet-filter pass rule. (also `add-pass-rule`) |

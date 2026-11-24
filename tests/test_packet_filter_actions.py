@@ -80,9 +80,10 @@ def test_toggle_to_the_state_the_gateway_is_already_in_posts_nothing(
 ):
     code, captured, posts = _run(monkeypatch, capsys, name, page)
 
-    assert code != 0
-    assert posts == []
-    assert f"'{button}' was not found on packetfilter" in captured.out + captured.err
+    # Only the opposite toggle is on the page: already in that state, reported as unchanged (exit 0).
+    out = json.loads(captured.out)
+    assert code == 0 and posts == []
+    assert out["outcome"] == "unchanged" and "already" in out["result"]
 
 
 def test_disable_is_a_guarded_dangerous_action_with_aliases():
