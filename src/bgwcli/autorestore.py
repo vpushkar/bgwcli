@@ -20,11 +20,14 @@ authentication fault or full session pool, even when the closing diff is readabl
 then carries write_unanswered=True), or when the same failure ended RETRY_LIMIT consecutive runs
 of one recovery (the intent record keeps a hash of the last failure and its count); such a
 stopped recovery sends nothing until the intent file is removed or the gateway is found converged.
+A recovery covers only what was missing or differing when it began (`recovery_scope`), and is dropped
+after RECOVERY_IDLE_RUN_LIMIT consecutive runs that sent nothing or after RECOVERY_MAX_AGE_SECONDS.
 """
 
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -64,7 +67,14 @@ from .snapshot import (
     service_key,
     snapshot_read_pages,
 )
-from .snapshot_diff import SnapshotDiff, diff_snapshots, holds_convergence_open, skipped_forward_warnings
+from .snapshot_diff import (
+    EntryDiff,
+    ReservationDiff,
+    SnapshotDiff,
+    diff_snapshots,
+    holds_convergence_open,
+    skipped_forward_warnings,
+)
 from .types import ParsedPage, to_json_dict
 from .write_outcome import unanswered_write_step
 
@@ -87,6 +97,12 @@ FALLBACK_CODE_WARNING = (
 # Consecutive runs of one recovery intent ending with the same failure before autorestore stops
 # writing on its own and exits 2: a timer must not re-post the same doomed writes forever.
 RETRY_LIMIT = 3
+# A recovery intent is dropped (with a warning) once it is this old, or once this many of its runs in a
+# row sent nothing (every remaining step blocked, e.g. a forward to a device that is offline). While an
+# intent is open its runs restore only what it covers (what was missing or differing when the reset was
+# detected), so a deliberate change made in the gateway UI later is never reverted as "recovery".
+RECOVERY_MAX_AGE_SECONDS = 24 * 3600
+RECOVERY_IDLE_RUN_LIMIT = 3
 _sleep = time.sleep  # seam for tests (cli passes nothing; run_autorestore(sleep=...) overrides)
 _monotonic = time.monotonic  # seam for the run's time limit
 
@@ -395,7 +411,135 @@ def _failure_reason(failures: Sequence[ParsedPageResult]) -> str:
     return "; ".join(f"{f.page}: {f.error or 'page unavailable'}" for f in failures)
 
 
+def recovery_scope(diff: SnapshotDiff) -> dict[str, Any]:
+    """What a recovery started from `diff` covers: the dumped entries the gateway lacks (and the
+    reservations it holds at another address) and every form field whose dumped value differs. Form
+    fields the live page renders disabled are included: a Save that re-enables them must still carry
+    their dumped values (wconfig security -> key)."""
+    return {
+        "services": sorted({service_key(entry) for entry in diff.services.missing}),
+        "forwards": sorted({forward_key(entry) for entry in diff.forwards.missing}),
+        "reservations": sorted(
+            {reservation_key(entry) for entry in diff.reservations.missing}
+            | {change.mac.lower() for change in diff.reservations.changed}
+        ),
+        "forms": {
+            page: sorted({change.field for change in changes if change.dump is not None})
+            for page, changes in sorted(diff.forms.items())
+            if any(change.dump is not None for change in changes)
+        },
+    }
+
+
+def scoped_diff(diff: SnapshotDiff, scope: Mapping[str, Any] | None) -> SnapshotDiff:
+    """`diff` limited to what a recovery covers (None: everything). Router-only entries are kept as
+    they are (autorestore never prunes; the planner reads them to avoid duplicate names)."""
+    if scope is None:
+        return diff
+    services, forwards = set(scope.get("services", ())), set(scope.get("forwards", ()))
+    reservations = set(scope.get("reservations", ()))
+    form_fields = {page: set(fields) for page, fields in scope.get("forms", {}).items()}
+    forms = {
+        page: kept
+        for page, changes in diff.forms.items()
+        if (kept := [change for change in changes if change.field in form_fields.get(page, ())])
+    }
+    limited = replace(
+        diff,
+        services=EntryDiff(
+            missing=[e for e in diff.services.missing if service_key(e) in services], extra=diff.services.extra
+        ),
+        forwards=EntryDiff(
+            missing=[e for e in diff.forwards.missing if forward_key(e) in forwards], extra=diff.forwards.extra
+        ),
+        reservations=ReservationDiff(
+            missing=[e for e in diff.reservations.missing if reservation_key(e) in reservations],
+            changed=[c for c in diff.reservations.changed if c.mac.lower() in reservations],
+            extra=diff.reservations.extra,
+        ),
+        forms=forms,
+    )
+    empty = not (
+        limited.services.missing or limited.services.extra or limited.forwards.missing or limited.forwards.extra
+        or limited.reservations.missing or limited.reservations.changed or limited.reservations.extra or forms
+    )
+    return replace(limited, identical=diff.identical or empty)
+
+
+@dataclass
+class _RunFacts:
+    """What the wrapper needs from one run: whether it resumed an open recovery and whether it sent."""
+
+    resumed: bool = False
+    sent: bool = False
+
+
+def _accepts_scope(method: Any) -> bool:
+    """True when a checkpoint's begin() takes the recovery scope (older checkpoints do not)."""
+    try:
+        return callable(method) and "scope" in inspect.signature(method).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def _call_optional(checkpoint: Any, name: str, *args: Any, **kwargs: Any) -> Any:
+    method = getattr(checkpoint, name, None)
+    return method(*args, **kwargs) if callable(method) else None
+
+
 def run_autorestore(
+    client_factory: ClientFactory,
+    dump: Snapshot,
+    options: AutorestoreOptions,
+    *,
+    checkpoint: Checkpoint | None = None,
+    log: Callable[[str], None] = print,
+    **kwargs: Any,
+) -> AutorestoreResult:
+    """Login -> fetch -> diff -> detect; then (commit only) restore passes until converged.
+
+    See `_run_autorestore`. On top of one run, an open recovery intent ends on its own: after
+    RECOVERY_IDLE_RUN_LIMIT consecutive committed runs that resumed it and sent nothing (and did not
+    converge), it is dropped with a warning; its age limit is checked when a run starts."""
+    facts = _RunFacts()
+    result = _run_autorestore(client_factory, dump, options, checkpoint=checkpoint, log=log, run_facts=facts, **kwargs)
+    if not (options.commit and facts.resumed and checkpoint is not None):
+        return result
+    if not callable(getattr(checkpoint, "note_run", None)):
+        return result
+    try:
+        if not checkpoint.is_active():
+            return result
+        if facts.sent:
+            checkpoint.note_run(sent=True)  # type: ignore[attr-defined]
+            return result
+        if result.status != "not-converged" or not result.passes:
+            # Only a run whose passes ran and sent nothing (every step blocked or skipped) shows the
+            # recovery cannot progress. Faults before any write (gateway unreachable, lost session), a
+            # run-time limit reached before the first step and a stopped recovery say nothing about
+            # that: only the age limit ends those.
+            return result
+        idle = checkpoint.note_run(sent=False)  # type: ignore[attr-defined]
+        if idle < RECOVERY_IDLE_RUN_LIMIT:
+            result.reason = f"{result.reason} (run {idle}/{RECOVERY_IDLE_RUN_LIMIT} of this recovery that sent nothing)"
+            return result
+        checkpoint.finish()
+    except OSError as exc:
+        result.status = "error"
+        result.reason = f"{result.reason}; recovery idle-run accounting failed: {exc}"
+        log(f"error: {result.reason}")
+        return result
+    warning = (
+        f"recovery dropped: {idle} consecutive runs sent nothing (every remaining step blocked); the remaining "
+        "differences are left alone and later runs treat them as ordinary drift; finish by hand with "
+        "`bgwcli restore` if they are still wanted"
+    )
+    result.warnings.append(warning)
+    log(f"warning: {warning}")
+    return result
+
+
+def _run_autorestore(
     client_factory: ClientFactory,
     dump: Snapshot,
     options: AutorestoreOptions,
@@ -409,6 +553,7 @@ def run_autorestore(
     checkpoint: Checkpoint | None = None,
     relogin: Relogin | None = None,
     monotonic: Callable[[], float] | None = None,
+    run_facts: _RunFacts | None = None,
 ) -> AutorestoreResult:
     """Login -> fetch -> diff -> detect; then (commit only) restore passes until converged.
 
@@ -416,6 +561,7 @@ def run_autorestore(
     log line): the gateway's web UI hangs routinely and a timer must not page on that. After a POST
     the router has been written to, so a failed re-read is an "error" (exit 2). A failed write stops
     all passes after the final read-only diff; a later invocation must refetch and replan before retrying."""
+    run_facts = run_facts if run_facts is not None else _RunFacts()
     pause = sleep if sleep is not None else _sleep
     clock = monotonic if monotonic is not None else _monotonic
     started = clock()
@@ -475,6 +621,45 @@ def run_autorestore(
     warnings: list[str] = skipped_forward_warnings(diff)
     for warning in warnings:
         log(f"warning: {warning}")
+    scope: dict[str, Any] | None = None
+    if recovering:
+        try:
+            started_at = _call_optional(checkpoint, "started_at")
+            age = time.time() - started_at if isinstance(started_at, (int, float)) else None
+            if age is not None and age >= RECOVERY_MAX_AGE_SECONDS:
+                expired = (
+                    f"recovery dropped: it began {age / 3600:.1f} h ago, past the "
+                    f"{RECOVERY_MAX_AGE_SECONDS // 3600} h limit; its remaining differences are treated as "
+                    "ordinary drift; finish by hand with `bgwcli restore` if they are still wanted"
+                )
+                if options.commit:
+                    checkpoint.finish()  # type: ignore[union-attr]
+                else:
+                    expired = expired.replace("recovery dropped:", "recovery would be dropped:", 1)
+                warnings.append(expired)
+                log(f"warning: {expired}")
+                recovering = False
+            else:
+                scope = _call_optional(checkpoint, "recorded_scope")
+                if options.commit and started_at is None:
+                    _call_optional(checkpoint, "ensure_started")
+        except OSError as exc:
+            reason = f"recovery checkpoint read failed: {exc}"
+            log(f"error: {reason}")
+            return AutorestoreResult(
+                status="error", reason=reason, detected=detected, used_fallback_code=used_fallback, final_diff=diff,
+                warnings=warnings,
+            )
+    run_facts.resumed = recovering
+
+    def open_shape() -> dict[str, Any] | None:
+        """The failure shape of this run's closing diff, limited to what the recovery covers."""
+        final = result.final_diff
+        return _open_differences(scoped_diff(final, scope) if final is not None else None)
+
+    if not recovering and detected:
+        # A new recovery covers what differs now; runs that resume it restore only that.
+        scope = recovery_scope(diff)
     if used_fallback:
         # The fallback code only corroborates a reset-shaped diff or an unfinished recovery: the
         # sticker code also works after someone set it back by hand, and ordinary drift must stay.
@@ -500,11 +685,17 @@ def run_autorestore(
         log(f"no-reset: {reason}")
         return result
 
-    def checkpoint_action(action: str, *, secondary: str | None = None) -> bool:
+    def checkpoint_action(
+        action: str, *, secondary: str | None = None, scope: Mapping[str, Any] | None = None
+    ) -> bool:
         if checkpoint is None:
             return True
         try:
-            getattr(checkpoint, action)()
+            if action == "begin" and _accepts_scope(getattr(checkpoint, "begin", None)):
+                # A checkpoint that keeps a scope records what this recovery covers (kept on resume).
+                checkpoint.begin(scope=scope)  # type: ignore[call-arg]
+            else:
+                getattr(checkpoint, action)()
         except OSError as exc:
             result.status = "error"
             detail = f"{secondary or f'recovery checkpoint {action}'} failed: {exc}"
@@ -513,7 +704,7 @@ def run_autorestore(
             return False
         return True
 
-    if recovering and restore_converged(diff, False):
+    if recovering and restore_converged(scoped_diff(diff, scope), False):
         if options.commit:
             if not checkpoint_action("finish"):
                 return result
@@ -536,7 +727,7 @@ def run_autorestore(
         nonlocal intent_started
         if intent_started:
             return True
-        if not checkpoint_action("begin"):
+        if not checkpoint_action("begin", scope=scope):
             if checkpoint is not None and not recovering:
                 # Publication may have replaced the file before its directory fsync failed.
                 # No mutation was attempted, so remove only this invocation's new intent.
@@ -634,7 +825,7 @@ def run_autorestore(
             )
         # Only a refresh that shows the gateway converged ends the run converged; remaining differences
         # that no step can execute are not-converged here exactly as on the ordinary path.
-        if restore_converged(result.final_diff, False):
+        if restore_converged(scoped_diff(result.final_diff, scope), False):
             if not checkpoint_action("finish"):
                 return result
             result.status = "converged"
@@ -645,7 +836,7 @@ def run_autorestore(
             log(f"converged: {result.reason}")
             return result
         log(f"not-converged: {result.reason}")
-        return count_failure({"kind": "not-converged", "open": _open_differences(result.final_diff)})
+        return count_failure({"kind": "not-converged", "open": open_shape()})
 
     if options.commit and recovering:
         try:
@@ -666,6 +857,10 @@ def run_autorestore(
             return result
 
     pending = pending_allocation_requests(dump, parsed, options.pages)
+    if scope is not None:
+        # Only reservations this recovery covers may trigger an allocation Clear and Rescan.
+        covered = set(scope.get("reservations", ()))
+        pending = [request for request in pending if reservation_key(request) in covered]
     if pending:
         try:
             preflight = inspect_allocation_conflicts(
@@ -707,7 +902,7 @@ def run_autorestore(
             try:
                 result.final_diff = None
                 rescan_allocation_conflicts(client, preflight, log=log, evidence=rescan_evidence)
-                mutation_possible = sent = True
+                mutation_possible = sent = run_facts.sent = True
                 result.allocation_preflight = allocation_preflight_report(preflight, rescan=rescan_evidence)
                 parsed, failures = fetch_pages(client, page_ids)
                 if failures:
@@ -717,7 +912,7 @@ def run_autorestore(
             except BgwError as exc:
                 clear_possible = rescan_evidence.clear_attempted is not False
                 mutation_possible = mutation_possible or clear_possible
-                sent = sent or clear_possible
+                sent = run_facts.sent = sent or clear_possible
                 result.allocation_preflight = allocation_preflight_report(preflight, error=exc, rescan=rescan_evidence)
                 result.session_pool_full = isinstance(exc, RouterSessionPoolFullError)
                 if result.session_pool_full:
@@ -748,7 +943,7 @@ def run_autorestore(
                     }, structural=refused)
                 return result
 
-    steps = build_restore_plan(diff, dump, parsed, restore_options)
+    steps = build_restore_plan(scoped_diff(diff, scope), dump, parsed, restore_options)
     result.plan = steps
     if result.allocation_preflight is not None:
         result.allocation_preflight.update(
@@ -779,7 +974,9 @@ def run_autorestore(
                 deadline_reached = True
                 log(f"run time limit of {options.max_run_seconds:g}s reached after pass {number - 1}; no further pass")
                 break
-            steps = _without_reposts(build_restore_plan(diff, dump, parsed, restore_options), acknowledged)
+            steps = _without_reposts(
+                build_restore_plan(scoped_diff(diff, scope), dump, parsed, restore_options), acknowledged
+            )
             result.plan = steps
         log(f"pass {number}/{options.max_passes}: {len(steps)} steps")
         # Read-only planning and refusals must not authorize recovery on a later invocation.
@@ -831,7 +1028,7 @@ def run_autorestore(
                 acknowledged.setdefault(_step_identity(done), number)
         facts = _ExecutionFacts.from_steps(execution.steps)
         mutation_possible = mutation_possible or facts.mutation_possible
-        sent = sent or facts.mutation_possible
+        sent = run_facts.sent = sent or facts.mutation_possible
         if unanswered_write_step(execution.steps) is not None:
             # Evidence from the executed steps, before any verification read can fail: every exit
             # below (and the retry-limit one) keeps it.
@@ -950,7 +1147,7 @@ def run_autorestore(
                     "error": type(error).__name__,
                 }, structural=structural)
         result.final_diff = diff if diff_read else None
-        converged = failed_step is None and restore_converged(diff, False)
+        converged = failed_step is None and restore_converged(scoped_diff(diff, scope), False)
         summary["converged"] = converged
         log(
             f"pass {number}/{options.max_passes}: {summary['applied']} applied, {summary['unchanged']} unchanged, "
@@ -990,7 +1187,7 @@ def run_autorestore(
             return count_failure({
                 "kind": "step",
                 "step": [*_step_identity(failed_step), failed_step.status],
-                "open": _open_differences(result.final_diff),
+                "open": open_shape(),
             })
         if converged:
             if not checkpoint_action("finish"):
@@ -1022,5 +1219,5 @@ def run_autorestore(
     )
     log(f"not-converged: {result.reason}")
     if intent_started or recovering:
-        return count_failure({"kind": "not-converged", "open": _open_differences(result.final_diff)})
+        return count_failure({"kind": "not-converged", "open": open_shape()})
     return result

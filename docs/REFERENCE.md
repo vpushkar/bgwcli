@@ -272,7 +272,20 @@ equivalent path spellings, is refused as a checkpoint directory before any direc
 
 An unfinished matching recovery resumes on the next invocation even if only some entries remain
 missing. Every invocation fetches fresh pages and rebuilds the remaining plan; it never replays
-saved POSTs. A different router, desired configuration or selection cannot inherit this intent. While one unfinished recovery is recorded for a router, a run with a different dump or page selection that needs to start its own recovery refuses with exit 2 (`error`) and leaves the other record in place.
+saved POSTs. A recovery covers only what the gateway lacked when the reset was detected: the intent
+records the identities of the missing services, forwards and reservations and the NAMES of the
+differing form fields (never values), and a resumed run plans and verifies only those. A setting
+changed in the gateway UI after the recovery began, or an entry that already matched the dump then,
+is never reverted as part of it; once everything the recovery covers matches, it ends `converged`
+whatever else differs. A recovery also ends on its own, with a warning in the result and the journal
+(`recovery dropped: ...`): after 3 consecutive committed runs that resumed it, ran their passes and
+sent nothing (every remaining step blocked, for example a forward to a device that is offline;
+`RECOVERY_IDLE_RUN_LIMIT`), or once it is 24 hours old (`RECOVERY_MAX_AGE_SECONDS`, checked when a
+run starts; a dry-run only reports `recovery would be dropped`). A run that sends resets the idle
+count; runs that end before any write for another reason (router unreachable, a lost session, the
+run time limit) do not count. The remaining differences are then ordinary drift: finish them with
+`bgwcli restore` if they are still wanted. A record written by an older version (no scope, no start
+time) covers the whole difference, as before, and gets its start time on the next committed run. A different router, desired configuration or selection cannot inherit this intent. While one unfinished recovery is recorded for a router, a run with a different dump or page selection that needs to start its own recovery refuses with exit 2 (`error`) and leaves the other record in place.
 Read-only ownership failures, fixed-owner refusals, and blocked or empty plans do not create intent.
 New intent is published only when an eligible Clear or executable restore plan is ready. It is removed
 after verified convergence, or when this invocation can positively establish that no mutation was

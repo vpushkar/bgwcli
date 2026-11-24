@@ -11,7 +11,7 @@ import sys
 import pytest
 from save_helpers import SAVED_RED, client_with, form, html
 
-from bgwcli import autorestore, cli
+from bgwcli import autorestore, cli, recovery_state
 from bgwcli import format as fmt
 from bgwcli.dumpfile import write_dump_file
 from bgwcli.recovery_state import RecoveryCheckpoint
@@ -69,6 +69,7 @@ def _scenario(tmp_env, monkeypatch, label, stdout=None):
     path = tmp_env / f"baseline-{label}.json"
     write_dump_file(path, dump)
     monkeypatch.setattr(autorestore, "_sleep", lambda seconds: None)
+    monkeypatch.setattr(recovery_state, "_now", lambda: 1_790_000_000.0)  # both runs record one start time
 
     def handler(request, _number):
         if request.method == "POST":

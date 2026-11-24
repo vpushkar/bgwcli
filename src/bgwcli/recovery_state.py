@@ -9,9 +9,9 @@ import re
 import stat
 import tempfile
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from . import filesystem
 from .client import normalize_origin
@@ -32,6 +32,17 @@ class Checkpoint(Protocol):
     def finish(self) -> None: ...
 
 
+class ScopedCheckpoint(Protocol):
+    """Optional checkpoint extension: what one recovery covers, when it began and how many of its
+    runs in a row sent nothing (see autorestore's RECOVERY_MAX_AGE_SECONDS / RECOVERY_IDLE_RUN_LIMIT)."""
+
+    def begin(self, scope: Mapping[str, Any] | None = None) -> None: ...
+    def recorded_scope(self) -> dict[str, Any] | None: ...
+    def started_at(self) -> float | None: ...
+    def ensure_started(self) -> None: ...
+    def note_run(self, *, sent: bool) -> int: ...
+
+
 class FailureTracker(Protocol):
     """Optional checkpoint extension: consecutive identical failed runs of one recovery intent."""
 
@@ -45,6 +56,32 @@ _TEMPORARY = re.compile(r"\.recovery-[a-z0-9_]{8}")
 _STALE_TEMPORARY_SECONDS = 3600
 
 _IDENTITY_KEYS = ("version", "origin", "fingerprint", "pages")
+# Fields kept beside the identity across resumes of the same intent (never part of its identity).
+_CARRIED_KEYS = ("failures", "scope", "startedAt", "idleRuns")
+_now = time.time  # seam for tests: the intent's age is wall-clock time, it must survive reboots
+_SCOPE_SECTIONS = ("services", "forwards", "reservations")
+
+
+def _valid_scope(value: object) -> dict[str, Any] | None:
+    """A recorded scope in its exact shape, else None (an older record: the whole difference)."""
+    if not isinstance(value, dict):
+        return None
+    sections = {name: value.get(name) for name in _SCOPE_SECTIONS}
+    forms = value.get("forms")
+    if not all(isinstance(v, list) and all(isinstance(i, str) for i in v) for v in sections.values()):
+        return None
+    if not isinstance(forms, dict) or not all(
+        isinstance(page, str) and isinstance(fields, list) and all(isinstance(f, str) for f in fields)
+        for page, fields in forms.items()
+    ):
+        return None
+    return {**sections, "forms": forms}
+
+
+def _positive_number(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        return None
+    return float(value)
 
 
 class RecoveryCheckpoint:
@@ -111,7 +148,8 @@ class RecoveryCheckpoint:
         count = 1
         if isinstance(previous, dict) and previous.get("fingerprint") == fingerprint:
             count = self.failure_count() + 1
-        self._publish({**self._record, "failures": {"fingerprint": fingerprint, "count": count}})
+        carried = {key: record[key] for key in _CARRIED_KEYS if isinstance(record, dict) and key in record}
+        self._publish({**self._record, **carried, "failures": {"fingerprint": fingerprint, "count": count}})
         return count
 
     def _read_record(self) -> object:
@@ -144,7 +182,11 @@ class RecoveryCheckpoint:
         except ValueError:
             return None
 
-    def begin(self) -> None:
+    def begin(self, scope: Mapping[str, Any] | None = None) -> None:
+        """Record this intent. A new intent stores `scope` (what the recovery covers: the entries
+        missing and the form fields differing when the reset was detected; None = everything that
+        differs) and its start time. Resuming the same intent keeps its own scope, start time, idle-run
+        count and failure history: a later run never widens or restarts a recovery."""
         filesystem.reject_filesystem_root(self.path.parent, description="Recovery checkpoint directory")
         filesystem.ensure_directory(self._state_base, description="Recovery directory")
         filesystem.ensure_directory(
@@ -159,10 +201,59 @@ class RecoveryCheckpoint:
                 "finish it with the matching dump, or remove the file after verifying the gateway."
             )
         record: dict[str, object] = dict(self._record)
-        if isinstance(existing, dict) and isinstance(existing.get("failures"), dict):
-            # Resuming the same intent keeps its failure history: the cross-run limit counts runs.
-            record["failures"] = existing["failures"]
+        if self._identity(existing) == self._record and isinstance(existing, dict):
+            # Resuming the same intent keeps its failure history (the cross-run limit counts runs), its
+            # scope and its start time (the age limit counts from the reset, not from the last run).
+            for key in _CARRIED_KEYS:
+                if key in existing:
+                    record[key] = existing[key]
+            record.setdefault("startedAt", _now())
+        else:
+            if scope is not None:
+                record["scope"] = {
+                    **{name: sorted(set(scope.get(name, ()))) for name in _SCOPE_SECTIONS},
+                    "forms": {page: sorted(set(fields)) for page, fields in sorted(scope.get("forms", {}).items())},
+                }
+            record["startedAt"] = _now()
+            record["idleRuns"] = 0
         self._publish(record)
+
+    def _active_record(self) -> dict[str, Any] | None:
+        record = self._read_record()
+        return record if isinstance(record, dict) and self._identity(record) == self._record else None
+
+    def recorded_scope(self) -> dict[str, Any] | None:
+        """What this recovery covers, or None (no intent, or an older record without a scope: the
+        whole difference)."""
+        record = self._active_record()
+        return _valid_scope(record.get("scope")) if record is not None else None
+
+    def started_at(self) -> float | None:
+        """When this recovery began (epoch seconds), or None when not recorded (an older record)."""
+        record = self._active_record()
+        return _positive_number(record.get("startedAt")) if record is not None else None
+
+    def ensure_started(self) -> None:
+        """Give an older record without a start time one now, so it expires within the age limit."""
+        record = self._active_record()
+        if record is not None and _positive_number(record.get("startedAt")) is None:
+            self._publish({**record, "startedAt": _now()})
+
+    def idle_runs(self) -> int:
+        record = self._active_record()
+        count = record.get("idleRuns") if record is not None else None
+        return count if isinstance(count, int) and not isinstance(count, bool) and count > 0 else 0
+
+    def note_run(self, *, sent: bool) -> int:
+        """Count consecutive runs of this recovery that sent nothing: a run that sent resets the count
+        to 0, one that sent nothing adds 1. Returns the new count (0 when this intent is not recorded)."""
+        record = self._active_record()
+        if record is None:
+            return 0
+        count = 0 if sent else self.idle_runs() + 1
+        if record.get("idleRuns") != count:
+            self._publish({**record, "idleRuns": count})
+        return count
 
     def _reap_stale_temporaries(self) -> None:
         """Remove crashed runs' `.recovery-*` temporaries: our own plain files, an hour or older.

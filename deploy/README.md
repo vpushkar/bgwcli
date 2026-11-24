@@ -24,6 +24,10 @@ its request timeout.
 Recovery intent is saved before writes, so a later invocation can resume a matching partially
 completed recovery using fresh router data. Read-only preflight failures do not create new intent.
 Ordinary unrelated drift remains `no-reset`; see the main README for checkpoint identity and storage.
+A recovery restores only what was missing or differing when the reset was detected, so a change you
+make in the gateway UI while one is still open is left alone. It ends on its own with a
+`recovery dropped` warning after 3 runs in a row that sent nothing (every remaining step blocked, e.g.
+a forward to an offline device) or 24 hours after it began; finish what is left with `bgwcli restore`.
 
 Within one run a write the gateway acknowledged (`Changes saved`, or `No changes detected`) is never
 posted again: later passes only re-read the gateway and retry steps that were blocked or never

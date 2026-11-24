@@ -122,7 +122,9 @@ def test_checkpoint_contains_only_private_identity_metadata(tmp_path):
     store = checkpoint(tmp_path, dump=dump)
     store.begin()
     record = json.loads(store.path.read_text())
-    assert set(record) == {"version", "origin", "fingerprint", "pages"}
+    # Identity plus the recovery's start time and idle-run count; a scope is recorded only when
+    # given, and holds entry identities and field NAMES, never values.
+    assert set(record) == {"version", "origin", "fingerprint", "pages", "startedAt", "idleRuns"}
     assert "test-private-secret" not in store.path.read_text()
     assert stat.S_IMODE(store.path.stat().st_mode) == 0o600
     assert stat.S_IMODE(store.path.parent.stat().st_mode) == 0o700

@@ -311,7 +311,9 @@ It acts only on total loss (every dumped service, forward **and** reservation mi
 recovery of the same dump; a dump with a single entry, or none, also needs every form page to differ or
 the sticker code to have been needed: see REFERENCE); ordinary drift is reported as `no-reset` and left alone. It never prunes,
 never reboots the gateway, never changes the access code, and never re-posts a write the gateway
-acknowledged within one run.
+acknowledged within one run. An unfinished recovery restores only what was missing when the reset was
+detected (a later change in the gateway UI is left alone), and it is dropped with a warning after 3 runs
+in a row that sent nothing or 24 hours after it began.
 
 ```
 $ bgwcli autorestore ~/bgw-baseline.json                                   # dry-run: plan, exit 1 on a reset
