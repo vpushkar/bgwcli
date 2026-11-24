@@ -1395,11 +1395,15 @@ def _confirm_warning_page(
             "so the change is not confirmed and the gateway discards an unconfirmed Wi-Fi change"
         )
     target_page = target.group(1).lower()
-    if target_page != source.lower():
+    # The live warning (wifiwarn_advanced.ha, fw 6.35.8, read 2026-11-24) always posts Continue to
+    # /cgi-bin/wconfig.ha, whichever Wi-Fi page was saved; the saved page itself is also accepted.
+    # Any other target (reset.ha, a non-Wi-Fi page) is refused.
+    if target_page not in {"wconfig", source.lower()}:
         shown = sanitize_terminal_text(action, single_line=True)[:200]
         return not_confirmed(
-            f"{page}: the Continue button's form posts to {shown}, not to {source}.ha whose Save was redirected "
-            "here, so the change is not confirmed and the gateway discards an unconfirmed Wi-Fi change"
+            f"{page}: the Continue button's form posts to {shown}, not to wconfig.ha or {source}.ha whose Save "
+            "was redirected here, so the change is not confirmed and the gateway discards an unconfirmed "
+            "Wi-Fi change"
         )
     value = cont.value or cont.label or cont.name
     try:

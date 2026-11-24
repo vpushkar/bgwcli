@@ -131,6 +131,18 @@ def test_continue_must_still_be_on_the_warning_page_read_for_its_nonce(clock, tm
     assert code == 2 and "Continue was not posted" in json.dumps(out)
 
 
+@pytest.mark.parametrize("kind", ["set", "submit"])
+def test_a_wconfig_unified_save_follows_the_live_warnings_continue_to_wconfig(
+    clock, tmp_env, monkeypatch, capsys, kind
+):
+    # The live wifiwarn_advanced.ha (fw 6.35.8, read 2026-11-24) posts Continue to /cgi-bin/wconfig.ha
+    # whichever Wi-Fi page was saved.
+    handler = _save_handler(WARNING_URL, lambda n: _warning("/cgi-bin/wconfig.ha"))
+    code, out, posts, _ = _run(monkeypatch, capsys, handler, _argv(kind, tmp_env, "wconfig_unified"))
+    assert [r.url.rsplit("/", 1)[-1] for r in posts] == ["wconfig_unified.ha", "wconfig.ha"]
+    assert "Continue" in posts[1].body.decode() and code == 0, out
+
+
 @pytest.mark.parametrize(("kind", "page"), [("set", "wconfig"), ("restore", "wconfig"), ("set", "wconfig_unified")])
 def test_a_wifi_pages_own_continue_is_still_posted(clock, tmp_env, monkeypatch, capsys, kind, page):
     handler = _save_handler(WARNING_URL, lambda n: _warning(f"/cgi-bin/{page}.ha"))
