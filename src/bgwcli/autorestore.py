@@ -47,6 +47,7 @@ from .fetch import ParsedPageResult
 from .recovery_state import Checkpoint
 from .restore import (
     CONTINUE_NOT_POSTED,
+    LAN_MOVING_FIELDS,
     RestoreExecution,
     RestoreOptions,
     RestoreStep,
@@ -947,6 +948,30 @@ def _run_autorestore(
         return result
 
     log(f"factory reset detected: {reason}")
+    try:
+        pending_move = _call_optional(checkpoint, "pending_lan_move") if recovering else None
+    except OSError as exc:
+        pending_move = None
+        log(f"warning: recovery pending LAN move could not be read: {exc}")
+    if pending_move:
+        # An earlier run's LAN move was answered. Still reading its fields at the old values means it
+        # did not apply: one failure of this recovery (the same fingerprint every time), counted before
+        # the move may be posted again, so the cross-run limit stops a move the gateway keeps ignoring.
+        still_old = sorted(
+            d.field for d in diff.forms.get(pending_move["page"], []) if d.field in pending_move["fields"]
+        )
+        if still_old:
+            result.reason = f"{reason}; the LAN move posted by an earlier run did not apply"
+            count_failure({"kind": "lan-move-not-applied", "page": pending_move["page"], "fields": still_old},
+                          structural=True)
+            if result.status == "error":
+                return result
+            result.reason = reason
+        else:
+            try:
+                _call_optional(checkpoint, "clear_pending_lan_move")
+            except OSError as exc:
+                log(f"warning: recovery pending LAN move could not be cleared: {exc}")
     if out_of_time():
         # The snapshot reads of a slow gateway used up the whole run limit: the first step is held to
         # it exactly like a step between two others. Nothing was sent, so nothing is counted and an
@@ -1041,7 +1066,15 @@ def _run_autorestore(
             log(f"error: {result.reason}")
             if reconnect.write_response_received is True or reconnect.acknowledgement_observed is True:
                 # The gateway answered the LAN write: the move is the expected outcome, not a repeating
-                # failure, and a count keyed to the old origin would only pile up across resets.
+                # failure, and a count keyed to the old origin would only pile up across resets. It is
+                # remembered: a later run that still reads the moved fields at their old values counts
+                # the move as failed before it may post it again (see the pending-move check).
+                moving = sorted({d.field for d in diff.forms.get(reconnect.page, []) if d.field in LAN_MOVING_FIELDS})
+                if moving:
+                    try:
+                        _call_optional(checkpoint, "set_pending_lan_move", reconnect.page, moving)
+                    except OSError as exc:
+                        log(f"warning: recovery pending LAN move could not be recorded: {exc}")
                 return result
             return count_failure({"kind": "reconnect", "step": [*_step_identity(reconnect), reconnect.status]})
         fault = (failed_step.error_type or "") if failed_step is not None else ""

@@ -57,7 +57,7 @@ _STALE_TEMPORARY_SECONDS = 3600
 
 _IDENTITY_KEYS = ("version", "origin", "fingerprint", "pages")
 # Fields kept beside the identity across resumes of the same intent (never part of its identity).
-_CARRIED_KEYS = ("failures", "scope", "startedAt", "idleRuns")
+_CARRIED_KEYS = ("failures", "scope", "startedAt", "idleRuns", "pendingLanMove")
 _now = time.time  # seam for tests: the intent's age is wall-clock time, it must survive reboots
 _SCOPE_SECTIONS = ("services", "forwards", "reservations")
 
@@ -254,6 +254,29 @@ class RecoveryCheckpoint:
         if record.get("idleRuns") != count:
             self._publish({**record, "idleRuns": count})
         return count
+
+    def pending_lan_move(self) -> dict[str, Any] | None:
+        """The LAN move (dhcpserver ipaddr/ipmask/dhcp) a run of this recovery posted and the gateway
+        answered: {"page", "fields"}, or None (none pending, or an older record without one)."""
+        record = self._active_record()
+        move = record.get("pendingLanMove") if record is not None else None
+        if not isinstance(move, dict) or not isinstance(move.get("page"), str):
+            return None
+        fields = move.get("fields")
+        if not isinstance(fields, list) or not fields or not all(isinstance(f, str) for f in fields):
+            return None
+        return {"page": move["page"], "fields": sorted(set(fields))}
+
+    def set_pending_lan_move(self, page: str, fields: Sequence[str]) -> None:
+        """Remember an answered LAN move until a later run reads whether it applied."""
+        record = self._active_record()
+        if record is not None:
+            self._publish({**record, "pendingLanMove": {"page": page, "fields": sorted(set(fields))}})
+
+    def clear_pending_lan_move(self) -> None:
+        record = self._active_record()
+        if record is not None and "pendingLanMove" in record:
+            self._publish({key: value for key, value in record.items() if key != "pendingLanMove"})
 
     def _reap_stale_temporaries(self) -> None:
         """Remove crashed runs' `.recovery-*` temporaries: our own plain files, an hour or older.

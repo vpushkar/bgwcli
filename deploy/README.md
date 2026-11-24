@@ -37,7 +37,9 @@ refused session or a full session pool after it was sent) ends the run `error` (
 unit) with `writeUnanswered: true`, even when the closing diff can be read: the gateway may or may
 not have applied it. The recovery intent counts consecutive runs that end with the
 same failure (a write that does not take effect, a step that keeps failing, or IP conflicts that a
-Clear and Rescan does not resolve); the third identical failure exits 2, and from then on the timer
+Clear and Rescan does not resolve, or a LAN move the gateway answers but never applies: a later run
+that still reads the moved `dhcpserver` fields at their old values counts it before posting again);
+the third identical failure exits 2, and from then on the timer
 sends nothing for that recovery and exits 2 until the gateway is found converged or you remove the
 intent file named in the message (after checking the gateway, or after a manual `bgwcli restore`).
 

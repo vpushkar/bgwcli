@@ -174,7 +174,8 @@ FORM_SAVE_BUTTONS: Mapping[str, str] = {
 }
 # dhcpserver fields whose change moves or renumbers the LAN; the step carries a warning so the
 # operator knows to reconnect to the new address (the closing diff will fail to re-fetch).
-_LAN_MOVING_FIELDS = ("ipaddr", "ipmask", "dhcp")
+LAN_MOVING_FIELDS = ("ipaddr", "ipmask", "dhcp")
+_LAN_MOVING_FIELDS = LAN_MOVING_FIELDS
 
 _UNORDERED = 0  # placeholder `order` for steps before _push numbers them
 
