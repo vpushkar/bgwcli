@@ -3374,7 +3374,7 @@ Operations are dry-run by default:
       bgwcli action run-speed-test --commit
       bgwcli action restart --commit --confirm RESTART
       bgwcli action restart-wifi-2.4 --commit --confirm RESTART-WIFI   (also restart-wifi-5, restart-broadband)
-      bgwcli action find-best-channel-5 --commit --confirm CHANSCAN     (5 GHz channel scan; 5 GHz clients drop briefly)
+      bgwcli action find-best-channel-5 --commit --confirm CHANSCAN     (5 GHz channel scan, ~20 s; may switch channel)
 
   bgwcli set <page> KEY=VALUE...
     Build a dry-run config mutation from current form state plus overrides, posted with the
