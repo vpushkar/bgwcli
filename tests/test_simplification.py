@@ -147,13 +147,22 @@ def test_the_page_nonce_ignores_a_commented_out_nonce():
 def test_nonce_selection_stays_fast_with_thousands_of_forms_sharing_one_action():
     import time
 
-    page = "".join(
-        f'<form action="/cgi-bin/t.ha"><input name="nonce" value="ab01"><input name="x{i}"></form>'
-        for i in range(4000)
-    )
-    started = time.monotonic()
-    _select_write_nonces(page, "t", "t.ha", {f"z{i}": "1" for i in range(4000)})
-    assert time.monotonic() - started < 1.0
+    def best_of_three(count: int) -> float:
+        page = "".join(
+            f'<form action="/cgi-bin/t.ha"><input name="nonce" value="ab01"><input name="x{i}"></form>'
+            for i in range(count)
+        )
+        fields = {f"z{i}": "1" for i in range(count)}
+        timings = []
+        for _ in range(3):
+            started = time.perf_counter()
+            _select_write_nonces(page, "t", "t.ha", fields)
+            timings.append(time.perf_counter() - started)
+        return min(timings)
+
+    # Four times the forms and posted names: about four times the work when ownership is linear,
+    # sixteen when every form is compared with every posted name.
+    assert best_of_three(4000) / best_of_three(1000) < 8
 
 
 # --- button-only named actions -----------------------------------------------------------------------
