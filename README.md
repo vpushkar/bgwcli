@@ -23,7 +23,7 @@ curl -fsSL https://raw.githubusercontent.com/vpushkar/bgwcli/main/install.sh | s
 ```
 
 It prints the PATH line to add if `~/.local/bin` is not on your PATH yet.
-Check what is installed with `bgwcli --version` (for example `bgwcli 0.4.2`).
+Check what is installed with `bgwcli --version` (for example `bgwcli 0.4.3`).
 
 **Install or upgrade as a single-file executable instead** (built on this machine with [PyInstaller](https://pyinstaller.org/) under a Python already installed here, no uv). Again one command for both; it rebuilds from the current `main` and replaces the file:
 
