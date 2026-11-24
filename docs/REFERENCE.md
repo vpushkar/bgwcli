@@ -562,13 +562,13 @@ After a committed ping/traceroute/nslookup the gateway answers 302 with an empty
 
 A committed `action` or `diagnostics` run whose POST fails with an HTTP error or a connection error reports a structured `failed` result (`committed: false`, `writeAttempted`, `writeResponseReceived`, `statusCode`) and exits 2 on every action kind. The form-button actions (`detect-wifi-congestion-2.4`, `detect-wifi-congestion-5`, `clear-connection-statistics`, `clear-lan-statistics`, `find-best-channel-5`, `restart`, `clear-device-list`, `packet-filter-enable`, `packet-filter-disable`) post the page's live form with the button's value as the page renders it, refuse before posting when the button is not on the page (e.g. `packet-filter-enable` while filters are already enabled), and inspect the answer: one whose follow-up page carries no banner at all (no `Changes saved`, no rejection, no `No changes detected`) is committed (exit 0) without an acknowledgement (`acknowledgementObserved` is absent), because these buttons are not Save buttons and the gateway does not always notify; one whose POST got no usable answer (an HTTP error, a lost connection, a refused session) reports the same structured `failed` result with exit 2 in JSON mode, and an explicit rejection banner from the gateway is a negative answer with exit 1. Every other action (`restart-from-resets`, `reset-*`, `run-speed-test`, `run-full-diagnostics`, `send-diagnostics`, `diagnostics-*-details`, `packet-filter-add-*`, `restart-wifi-*`, `restart-broadband`) posts its fixed payload and is reported committed (exit 0) on a 2xx/3xx answer, unless that answer (inline in a 200, or on the page a 3xx redirects to) carries the gateway's rejection banner: that is a structured rejection with exit 1, like a form-button action. A redirect target that cannot be read (an HTTP error, a lost connection, a page-level 401/403) means the answer is unknown: the structured `failed` result carries the POST's evidence and exits 2, never committed success. The exception is the actions whose effect takes the gateway's web server down (`restart`, `restart-from-resets`, `reset-ip`, `reset-connection`, `reset-wifi-config`, `reset-firewall-config`, `factory-reset` and `restart-broadband`) and the actions that take down the client's own radio (`restart-wifi-2.4`, `restart-wifi-5` and `find-best-channel-5`): the page that would carry the answer cannot be served, so it is not read, and the result is `committed: true` with `answerRead: false` and a note saying the answer page was not read (exit 0). Only the Wi-Fi page actions follow the Wi-Fi Warning page; no other action's confirmation authorizes its Continue POST. `restart` and `restart-from-resets` then load the page a 301/302/303 answer redirects to, once, as a browser does (resolved against the POST URL, same origin, inside `/cgi-bin/`): a dropped connection, a 5xx or a page without a refusal means the restart was requested and the reboot is not verified (exit 0); a Login page or 401/403 there is no answer (`committed: false`, exit 2), a rejection banner a negative answer (exit 1), and a full session pool is reported like any other pool-full answer. A committed `diagnostics` run whose POST is answered with a rejection banner (inline in a 200, or on the `diag` page a 3xx redirects to) is a structured rejection with exit 1 and is not polled.
 
-Diagnostic network actions dry-run by default and require `--commit --confirm DIAG` to send the router form:
+Diagnostic network actions dry-run by default; `--commit` sends the router form (`--confirm DIAG` is accepted but no longer required):
 
 ```bash
 bgwcli diagnostics ping example.com
-bgwcli diagnostics ping example.com --commit --confirm DIAG
-bgwcli diagnostics traceroute example.com --commit --confirm DIAG
-bgwcli diagnostics nslookup example.com --commit --confirm DIAG
+bgwcli diagnostics ping example.com --commit
+bgwcli diagnostics traceroute example.com --commit
+bgwcli diagnostics nslookup example.com --commit
 ```
 
 Use `--ipv4` or `--ipv6` to set the router protocol preference.
@@ -600,12 +600,13 @@ Dry-run JSON for `action`, `set`, `submit`, and diagnostic commands uses the sam
   "page": "speed",
   "guarded": true,
   "dangerous": false,
-  "confirmation": "SPEED",
-  "commitCommand": "action run-speed-test --commit --confirm SPEED",
+  "commitCommand": "action run-speed-test --commit",
   "action": "run-speed-test",
   "payload": { "run": "Run Speed Test" }
 }
 ```
+
+`--confirm <token>` is required only for dangerous actions and for actions that take down the gateway's web server or the client's radio (the `restart`/`reset` family, `restart-broadband`, `restart-wifi-*`, `find-best-channel-5`, `clear-*-statistics`, `packet-filter-disable`, `factory-reset`, `send-diagnostics`...; `bgwcli actions` shows which). Every other action, and `diagnostics`, commits with `--commit` alone; a token given anyway must be the action's own or nothing is posted. The dry run's `commitCommand` names the token only where it is required. `set`, `submit`, `restore` and `autorestore` keep their tokens.
 
 The generic `set` command refuses mutation attempts against dangerous pages:
 
@@ -648,7 +649,7 @@ LAN Statistics also exposes four guarded actions. Each dry-run shows its confirm
 
 ```bash
 bgwcli action detect-wifi-congestion-2.4
-bgwcli action detect-wifi-congestion-5 --commit --confirm CONGESTION-5
+bgwcli action detect-wifi-congestion-5 --commit
 bgwcli action clear-connection-statistics --commit --confirm CLEAR-CONNECTION-STATISTICS
 bgwcli action clear-lan-statistics --commit --confirm CLEAR-LAN-STATISTICS
 ```

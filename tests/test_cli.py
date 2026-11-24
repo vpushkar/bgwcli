@@ -363,7 +363,8 @@ def test_tabs_section_and_actions_are_local(capsys, fake, tmp_env):
     code, payload, _ = run_json(capsys, ["actions", "--json"])
     assert code == 0 and any(a["name"] == "run-speed-test" and a["confirmToken"] == "SPEED" for a in payload)
     code, out, _ = run(capsys, ["actions"])
-    assert "run-speed-test" in out and "confirm=SPEED" in out
+    # run-speed-test commits with --commit alone; restart still names its token.
+    assert "run-speed-test" in out and "confirm=SPEED" not in out and "confirm=RESTART" in out
     # none of these touched the router, and the local-only commands did not create a session cache dir
     assert "client" not in fake or fake["client"].gets == []
     assert not (tmp_env / "cache").exists()
@@ -700,13 +701,14 @@ def test_action_dry_run_and_commit(capsys, fake):
     code, payload, _ = run_json(capsys, ["action", "run-speed-test", "--json"])
     assert code == 0
     assert payload["dryRun"] is True and payload["committed"] is False
-    assert payload["confirmation"] == "SPEED"
-    assert payload["commitCommand"] == "action run-speed-test --commit --confirm SPEED"
+    assert "confirmation" not in payload  # a token-free action names no token
+    assert payload["commitCommand"] == "action run-speed-test --commit"
     assert {"operation", "page", "guarded", "dangerous", "payload"} <= set(payload)
     assert fake["client"].posts == []
 
-    code, _, err = run(capsys, ["action", "run-speed-test", "--commit"])
-    assert code == 1 and "Refusing to run action 'run-speed-test'. Re-run with --commit --confirm SPEED." in err
+    # restart needs its token; --commit alone is refused before the router is touched.
+    code, _, err = run(capsys, ["action", "restart", "--commit"])
+    assert code == 1 and "Refusing to run action 'restart'. Re-run with --commit --confirm RESTART." in err
     assert fake["client"].posts == []
 
     code, _, err = run(capsys, ["action", "nope"])
@@ -727,9 +729,9 @@ def test_action_text_output(capsys, fake):
     assert "dry-run: no router action was sent" in out and "RESTART" in out
 
 
-def test_diagnostic_commit_requires_confirmation_before_router_access(capsys, fake):
-    code, _, err = run(capsys, ["diagnostics", "ping", "example.com", "--commit"])
-    assert code == 1 and "Refusing to run diagnostic 'ping'. Re-run with --commit --confirm DIAG." in err
+def test_diagnostic_commit_refuses_a_wrong_token_before_router_access(capsys, fake):
+    code, _, err = run(capsys, ["diagnostics", "ping", "example.com", "--commit", "--confirm", "RESTART"])
+    assert code == 1 and "Refusing to run diagnostic 'ping': --confirm RESTART is not its token." in err
     assert "client" not in fake or fake["client"].gets == []
     code, _, err = run(capsys, ["diagnostics", "ping"])
     assert code == 1 and "Missing target for diagnostics ping." in err
@@ -740,7 +742,7 @@ def test_diagnostic_dry_run_and_commit(capsys, fake):
     assert code == 0
     assert payload["operation"] == "diagnostic" and payload["dryRun"] is True
     assert payload["payload"]["WebAddress"] == "example.com" and payload["payload"]["protopref"] == "IPv6"
-    assert payload["confirmation"] == "DIAG"
+    assert "confirmation" not in payload and payload["commitCommand"].endswith(" --commit")
     assert fake["client"].posts == []
 
     code, payload, _ = run_json(capsys, ["diagnostics", "traceroute", "example.com", "--commit", "--confirm", "DIAG",

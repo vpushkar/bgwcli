@@ -55,7 +55,7 @@ def test_confirm_tokens_pages_payloads_and_dangerous_flags_preserved():
         ),
         "clear-lan-statistics": ("lanstatistics", "CLEAR-LAN-STATISTICS", {"Clear": "Clear Statistics"}, True),
         "run-full-diagnostics": ("diag", "DIAG", {"RunFullDiagnostics": "Run Full Diagnostics"}, False),
-        "send-diagnostics": ("diag", "SEND-DIAGNOSTICS", {"SendDiagnostics": "Send Diagnostics"}, False),
+        "send-diagnostics": ("diag", "SEND-DIAGNOSTICS", {"SendDiagnostics": "Send Diagnostics"}, True),
         "diagnostics-ethernet-details": ("diag", "DIAG", {"EthDetails": "Details"}, False),
         "diagnostics-authentication-details": ("diag", "DIAG", {"AuthDetails": "Details"}, False),
         "diagnostics-ip-details": ("diag", "DIAG", {"IPDetails": "Details"}, False),

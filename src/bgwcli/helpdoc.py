@@ -126,7 +126,7 @@ def section_help_epilog(section: RouterSectionName) -> str:
     if section == "Diagnostics":
         parts += [
             "",
-            f"Operations (bgwcli {command} <operation> <host>; dry-run, add --commit --confirm DIAG to send):",
+            f"Operations (bgwcli {command} <operation> <host>; dry-run, add --commit to send):",
             diagnostic_operations_text(),
         ]
     example = next(row for row in rows if not row.is_default and not row.guarded)
@@ -426,18 +426,26 @@ def restore_phases_epilog() -> str:
     ])
 
 
+def _token_cell(action, prefix: str) -> str:
+    """The --confirm token an action needs, or "--commit only" when --commit alone commits it."""
+    return prefix + action.confirm_token if action.requires_confirmation else "--commit only"
+
+
 def actions_epilog() -> str:
     from .actions import ROUTER_ACTIONS
 
     name_width = max(len(action.name) for action in ROUTER_ACTIONS) + 2
     token_width = max(len(action.confirm_token) for action in ROUTER_ACTIONS) + len("--confirm ") + 2
     page_width = max(len(action.page) for action in ROUTER_ACTIONS) + 2
-    lines = ["Actions (bgwcli action <name> previews; add --commit --confirm <token> to POST):"]
+    lines = [
+        "Actions (bgwcli action <name> previews; add --commit to POST, plus the --confirm <token> shown "
+        "for dangerous and connection-dropping actions):"
+    ]
     for action in ROUTER_ACTIONS:
         guard = "dangerous" if action.dangerous else "guarded"
         aliases = f" (also: {', '.join(action.aliases)})" if action.aliases else ""
         lines.append(
-            f"  {action.name.ljust(name_width)}{('--confirm ' + action.confirm_token).ljust(token_width)}"
+            f"  {action.name.ljust(name_width)}{_token_cell(action, '--confirm ').ljust(token_width)}"
             f"{action.page.ljust(page_width)}{guard.ljust(11)}{action.description.rstrip('.')}{aliases}"
         )
     return "\n".join(lines)
@@ -546,7 +554,7 @@ def readme_pages_markdown() -> str:
             lines.append(f"| `bgwcli {row.command} {row.slug}` | {_md(row.summary)}{marker} |")
         if section == "Diagnostics":
             for name, summary in _DIAGNOSTIC_OPERATIONS:
-                lines.append(f"| `bgwcli diagnostics {name}` | {summary}; dry run, `--commit --confirm DIAG` sends |")
+                lines.append(f"| `bgwcli diagnostics {name}` | {summary}; dry run, `--commit` sends |")
         lines.append("")
     return "\n".join(lines)
 
@@ -585,7 +593,8 @@ def readme_actions_markdown() -> str:
         kind = "dangerous" if action.dangerous else "guarded"
         aliases = f" (also `{'`, `'.join(action.aliases)}`)" if action.aliases else ""
         lines.append(
-            f"| `{action.name}` | `{action.confirm_token}` | `{action.page}` | {kind} | "
+            f"| `{action.name}` | {'`' + action.confirm_token + '`' if action.requires_confirmation else '—'} | "
+            f"`{action.page}` | {kind} | "
             f"{_md(action.description)}{aliases} |"
         )
     lines.append("")
@@ -626,7 +635,7 @@ def root_actions_list(indent: str = "      ") -> str:
     width = max(len(action.name) for action in ROUTER_ACTIONS) + 1
     token_width = max(len(action.confirm_token) for action in ROUTER_ACTIONS) + len("--confirm=") + 2
     return "\n".join(
-        f"{indent}{action.name.ljust(width)}{('--confirm=' + action.confirm_token).ljust(token_width)}"
+        f"{indent}{action.name.ljust(width)}{_token_cell(action, '--confirm=').ljust(token_width)}"
         f"{'dangerous' if action.dangerous else 'guarded'}"
         for action in ROUTER_ACTIONS
     )

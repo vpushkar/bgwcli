@@ -490,7 +490,10 @@ def test_action_help_rows():
         assert len(rows) == 1, action.name
         row = rows[0]
         fields = row.split()
-        assert fields[fields.index("--confirm") + 1] == action.confirm_token, action.name
+        if action.requires_confirmation:
+            assert fields[fields.index("--confirm") + 1] == action.confirm_token, action.name
+        else:
+            assert "--confirm" not in fields and "--commit only" in row, action.name
         assert f" {action.page} " in f" {row} "
         assert action.description.rstrip(".") in row
         assert ("dangerous" in row.split()) == bool(action.dangerous), action.name
@@ -664,7 +667,8 @@ def test_readme_actions_block_lists_every_action():
     block = _readme_block("actions")
     for action in ROUTER_ACTIONS:
         row = next(line for line in block.splitlines() if line.startswith(f"| `{action.name}` |"))
-        assert f"`{action.confirm_token}`" in row and f"`{action.page}`" in row
+        token = f"`{action.confirm_token}`" if action.requires_confirmation else "| — |"
+        assert token in row and f"`{action.page}`" in row
 
 
 def test_readme_states_submit_and_set_rules_and_firmware_command():
@@ -796,7 +800,8 @@ def test_final_root_help_lists_phases_actions_and_snapshot_count():
     phases = [line.split()[1] for line in text.splitlines() if re.match(r"^\s+\d+\. ", line)]
     assert phases == list(restore.RESTORE_PAGE_ORDER)
     for action in ROUTER_ACTIONS:
-        assert any(line.split()[:2] == [action.name, f"--confirm={action.confirm_token}"]
+        token = [f"--confirm={action.confirm_token}"] if action.requires_confirmation else ["--commit", "only"]
+        assert any(line.split()[: 1 + len(token)] == [action.name, *token]
                    for line in text.splitlines()), action.name
     flat = " ".join(text.split())
     assert "captures every page" not in flat

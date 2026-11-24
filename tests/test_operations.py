@@ -92,8 +92,7 @@ def test_action_dry_run_returns_consistent_guarded_operation_shape():
         "action": "run-speed-test",
         "guarded": True,
         "dangerous": False,
-        "confirmation": "SPEED",
-        "commitCommand": "action run-speed-test --commit --confirm SPEED",
+        "commitCommand": "action run-speed-test --commit",
         "payload": {"run": "Run Speed Test"},
     }
 
@@ -183,8 +182,8 @@ def test_submit_dry_run_and_diagnostic_dry_run_include_commit_commands():
     assert diag.action == "ping"
     assert diag.target == "example.com"
     assert diag.button == "Ping"
-    assert diag.confirmation == "DIAG"
-    assert diag.commit_command == "diagnostics ping example.com --commit --confirm DIAG"
+    assert diag.confirmation is None
+    assert diag.commit_command == "diagnostics ping example.com --commit"
     assert diag.payload == {"Ping": "Ping"}
 
 

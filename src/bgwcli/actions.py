@@ -38,6 +38,17 @@ class RouterAction:
     # there is the gateway going down, not an error.
     follow_redirect: bool = field(default=False, metadata={"serialize": False})
 
+    @property
+    def requires_confirmation(self) -> bool:
+        """--confirm <token> is required only where a mistake is costly: a dangerous action, or one that
+        takes down the gateway's web server or the client's radio. Any other action commits with
+        --commit alone (a token given anyway must still be its own)."""
+        return self.dangerous or self.drops_web_server
+
+    def commit_command(self) -> str:
+        token = f" --confirm {self.confirm_token}" if self.requires_confirmation else ""
+        return f"action {self.name} --commit{token}"
+
 
 ROUTER_ACTIONS: tuple[RouterAction, ...] = (
     RouterAction(
@@ -130,7 +141,7 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         description="Send the router diagnostics report to AT&T.",
         confirm_token="SEND-DIAGNOSTICS",
         payload={"SendDiagnostics": "Send Diagnostics"},
-        dangerous=False,
+        dangerous=True,  # sends a report off the network to the ISP: keep its --confirm token
         aliases=("send-diagnostic-report",),
     ),
     RouterAction(

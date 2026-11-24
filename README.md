@@ -406,9 +406,9 @@ Every router tab is a command. All accept `--json`; `--forms` adds the page's fo
 | `bgwcli diagnostics event-notifications` | Event notification settings |
 | `bgwcli diagnostics nat-table` | Active NAT sessions |
 | `bgwcli diagnostics site-map` | The router's own page index |
-| `bgwcli diagnostics ping <host>` | Ping a host from the gateway; dry run, `--commit --confirm DIAG` sends |
-| `bgwcli diagnostics traceroute <host>` | Trace the route to a host from the gateway; dry run, `--commit --confirm DIAG` sends |
-| `bgwcli diagnostics nslookup <host>` | Resolve a name with the gateway's DNS; dry run, `--commit --confirm DIAG` sends |
+| `bgwcli diagnostics ping <host>` | Ping a host from the gateway; dry run, `--commit` sends |
+| `bgwcli diagnostics traceroute <host>` | Trace the route to a host from the gateway; dry run, `--commit` sends |
+| `bgwcli diagnostics nslookup <host>` | Resolve a name with the gateway's DNS; dry run, `--commit` sends |
 <!-- pages:end -->
 
 `home`, `lan` (for `home-network`) and `diag`, `diagnostic` (for `diagnostics`) are accepted as section
@@ -437,22 +437,22 @@ Every action, its token and the page it starts from (`bgwcli action -h` prints t
 | Action | Token | Source page | Kind | What it does |
 | --- | --- | --- | --- | --- |
 | `restart` | `RESTART` | `restart` | dangerous | Restart the gateway. (also `restart-device`, `reboot`) |
-| `clear-device-list` | `CLEAR-DEVICES` | `devices` | guarded | Clear inactive devices from the device list. |
-| `run-speed-test` | `SPEED` | `speed` | guarded | Run the router speed test. (also `speed-test`) |
-| `detect-wifi-congestion-2.4` | `CONGESTION-2.4` | `lanstatistics` | guarded | Run 2.4 GHz Wi-Fi congestion detection from LAN Statistics. (also `congestion-2.4`, `congestion-24`) |
-| `detect-wifi-congestion-5` | `CONGESTION-5` | `lanstatistics` | guarded | Run 5 GHz Wi-Fi congestion detection from LAN Statistics. (also `congestion-5`, `congestion-5ghz`) |
+| `clear-device-list` | — | `devices` | guarded | Clear inactive devices from the device list. |
+| `run-speed-test` | — | `speed` | guarded | Run the router speed test. (also `speed-test`) |
+| `detect-wifi-congestion-2.4` | — | `lanstatistics` | guarded | Run 2.4 GHz Wi-Fi congestion detection from LAN Statistics. (also `congestion-2.4`, `congestion-24`) |
+| `detect-wifi-congestion-5` | — | `lanstatistics` | guarded | Run 5 GHz Wi-Fi congestion detection from LAN Statistics. (also `congestion-5`, `congestion-5ghz`) |
 | `clear-connection-statistics` | `CLEAR-CONNECTION-STATISTICS` | `lanstatistics` | dangerous | Clear connection statistics counters from LAN Statistics. (also `clear-connection-stats`) |
 | `clear-lan-statistics` | `CLEAR-LAN-STATISTICS` | `lanstatistics` | dangerous | Clear LAN statistics counters using the LAN Statistics Clear Statistics button. (also `clear-statistics`, `clear-lan-stats`) |
-| `run-full-diagnostics` | `DIAG` | `diag` | guarded | Run the router's full diagnostic test suite. (also `full-diagnostics`) |
-| `send-diagnostics` | `SEND-DIAGNOSTICS` | `diag` | guarded | Send the router diagnostics report to AT&T. (also `send-diagnostic-report`) |
-| `diagnostics-ethernet-details` | `DIAG` | `diag` | guarded | Show Ethernet diagnostic details. (also `ethernet-details`) |
-| `diagnostics-authentication-details` | `DIAG` | `diag` | guarded | Show authentication diagnostic details. (also `authentication-details`) |
-| `diagnostics-ip-details` | `DIAG` | `diag` | guarded | Show IP diagnostic details. (also `ip-details`) |
-| `diagnostics-dns-details` | `DIAG` | `diag` | guarded | Show DNS diagnostic details. (also `dns-details`) |
-| `packet-filter-enable` | `PACKETFILTER` | `packetfilter` | guarded | Enable packet filters. (also `enable-packet-filter`, `enable-packet-filters`) |
+| `run-full-diagnostics` | — | `diag` | guarded | Run the router's full diagnostic test suite. (also `full-diagnostics`) |
+| `send-diagnostics` | `SEND-DIAGNOSTICS` | `diag` | dangerous | Send the router diagnostics report to AT&T. (also `send-diagnostic-report`) |
+| `diagnostics-ethernet-details` | — | `diag` | guarded | Show Ethernet diagnostic details. (also `ethernet-details`) |
+| `diagnostics-authentication-details` | — | `diag` | guarded | Show authentication diagnostic details. (also `authentication-details`) |
+| `diagnostics-ip-details` | — | `diag` | guarded | Show IP diagnostic details. (also `ip-details`) |
+| `diagnostics-dns-details` | — | `diag` | guarded | Show DNS diagnostic details. (also `dns-details`) |
+| `packet-filter-enable` | — | `packetfilter` | guarded | Enable packet filters. (also `enable-packet-filter`, `enable-packet-filters`) |
 | `packet-filter-disable` | `PACKETFILTER` | `packetfilter` | dangerous | Disable packet filters (the gateway stops applying every packet-filter rule). (also `disable-packet-filter`, `disable-packet-filters`) |
-| `packet-filter-add-drop-rule` | `PACKETFILTER` | `packetfilter` | guarded | Open/add a packet-filter drop rule. (also `add-drop-rule`) |
-| `packet-filter-add-pass-rule` | `PACKETFILTER` | `packetfilter` | guarded | Open/add a packet-filter pass rule. (also `add-pass-rule`) |
+| `packet-filter-add-drop-rule` | — | `packetfilter` | guarded | Open/add a packet-filter drop rule. (also `add-drop-rule`) |
+| `packet-filter-add-pass-rule` | — | `packetfilter` | guarded | Open/add a packet-filter pass rule. (also `add-pass-rule`) |
 | `reset-ip` | `RESET-IP` | `reset` | dangerous | Reset the router IP stack. |
 | `reset-connection` | `RESET-CONNECTION` | `reset` | dangerous | Reset the router broadband connection. |
 | `restart-from-resets` | `RESTART` | `reset` | dangerous | Restart from the Diagnostics > Resets page. |

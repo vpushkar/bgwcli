@@ -88,8 +88,9 @@ def test_lan_actions_dry_run_and_confirmation_gate_no_http(
     output = json.loads(capsys.readouterr().out)
     assert output["dryRun"] is True and output["committed"] is False
     assert output["payload"] == {button: value}
-    assert output["commitCommand"] == f"action {name} --commit --confirm {token}"
-    for confirmation in (None, "WRONG-TOKEN"):
+    required = get_action(name).requires_confirmation
+    assert output["commitCommand"] == f"action {name} --commit" + (f" --confirm {token}" if required else "")
+    for confirmation in ((None, "WRONG-TOKEN") if required else ("WRONG-TOKEN",)):
         with pytest.raises(UsageError, match=token):
             cli.run(command(name, commit=True, confirm=confirmation), client)
     assert requests == []

@@ -118,7 +118,7 @@
     "payload": {
       "SendDiagnostics": "Send Diagnostics"
     },
-    "dangerous": false,
+    "dangerous": true,
     "aliases": [
       "send-diagnostic-report"
     ]

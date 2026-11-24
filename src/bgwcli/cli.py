@@ -641,9 +641,14 @@ def _run_action(client: Any, command: Command) -> None:
         command.output(fmt.operation_output(result), lambda: fmt.print_operation(result))
         return
 
-    if command.confirm != action.confirm_token:
+    if command.confirm != action.confirm_token and (action.requires_confirmation or command.confirm):
+        if action.requires_confirmation:
+            raise UsageError(
+                f"Refusing to run action '{action.name}'. Re-run with --commit --confirm {action.confirm_token}."
+            )
         raise UsageError(
-            f"Refusing to run action '{action.name}'. Re-run with --commit --confirm {action.confirm_token}."
+            f"Refusing to run action '{action.name}': --confirm {command.confirm} is not its token. "
+            f"Re-run with --commit alone (or --confirm {action.confirm_token})."
         )
 
     # Every action reads its source page first: a "Please wait" or truncated answer carries no form
@@ -774,8 +779,11 @@ def _run_diagnostic(client: Any, command: Command) -> None:
     if len(command.args) < 2 or not command.args[1]:
         raise UsageError(f"Missing target for diagnostics {kind}.")
     target = command.args[1]
-    if command.commit and command.confirm != DIAG_CONFIRM_TOKEN:
-        raise UsageError(f"Refusing to run diagnostic '{kind}'. Re-run with --commit --confirm {DIAG_CONFIRM_TOKEN}.")
+    if command.commit and command.confirm and command.confirm != DIAG_CONFIRM_TOKEN:
+        raise UsageError(
+            f"Refusing to run diagnostic '{kind}': --confirm {command.confirm} is not its token. "
+            f"Re-run with --commit alone (or --confirm {DIAG_CONFIRM_TOKEN})."
+        )
 
     diag_page = fetch_parsed_page(client, "diag", include_secrets=True)
     truncated = truncated_page_problem("diag", diag_page.parsed) if diag_page.ok else None
@@ -2574,7 +2582,9 @@ _COMMAND_OPTIONS: tuple[tuple[tuple[str, ...], dict[str, Any]], ...] = (
     (("--all",), {"action": _FLAG, "help": "Device List (devices, device device-list): include offline devices"}),
     (("--limit",), {"metavar": "<n>", "help": "Limit displayed rows. Default: 20"}),
     (("--commit",), {"action": _FLAG, "help": "Actually POST (operations are dry-run by default)"}),
-    (("--confirm",), {"metavar": "<token>", "help": "Required token for every committed operation"}),
+    (("--confirm",), {"metavar": "<token>", "help": (
+            "Confirmation token: required for set/submit/restore and for dangerous or connection-dropping actions"
+        )}),
     (("--ipv4",), {"dest": "protocol", "action": "store_const", "const": "IPv4", "help": "diagnostics: prefer IPv4"}),
     (("--ipv6",), {"dest": "protocol", "action": "store_const", "const": "IPv6", "help": "diagnostics: prefer IPv6"}),
     (

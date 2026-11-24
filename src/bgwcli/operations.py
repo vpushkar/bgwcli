@@ -75,8 +75,8 @@ def action_dry_run(action: RouterAction, display_payload: dict[str, str]) -> Ope
         action=action.name,
         guarded=True,
         dangerous=action.dangerous,
-        confirmation=action.confirm_token,
-        commit_command=f"action {action.name} --commit --confirm {action.confirm_token}",
+        confirmation=action.confirm_token if action.requires_confirmation else None,
+        commit_command=action.commit_command(),
         payload=display_payload,
     )
 
@@ -90,7 +90,7 @@ def action_committed(action: RouterAction, status_code: int | None, location: st
         action=action.name,
         guarded=True,
         dangerous=action.dangerous,
-        confirmation=action.confirm_token,
+        confirmation=action.confirm_token if action.requires_confirmation else None,
         status_code=status_code,
         location=location,
     )
@@ -201,8 +201,7 @@ def diagnostic_dry_run(kind: str, target: str, payload: dict[str, str], button: 
         button=button,
         guarded=True,
         dangerous=False,
-        confirmation="DIAG",
-        commit_command=f"diagnostics {kind} {quote_arg(target)} --commit --confirm DIAG",
+        commit_command=f"diagnostics {kind} {quote_arg(target)} --commit",
         payload=payload,
     )
 

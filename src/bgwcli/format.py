@@ -196,7 +196,8 @@ def print_actions(actions: Sequence[RouterAction], stream: TextIO | None = None)
         guard = "dangerous" if action.dangerous else "guarded"
         out.write(
             f"{action.name.ljust(name_width)} {action.page.ljust(page_width)} {guard.ljust(9)} "
-            f"confirm={action.confirm_token.ljust(token_width)} {action.description}\n"
+            f"confirm={(action.confirm_token if action.requires_confirmation else '-').ljust(token_width)} "
+            f"{action.description}\n"
         )
 
 
