@@ -35,6 +35,7 @@ from .allocation_preflight import (
 from .audit import build_audit, capture_fixture_pack, preflight_fixture_root
 from .autorestore import AutorestoreOptions, result_output, run_autorestore
 from .client import (
+    READ_TIMEOUT_TEXT,
     BGW320Client,
     PostWriteEvidence,
     RouterResponseError,
@@ -670,6 +671,8 @@ def _run_action(client: Any, command: Command) -> None:
         outcome = _post_live_button(client, command, action, page_result.parsed, sent)
         if outcome is None:  # already in the requested state: reported, nothing posted
             return
+        if action.follow_redirect and isinstance(outcome, RestoreStepResult):
+            outcome = _ambiguous_restart_post(outcome)
         if action.follow_redirect and not isinstance(outcome, RestoreStepResult):
             _finish_restart(command, client, action, outcome, sent)
             return
@@ -807,6 +810,17 @@ def _post_live_button(
     )
 
 
+def _ambiguous_restart_post(step: RestoreStepResult) -> RestoreStepResult:
+    """A restart POST answered 5xx, or sent and then not answered in time, may have started the
+    reboot: its failed step (exit 2) says so. Other failures keep their own wording."""
+    error = step.error or ""
+    server_error = step.write_response_received is True and (step.status_code or 0) >= 500
+    read_timeout = step.write_attempted is not False and error.startswith(READ_TIMEOUT_TEXT)
+    if step.status != "failed" or not (server_error or read_timeout):
+        return step
+    return replace(step, error=append_sentence(error, f"The {RESTART_UNCERTAIN}"))
+
+
 def _finish_restart(command: Command, client: Any, action: Any, response: Any, sent: PostWriteEvidence) -> None:
     """Report a restart POST the gateway answered. Only a 301/302/303 to its restarting page leads to
     the hand-off; any other answer (inline 200, another status) leaves the restart unconfirmed."""
@@ -875,14 +889,16 @@ def _request_redirect_handoff(
     except RouterSessionPoolFullError:
         raise
     except (BgwError, OSError) as exc:
+        # A timeout wins: the request deadline cuts the socket, so a deadline cut can surface as a
+        # reset wrapped in the timeout, and it is the client giving up, not the gateway going down.
+        if _timed_out(exc):
+            return NO_ANSWER, (
+                f"the restart hand-off page {location} did not answer in time; {RESTART_UNCERTAIN}"
+            ), False
         if _gateway_went_down(exc):
             return None, (
                 f"Restart requested: the gateway redirected to {location} and then reset, refused or cut "
                 f"the connection ({exc}), as it does when it goes down for the reboot. {_RESTART_UNVERIFIED}"
-            ), False
-        if _timed_out(exc):
-            return NO_ANSWER, (
-                f"the restart hand-off page {location} did not answer in time; {RESTART_UNCERTAIN}"
             ), False
         return NO_ANSWER, (
             f"the restart hand-off page {location} could not be requested ({exc}); {_RESTART_UNCONFIRMED}"
@@ -902,7 +918,10 @@ def _request_redirect_handoff(
             f"{error} The restart POST was sent {sent} and answered HTTP {post_status}; {_RESTART_UNCONFIRMED}.",
         )
         error.write_attempted = True
-        error.write_evidence = {**(getattr(error, "write_evidence", None) or {}), "writeResponseReceived": True}
+        error.write_evidence = {
+            **(getattr(error, "write_evidence", None) or {}),
+            "writeResponseReceived": True, "writeAttempts": attempts or 1, "statusCode": post_status,
+        }
         raise error
     login_redirect = False
     if 300 <= status < 400:
@@ -919,6 +938,12 @@ def _request_redirect_handoff(
         return NO_ANSWER, f"the restart hand-off page {location} answered HTTP {status}; {RESTART_UNCERTAIN}", True
     if 300 <= status < 500:
         return NO_ANSWER, f"the restart hand-off page {location} answered HTTP {status}; {_RESTART_UNCONFIRMED}", True
+    # Only a 2xx answer that serves a page is the restarting page: a 1xx, a 204/205 or an empty body
+    # carries no page at all.
+    if not 200 <= status < 300 or status in (204, 205) or not body.strip():
+        return NO_ANSWER, (
+            f"the restart hand-off page {location} answered HTTP {status} without a page; {_RESTART_UNCONFIRMED}"
+        ), True
     try:
         parsed = parse_page("restarting", body)
         banner = router_error_banner(body)

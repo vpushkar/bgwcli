@@ -177,6 +177,10 @@ class RawResponse:
 Transport = Callable[[HttpRequest], RawResponse]
 
 
+# The start of the error a response-read timeout becomes: the request went out, its answer did not come.
+READ_TIMEOUT_TEXT = "Timed out reading response from"
+
+
 class ResponseReadTimeout(TimeoutError):
     """The connection was made and the request sent, but the response did not arrive in time.
 
@@ -1016,7 +1020,7 @@ class BGW320Client:
         except BgwError:
             raise
         except ResponseReadTimeout as exc:
-            raise RouterConnectionError(f"Timed out reading response from {url}") from exc
+            raise RouterConnectionError(f"{READ_TIMEOUT_TEXT} {url}") from exc
         except ResponseEndedEarly as exc:
             raise RouterConnectionError(f"Response from {url} ended early: {exc}") from exc
         except TimeoutError as exc:
@@ -1385,13 +1389,22 @@ def _normalized_origin(parts) -> tuple[str, str, int | None]:
     return (scheme, (parts.hostname or "").lower(), port if port is not None else default)
 
 
+_LOGIN_PATH = "/cgi-bin/login.ha"
+
+
 def _is_login_url(url: str) -> bool:
-    """True when a (redirect-followed) response's final URL is the gateway login handshake."""
-    return re.search(r"/cgi-bin/login\.ha(?:[?#]|$)", url or "", re.I) is not None
+    """True when a (redirect-followed) response's final URL is the gateway login handshake: its path,
+    never a query or fragment that merely names it."""
+    try:
+        return urlsplit(url or "").path.lower() == _LOGIN_PATH
+    except ValueError:
+        return False
 
 
 def _redirects_to_login(response: HttpResponse) -> bool:
-    """True when an unfollowed 3xx answer points at the gateway login handshake."""
+    """True when an unfollowed 3xx answer points at the gateway login handshake: the Location resolved
+    against the request URL is on the same origin with the login path. A query naming login.ha
+    (``restarting.ha?next=/cgi-bin/login.ha``), another origin or a malformed Location is not."""
     if not 300 <= response.status_code < 400:
         return False
     location = response.headers.get("location")
@@ -1400,9 +1413,12 @@ def _redirects_to_login(response: HttpResponse) -> bool:
     if not location:
         return False
     try:
-        return _is_login_url(urljoin(response.url, location))
-    except ValueError:  # a malformed Location (e.g. an unclosed IPv6 bracket) is no login redirect
-        return _is_login_url(location)
+        request = urlsplit(response.url)
+        origin = f"{request.scheme}://{request.netloc}"
+    except ValueError:
+        return False
+    kind, target = resolve_gateway_redirect(origin, request.path, location)
+    return kind == "ok" and target.path.lower() == _LOGIN_PATH
 
 
 def router_sessions_full(html: str) -> bool:
