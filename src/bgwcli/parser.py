@@ -554,6 +554,14 @@ def _first_row_names_columns(
     )
 
 
+def _is_row_header_row(row: TableGridRow[Cell], is_header_cell: Callable[[Cell], bool] | None) -> bool:
+    """True when the row's first cell is a header cell and every other cell is a data cell: a row
+    header beside its values (``<th scope="row">Label</th><td>value</td>``)."""
+    if is_header_cell is None or len(row.cells) < 2:
+        return False
+    return is_header_cell(row.cells[0]) and not any(is_header_cell(cell) for cell in row.cells[1:])
+
+
 def _names_a_secret(grid: list[TableGridRow[Cell]], text: Callable[[Cell], str]) -> bool:
     """True when a header-row cell or a first-column cell of the table is secret-named."""
     first = next((row for row in grid if row.cells), grid[0])
@@ -614,6 +622,11 @@ def govern_table(
     if first is None:
         return [], []
     names_columns = _first_row_names_columns(grid[first], text, is_header_cell)
+    if names_columns and not header_row_is_data and _is_row_header_row(grid[first], is_header_cell):
+        # `<th>Test</th><td>Pass</td>[<td>...</td>]` is a labelled data row (the gateway's diagnostics
+        # results), not column names: its "Pass" must not name a secret column over the later results.
+        # The fixture sanitizer (header_row_is_data) keeps the fail-closed column reading.
+        names_columns = False
     headers = (
         column_headers([text(cell) for cell in grid[first].columns], grid[first].span_copies) if names_columns else []
     )
