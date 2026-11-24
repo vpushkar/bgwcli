@@ -1439,15 +1439,18 @@ def _resent_attempts(evidence: PostWriteEvidence) -> int | None:
 
 
 def _confirm_save(
-    client: Any, page: str, payload: dict[str, str], sent: PostWriteEvidence | None = None
+    client: Any, page: str, payload: dict[str, str], sent: PostWriteEvidence | None = None,
+    submit: tuple[str, str] | None = None,
 ) -> tuple[int | None, str | None, Any | None]:
     """POST a page's form and collect the gateway's acknowledgement step. When the gateway answers
     with a Wi-Fi Warning redirect, post Continue to the owning form (without it the change is
     discarded). Returns (status_code, location, step); step is None when no acknowledgement
     protocol applies to the page. Pool-full/authentication failures raise; every other outcome is
     returned for the caller to decide through save_result. A caller that reports `writeAttempts`
-    passes its own `sent` evidence, complete when this returns."""
-    posted = _post_save(client, page, payload, sent)
+    passes its own `sent` evidence, complete when this returns. `submit` (name, value): the button
+    the write was planned with must still be in the target form of the page the nonce is read from,
+    or nothing is sent."""
+    posted = _post_save(client, page, payload, sent, submit)
     if isinstance(posted, RestoreStepResult):
         # The same "could not answer" the Wi-Fi/LAN paths report as a failed step: structured, exit 2.
         return None, None, posted
@@ -1917,6 +1920,19 @@ def _live_form_values(parsed: Any) -> dict[str, str]:
     return values
 
 
+def _planned_submit(plan: Any, parsed: Any) -> tuple[str, str] | None:
+    """(name, value) of the button a generic submit was planned with, for the nonce-page recheck the
+    named actions also get: a page that changed between the planning read and the nonce read (the
+    button flipped, vanished or took another value) posts nothing. None for a button outside every
+    form (the live parse says so), which has no form to be checked in, as before."""
+    button = getattr(plan, "button", None)
+    if button is None or not button.name:
+        return None
+    if getattr(parsed, "_form_owners_known", False) and button._form_index is None:
+        return None
+    return button.name, plan.raw_payload[button.name]
+
+
 def _run_submit(client: Any, command: Command) -> None:
     page = resolve_cgi_page(_require_arg(command, "page name"))
     if len(command.args) < 2 or not command.args[1]:
@@ -1948,7 +1964,9 @@ def _run_submit(client: Any, command: Command) -> None:
     if _report_lan_save(client, command, page, plan, page_result.parsed, "submit", button):
         return
     sent = PostWriteEvidence()
-    status_code, location, saved = _confirm_save(client, page, plan.raw_payload, sent)
+    status_code, location, saved = _confirm_save(
+        client, page, plan.raw_payload, sent, submit=_planned_submit(plan, page_result.parsed)
+    )
     if saved is not None:
         saved = _acknowledged_write_as_applied(saved)
     elif plan.button is not None and is_opener_button(page, plan.button.name):

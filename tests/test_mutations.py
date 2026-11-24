@@ -287,7 +287,7 @@ class _AllocClient:
 
         return HttpResponse(200, "OK", {}, self.body, "https://r/")
 
-    def post_cgi_page(self, page, fields):
+    def post_cgi_page(self, page, fields, **_):
         from bgwcli.types import HttpResponse
 
         self.posts.append((page, dict(fields)))
