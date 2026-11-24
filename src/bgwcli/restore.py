@@ -1452,9 +1452,26 @@ def _confirm_warning_page(
         malformed = _malformed_redirect(client, target_page, response, base)
         if malformed is not None:
             return malformed
+        # The Continue POST's own answer is already in hand (no request is needed to read it): an
+        # inline rejection or "No changes detected" decides the step. The result carries Continue's
+        # own status, not the Save's.
+        answered = {**base, "status_code": response.status_code, "location": final_location}
+        if response.status_code == 200:
+            try:
+                notice = save_notification(target_page, response.body or "")
+            except TruncatedPageError:
+                notice = None
+            if notice is not None and notice.error:
+                return RestoreStepResult(
+                    **answered, status="failed", write_performed=False, acknowledgement_observed=False,
+                    error=write_guidance(f"{WRITE_REJECTED_PREFIX}{notice.error}", base),
+                )
+            if notice is not None and notice.no_changes and not notice.saved:
+                return RestoreStepResult(
+                    **answered, status="unchanged", write_performed=False, acknowledgement_observed=False,
+                )
         return RestoreStepResult(
-            **{**base, "location": final_location}, status="applied",
-            write_performed=None, acknowledgement_observed=False,
+            **answered, status="applied", write_performed=None, acknowledgement_observed=False,
         )
     if _accepted(response.status_code):
         return _wait_for_save(client, target_page, response, base, step=step)
