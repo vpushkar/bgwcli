@@ -177,8 +177,9 @@ class FakeRouter:
     def post_form(self, nonce_page: str, post_path: str, fields: Mapping[str, str], **_kwargs) -> Post:
         return self.post_cgi_page(post_path.removesuffix(".ha"), fields)
 
-    def get_cgi_page(self, page: str) -> Get:
-        self.gets.append(page)
+    def get_cgi_page(self, page: str, *, query: str = "") -> Get:
+        # A redirect read with a query is recorded as "page?query"; the page map is keyed by page.
+        self.gets.append(f"{page}?{query}" if query else page)
         if callable(self._pages):
             return self._pages(page)
         if self._pages is None:

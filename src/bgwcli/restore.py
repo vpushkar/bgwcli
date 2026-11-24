@@ -954,7 +954,9 @@ class RestorePoster(Protocol):
         nonce_query: str = "",
     ) -> PostResponse: ...
 
-    def get_cgi_page(self, page: str) -> GetResponse: ...
+    # `query` (no leading "?") is the query of the redirect that named the page; it is passed only when
+    # non-empty, so a client without redirect reads may omit it.
+    def get_cgi_page(self, page: str, *, query: str = "") -> GetResponse: ...
 
 
 @dataclass(frozen=True)
@@ -1344,7 +1346,8 @@ CONTINUE_NOT_POSTED = "The Wi-Fi Warning was not confirmed: Continue was not pos
 
 
 def _confirm_warning_page(
-    client: RestorePoster, location: str, base: dict[str, Any], *, step: RestoreStep | None = None
+    client: RestorePoster, location: str, base: dict[str, Any], *, step: RestoreStep | None = None,
+    read_answer: bool = True,
 ) -> RestoreStepResult:
     """Confirm the Wi-Fi Warning the save POST redirected to. That POST was sent and answered (the
     redirect is its answer), so the step reports a sent write on every outcome; a failure before
@@ -1442,6 +1445,17 @@ def _confirm_warning_page(
             sent_text="Two POSTs went out (the Save and the Continue)",
         )
     final_location = _location(response.headers)
+    if _accepted(response.status_code) and not read_answer:
+        # A radio-dropping action (find-best-channel-5): the accepted Continue is its last request.
+        # Nothing is read after it (the radio, maybe the client's own, is re-tuning); a Continue
+        # answer whose Location cannot even be parsed is still no answer.
+        malformed = _malformed_redirect(client, target_page, response, base)
+        if malformed is not None:
+            return malformed
+        return RestoreStepResult(
+            **{**base, "location": final_location}, status="applied",
+            write_performed=None, acknowledgement_observed=False,
+        )
     if _accepted(response.status_code):
         return _wait_for_save(client, target_page, response, base, step=step)
     return RestoreStepResult(
@@ -1885,9 +1899,10 @@ def is_confirmation_redirect(
 
 def confirm_warning_page(
     client: RestorePoster, location: str, *, status_code: int | None = None, page: str = "wconfig",
-    write_attempts: int | None = None,
+    write_attempts: int | None = None, read_answer: bool = True,
 ) -> RestoreStepResult:
     """Follow a Wi-Fi Warning redirect and post Continue to the owning form (shared by set and restore).
+    `read_answer=False` (an action that drops the radio): nothing is read after an accepted Continue.
     `status_code` is the save POST's answer, kept on every failure produced while confirming; `page` is
     the owning form's page (wconfig or wconfig_unified) named by the step."""
     base = {"order": 0, "page": page, "kind": "form", "description": "confirm Wi-Fi Warning",
@@ -1897,6 +1912,6 @@ def confirm_warning_page(
         # The Save was re-sent: every text built below says so, combined with Continue's own count.
         base["write_attempts"] = write_attempts
     try:
-        return _confirm_warning_page(client, location, base)
+        return _confirm_warning_page(client, location, base, read_answer=read_answer)
     except Exception as exc:  # noqa: BLE001 - Continue may already have been sent
         return _execution_error(base, exc)

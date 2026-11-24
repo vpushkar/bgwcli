@@ -1483,7 +1483,10 @@ def _confirm_response(
     warning = confirmation_target(location, status_code, _gateway_origin(client), f"/cgi-bin/{page}.ha")
     if follow_warning and warning:
         step = _with_attempts(
-            confirm_warning_page(client, warning, status_code=status_code, page=page, write_attempts=attempts),
+            confirm_warning_page(
+                client, warning, status_code=status_code, page=page, write_attempts=attempts,
+                read_answer=read_redirect,
+            ),
             attempts,
         )
         _raise_if_coordination_failure(step)

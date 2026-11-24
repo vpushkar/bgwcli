@@ -307,9 +307,11 @@ def test_an_absolute_same_origin_warning_with_its_default_port_still_gets_contin
         return html((SAVED_RED if state["continued"] else "") + SCAN_FORM)
 
     argv = ["action", "find-best-channel-5", "--commit", "--confirm", "CHANSCAN"]
-    code, out, posts, _, _, _ = _cli(monkeypatch, capsys, argv, handler)
+    code, out, posts, gets_after, _, _ = _cli(monkeypatch, capsys, argv, handler)
     assert len(posts) == 2 and "Continue" in posts[1].body.decode()
     assert code == 0 and out["committed"] is True and out.get("warning") is None
+    # The scan drops the 5 GHz radio: after the accepted Continue nothing is read.
+    assert out["answerRead"] is False and gets_after == ["/cgi-bin/wifiwarn_advanced.ha"] * 2
 
 
 @pytest.mark.parametrize(
