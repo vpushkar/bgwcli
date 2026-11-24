@@ -567,6 +567,21 @@ contains Wi-Fi keys and access codes in clear text: treat dump files as credenti
 self-signed certificate, which the CLI accepts by default; run it only from a trusted local network. The
 client never uses an HTTP(S) proxy, so the access code goes only to the router.
 
+## Threat model
+
+`bgwcli` trusts the gateway it is pointed at. It reads the markup that gateway actually serves and fails
+closed when it is not what was planned: a write is refused, with nothing sent, when the button or form
+it was planned with is gone from the page read for the write nonce. Writes and the access code go only
+to the gateway's own origin and never through a proxy; a redirect to another origin is never followed
+for a write, and one form's nonce is never sent with another form's controls.
+
+It is not hardened against a deliberately hostile gateway (or something impersonating it on the LAN)
+that crafts adversarial HTML to steer a write. Known cases it does not defend against: a
+`<select type=submit>` or a button reassigned with `form=` standing in for the real submit,
+ambiguous URL authority spellings such as `///cgi-bin/...`, and `<legend>`/disabled-`<fieldset>`
+edge cases (including the cost of deeply nested fieldsets). Run it only against your own gateway on a
+trusted network.
+
 ## Credits and license
 
 `bgwcli` is an independent Python implementation whose command surface, dump-file format, session-cache
