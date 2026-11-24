@@ -379,6 +379,8 @@ def run(command: Command, client: Any | None = None) -> int:
             return command.exit_code
 
         coordinator = SessionCoordinatorOptions.from_options(command.options)
+        if command.name == "autorestore":
+            coordinator = replace(coordinator, reuse_expired_cache=True)
         with_router_session(client, coordinator, lambda: run_command(client, command))
         return command.exit_code
     except KeyboardInterrupt as interrupt:

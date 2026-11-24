@@ -61,6 +61,10 @@ class SessionCoordinatorOptions:
     pool_cooldown_ms: int
     lock_timeout_ms: int
     wait_for_session: bool
+    # autorestore (a 15-minute timer, far past the 120 s lifetime): import the cached session whatever
+    # its age. A dead one is noticed on the first page read and replaced by one login; a live one saves
+    # a login, and with it a slot of the gateway's small web-session pool.
+    reuse_expired_cache: bool = False
 
     @classmethod
     def from_options(cls, options: GlobalOptions) -> SessionCoordinatorOptions:
@@ -132,7 +136,10 @@ def with_router_session(client: BGW320Client, options: SessionCoordinatorOptions
     try:
         cached = _read_cached_session(paths.cache)
         stored_cookies: dict[str, str] | None = None
-        if _cache_live(cached, _now_ms(), options.cache_ttl_ms):
+        now = _now_ms()
+        if _cache_live(cached, now, options.cache_ttl_ms) or (
+            options.reuse_expired_cache and _cache_reusable(cached, now)
+        ):
             client.import_session(cached)
             stored_cookies = _session_cookies(client)
         # What the client held before run(): a failing run persists only a session it obtained itself.
@@ -273,6 +280,15 @@ def _cache_live(cached: dict[str, Any] | None, now: int, ttl_ms: int | None) -> 
     if isinstance(cached_at, (int, float)) and not isinstance(cached_at, bool):
         return cached_at <= now < _expires_at(cached)
     return _within_lifetime(_expires_at(cached), now, ttl_ms)
+
+
+def _cache_reusable(cached: dict[str, Any] | None, now: int) -> bool:
+    """A cached authenticated session of any age, unless it was stamped in the future (written while
+    the clock was ahead). Whether the gateway still honours it is learned from the first page read."""
+    if cached is None or cached.get("authenticated") is not True:
+        return False
+    cached_at = cached.get("cachedAt")
+    return isinstance(cached_at, (int, float)) and not isinstance(cached_at, bool) and cached_at <= now
 
 
 def _cooldown_live(cooldown: dict[str, Any] | None, now: int, cooldown_ms: int | None) -> bool:

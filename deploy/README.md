@@ -105,6 +105,13 @@ gateway still holds the baseline (someone set the access code back by hand) the 
 `no-reset`, sends nothing and logs a `warning:` to set `BGW_ACCESS_CODE` to the gateway's current
 code. The fallback session is cached, so the next run does not log in again.
 
+Each run reuses the gateway session the previous run left in the session cache, whatever its age
+(other commands drop a cached session after `BGW_SESSION_CACHE_TTL`, 120 s by default, much shorter
+than the 15-minute timer). A session the gateway still honours costs no login; one it has expired is
+noticed on the first page read, before anything is written, and replaced by one login. Without this,
+every run logged in afresh and left its session to the gateway's idle expiry, filling its small
+web-session pool. Nothing needs to be set for it.
+
 Quote every value in `autorestore.env` with single quotes, as in the example. systemd's
 `EnvironmentFile=` and `sh` (`set -a; . file`) both strip the surrounding single quotes and read
 what is between them literally, so the unit and a shell see the same code; an unquoted value with
