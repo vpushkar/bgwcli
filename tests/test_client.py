@@ -977,7 +977,7 @@ def test_slow_pages_get_a_longer_default_timeout_unless_the_timeout_was_set_expl
     15 s default made them fail every time. Per-page floors apply only to the implicit default."""
     from bgwcli.client import SLOW_PAGE_TIMEOUT_MS
 
-    assert SLOW_PAGE_TIMEOUT_MS == {"home": 45000, "lanstatistics": 45000}
+    assert SLOW_PAGE_TIMEOUT_MS == {"home": 45000, "lanstatistics": 45000, "devices": 45000}
     seen = {}
 
     def handler(req, n):
@@ -986,9 +986,13 @@ def test_slow_pages_get_a_longer_default_timeout_unless_the_timeout_was_set_expl
 
     make_client(FakeTransport(handler)).get_cgi_page("home", auth=False)
     make_client(FakeTransport(handler)).get_cgi_page("lanstatistics", auth=False)
+    make_client(FakeTransport(handler)).get_cgi_page("devices", auth=False)
     make_client(FakeTransport(handler)).get_cgi_page("sysinfo", auth=False)
     assert seen["/cgi-bin/home.ha"] == 45000
     assert seen["/cgi-bin/lanstatistics.ha"] == 45000
+    # 2026-11-24: devices.ha took over 15 s right after a Wi-Fi change and a Clear and Rescan, so
+    # clear-device-list's page read timed out before its POST with the plain default.
+    assert seen["/cgi-bin/devices.ha"] == 45000
     assert seen["/cgi-bin/sysinfo.ha"] == 1000  # make_client's configured 1000 ms is treated as explicit
 
     seen.clear()

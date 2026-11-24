@@ -2825,7 +2825,7 @@ _GLOBAL_OPTIONS: tuple[tuple[tuple[str, ...], dict[str, Any]], ...] = (
         ("--timeout",),
         {
             "metavar": "<seconds>",
-            "help": "Request timeout in seconds, at most 3600. Default: 15 (home/lanstatistics: 45 unless set)",
+            "help": "Request timeout in seconds, at most 3600. Default: 15 (home, lanstatistics, devices: 45)",
         },
     ),
     (("--strict-tls",), {"action": _FLAG, "help": "Enforce TLS validation"}),
@@ -3289,7 +3289,7 @@ Global options:
   --max-passes <n>          autorestore: restore passes before giving up. Default: 3
   --wait <seconds>          autorestore: pause between passes. Default: 120
   --on-any-diff             autorestore: treat any restorable difference as a reset, not only total loss
-  --timeout <seconds>       Request timeout in seconds, at most 3600. Default: 15 (home/lanstatistics: 45 unless set)
+  --timeout <seconds>       Request timeout in seconds, at most 3600. Default: 15 (home, lanstatistics, devices: 45)
   --delay <seconds>         Delay between audit/scan/sweep requests in seconds. Default: 1
   --limit <n>               Limit displayed rows. Default: 20
   --wait-for-session        Wait/retry when the router says all web sessions are in use
