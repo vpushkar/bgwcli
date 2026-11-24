@@ -13,7 +13,7 @@ from .actions import is_opener_button
 from .errors import UsageError
 from .pages import form_target
 from .redact import page_sensitive_names, redact_value
-from .types import ParsedButton, ParsedPage
+from .types import ParsedButton, ParsedForm, ParsedPage
 
 DANGEROUS_PAGES = frozenset({"reset", "restart", "routerpasswd", "update"})
 
@@ -105,7 +105,10 @@ def build_submit_plan(
             f"`set {page} KEY=VALUE --commit --confirm {token}`. Nothing was posted."
         )
     changes = parse_assignments(assignments)
-    payload = _without_foreign_allocations(page, base_payload(parsed), changes)
+    # As a browser submits it: only the controls the button's own form owns (its descendants and
+    # controls attached with form="<id>"), never a sibling form's fields.
+    owner = button._form_index if parsed._form_owners_known else _ANY_FORM
+    payload = _without_foreign_allocations(page, base_payload(parsed, owner), changes)
     payload.update(changes)
     if button.name:
         payload[button.name] = button.value or button.label or button.name
@@ -133,13 +136,49 @@ def _resolve_exact_button(page: str, parsed: ParsedPage, button_name: str) -> Pa
     return matches[0]
 
 
+def _owning_forms(parsed: ParsedPage, button: ParsedButton) -> list[ParsedForm]:
+    """The form(s) ``button`` submits: its form owner when the page was parsed from live HTML (none for
+    a form-less button), else (a page rebuilt from JSON) every form holding a control of its name."""
+    if parsed._form_owners_known:
+        index = button._form_index
+        return [] if index is None or index >= len(parsed.forms) else [parsed.forms[index]]
+    return [form for form in parsed.forms if button.name in form.button_names]
+
+
+SUBMIT_TYPES = frozenset({"submit", "image"})
+
+
+def own_submit_button(page: str, parsed: ParsedPage, name: str) -> ParsedButton | None:
+    """The enabled submit control named exactly ``name`` that submits ``page``'s own form, as a named
+    action posts it; None when there is none. A reset or plain button, a disabled one, or one owned by
+    another form is never it. Two such submits rendering different values are ambiguous: UsageError,
+    nothing is posted."""
+    named = [
+        b for b in parsed.buttons if b.name == name and not b.disabled and (b.type or "").lower() in SUBMIT_TYPES
+    ]
+    own = [b for b in named if _submits_own_form(page, parsed, b)]
+    if len({b.value or b.label or b.name for b in own}) > 1:
+        raise UsageError(
+            f"Button '{name}' appears more than once on {page} with different values; nothing was posted."
+        )
+    return own[0] if own else None
+
+
+def _submits_own_form(page: str, parsed: ParsedPage, button: ParsedButton) -> bool:
+    owners = _owning_forms(parsed, button)
+    if parsed._form_owners_known:
+        return bool(owners) and _is_own_form(page, owners[0].action)
+    return not owners or any(_is_own_form(page, form.action) for form in owners)
+
+
 def require_own_form(page: str, parsed: ParsedPage, button: ParsedButton) -> None:
     """Generic submit posts the page's own payload to the page's own CGI. A button that lives in a
-    form with a different action (the Wi-Fi restart forms on the home page) is refused before any
-    POST: sending this page's fields to that form is a write nobody asked for."""
+    form with a different action (the Wi-Fi restart forms on the home page, or a button attached to
+    such a form with form="<id>") is refused before any POST: sending this page's fields to that form
+    is a write nobody asked for."""
     if not button.name:
         return
-    owners = [form for form in parsed.forms if button.name in form.button_names]
+    owners = _owning_forms(parsed, button)
     if not owners or any(_is_own_form(page, form.action) for form in owners):
         return
     from .actions import ROUTER_ACTIONS
@@ -198,14 +237,19 @@ def _find_button(parsed: ParsedPage, button_name: str) -> ParsedButton | None:
     return matches[0] if matches else None
 
 
-def base_payload(parsed: ParsedPage) -> dict[str, str]:
+_ANY_FORM: object = object()
+
+
+def base_payload(parsed: ParsedPage, owner: int | None | object = _ANY_FORM) -> dict[str, str]:
     """What a browser would post for the page as rendered: enabled data fields, checked
-    checkables, enabled selects and textareas. nonce/hashpassword are the client's job."""
+    checkables, enabled selects and textareas. nonce/hashpassword are the client's job.
+    ``owner`` (a form index, or None for form-less controls) keeps only the controls that form owns;
+    by default every control on the page is read."""
     payload: dict[str, str] = {}
     for f in parsed.fields:
         if f.name in ("nonce", "hashpassword"):
             continue
-        if f.disabled:
+        if f.disabled or (owner is not _ANY_FORM and f._form_index != owner):
             continue
         if f.type.lower() in IGNORED_INPUT_TYPES:
             continue
@@ -213,11 +257,11 @@ def base_payload(parsed: ParsedPage) -> dict[str, str]:
             continue
         payload[f.name] = f.value
     for s in parsed.selects:
-        if s.disabled:
+        if s.disabled or (owner is not _ANY_FORM and s._form_index != owner):
             continue
         payload[s.name] = s.value
     for t in parsed.textareas:
-        if t.disabled:
+        if t.disabled or (owner is not _ANY_FORM and t._form_index != owner):
             continue
         payload[t.name] = t.value
     return payload

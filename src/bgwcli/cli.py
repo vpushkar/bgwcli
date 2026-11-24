@@ -88,6 +88,7 @@ from .mutations import (
     build_mutation_plan,
     build_submit_plan,
     confirm_token_for_page,
+    own_submit_button,
     require_own_form,
 )
 from .operations import (
@@ -785,23 +786,26 @@ def _post_live_button(
     client: Any, command: Command, action: Any, parsed: Any, sent: PostWriteEvidence
 ) -> Any | None:
     """POST exactly {button: the value the page renders} plus the nonce for a button-only action.
-    The button is resolved by its exact HTML name and checked again on the page read for the nonce.
-    None when only the toggle's opposite button is on the page (already in that state: reported as
-    unchanged, nothing posted)."""
+    The button is the enabled submit of the page's own form with exactly that HTML name (two of them
+    rendering different values are refused), checked again on the page read for the nonce. None when
+    only the toggle's opposite button - by the same test - is on the page (already in that state:
+    reported as unchanged, nothing posted)."""
     name = action.form_button
-    buttons = [b for b in parsed.buttons if b.name == name and not b.disabled]
-    if not buttons:
+    button = own_submit_button(action.page, parsed, name)
+    if button is None:
         opposite = action.opposite_button
-        if opposite and any(b.name == opposite and not b.disabled for b in parsed.buttons):
+        if opposite and own_submit_button(action.page, parsed, opposite) is not None:
             result = replace(
                 action_committed(action, None, None), committed=False, outcome="unchanged",
                 result=f"Nothing posted: the gateway is already in that state ({action.page} offers '{opposite}').",
             )
             command.output(fmt.operation_output(result), lambda: fmt.print_operation(result))
             return None
+        # A same-name button of another form gets that form's refusal (and the action to use instead).
+        for other in parsed.buttons:
+            if other.name == name and not other.disabled:
+                require_own_form(action.page, parsed, other)
         raise UsageError(f"Button '{name}' was not found on {action.page}.")
-    button = buttons[0]
-    require_own_form(action.page, parsed, button)
     value = button.value or button.label or button.name
     return _post_observed(
         client, action.page,

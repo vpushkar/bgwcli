@@ -24,14 +24,15 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from email.utils import parsedate_to_datetime
-from html.parser import HTMLParser
 from typing import Any, Protocol, runtime_checkable
 from urllib.parse import urlencode, urljoin, urlsplit
 
 from . import __version__
 from .config import GlobalOptions
 from .errors import BgwError, RouterAuthError, RouterConnectionError, RouterSessionPoolFullError, UsageError
+from .html import normalize_whitespace
 from .pages import canonical_cgi_page, form_target
+from .parser import RawTextHTMLParser
 from .types import HttpMethod, HttpResponse, RouterSessionSnapshot
 
 MAX_REDIRECTS = 5
@@ -1173,24 +1174,37 @@ def _nonce_value(raw: str) -> str | None:
     return None
 
 
-class _FormScanner(HTMLParser):
-    """Forms as a browser reads them, in one linear pass of the stdlib HTML tokenizer (the same family
-    of parser parse_page uses): attribute values are entity-decoded and may hold any markup,
-    comments are skipped, script/style/textarea/title text is raw text, a <form> opened inside an
-    open form is ignored (HTML5 form-element pointer), and controls inside a disabled fieldset are
-    disabled."""
-
-    CDATA_CONTENT_ELEMENTS = ("script", "style", "textarea", "title")
+class _FormScanner(RawTextHTMLParser):
+    """Forms as a browser reads them, in one linear pass of the tokenizer parse_page uses
+    (``RawTextHTMLParser``: the same raw-text elements and empty comments on every Python release):
+    attribute values are entity-decoded and may hold any markup, comments are skipped, a <form>
+    opened inside an open form is ignored (HTML5 form-element pointer), and controls inside a
+    disabled fieldset are disabled. A <button>'s caption is read like ``Element.text``: every tag
+    boundary is a space, script/style content is no text, whitespace is collapsed."""
 
     def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
+        super().__init__()
         self.forms: list[tuple[str, list[str], list[str], dict[str, str]]] = []
+        # Per form: every enabled submit name -> each value it posts, in document order.
+        self.submit_values: list[dict[str, list[str]]] = []
         self.page_nonces: list[str] = []
         self._current: tuple[str, list[str], list[str], dict[str, str]] | None = None
         self._fieldsets: list[bool] = []
         self._button: tuple[str, str | None, list[str]] | None = None  # name, value attribute, text
+        self._skip_text = False  # inside script/style: raw text, never caption
+
+    def _add_submit(self, name: str, value: str) -> None:
+        if self._current is None:
+            return
+        self._current[3].setdefault(name, value)
+        self.submit_values[-1].setdefault(name, []).append(value)
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.expect_raw_content(tag)
+        if self._button is not None:
+            self._button[2].append(" ")
+        if tag in _SKIP_CAPTION_TAGS:
+            self._skip_text = True
         attributes: dict[str, str] = {}
         for key, value in attrs:
             attributes.setdefault(key.lower(), "" if value is None else value)
@@ -1198,6 +1212,7 @@ class _FormScanner(HTMLParser):
             if self._current is None:
                 self._current = (attributes.get("action", "").strip(), [], [], {})
                 self.forms.append(self._current)
+                self.submit_values.append({})
             return
         if tag == "fieldset":
             self._fieldsets.append("disabled" in attributes)
@@ -1219,18 +1234,24 @@ class _FormScanner(HTMLParser):
         if tag == "button":
             self._button = (name, attributes.get("value"), [])
         else:
-            self._current[3].setdefault(name, attributes.get("value") or name)
+            self._add_submit(name, attributes.get("value") or name)
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self.handle_starttag(tag, attrs)
+        self._raw_tag = None  # a self-closed element has no content
+        self._skip_text = False
         if tag == "button":
             self.handle_endtag(tag)
+        elif self._button is not None:
+            self._button[2].append(" ")
 
     def handle_data(self, data: str) -> None:
-        if self._button is not None:
+        if self._button is not None and not self._skip_text:
             self._button[2].append(data)
 
     def handle_endtag(self, tag: str) -> None:
+        if tag in _SKIP_CAPTION_TAGS:
+            self._skip_text = False
         if tag == "form":
             self._current = None
         elif tag == "fieldset" and self._fieldsets:
@@ -1239,21 +1260,22 @@ class _FormScanner(HTMLParser):
             name, value, text = self._button
             self._button = None
             # What the planner posts for a <button>: its value attribute, else its caption, else its name.
-            if self._current is not None:
-                self._current[3].setdefault(name, value or " ".join("".join(text).split()) or name)
+            self._add_submit(name, value or normalize_whitespace("".join(text)) or name)
+            return
+        if self._button is not None:
+            self._button[2].append(" ")
 
 
+_SKIP_CAPTION_TAGS = frozenset({"script", "style"})
 _STRAY_LT = re.compile(r"<(?![A-Za-z/!?])")
 
 
 def _scan(html: str) -> _FormScanner:
     scanner = _FormScanner()
-    # <!--> and <!---> are empty comments to a browser; older stdlib tokenizers read them as the start
-    # of a comment that hides the rest of the page.
     # A "<" that cannot start a tag (not followed by a letter, "/", "!" or "?") is text to a browser;
     # escaping it first keeps the stdlib tokenizer on its fast path for hostile "<<<<" bodies (an
-    # attribute value decodes it back).
-    scanner.feed(_STRAY_LT.sub("&lt;", html.replace("<!--->", "<!---->").replace("<!-->", "<!---->")))
+    # attribute value decodes it back). Empty comments (<!-->, <!--->) are the tokenizer's job.
+    scanner.feed(_STRAY_LT.sub("&lt;", html))
     scanner.close()
     return scanner
 
@@ -1270,12 +1292,23 @@ def _require_submit_on_page(html: str, nonce_page: str, post_path: str, submit: 
     the page changed between the planning read and this one, and nothing is sent."""
     name, value = submit
     target = form_target(post_path)
+    scanner = _scan(html)
     # A named action's button always comes from a form: a form-less page means the page changed.
-    owners = [form for form in _scan_forms(html) if form_target(form[0]) == target]
-    if not any(form[3].get(name) == value for form in owners):
+    values = [
+        posted
+        for form, submits in zip(scanner.forms, scanner.submit_values, strict=True)
+        if form_target(form[0]) == target
+        for posted in submits.get(name, ())
+    ]
+    if value not in values:
         raise NoncePageRefusedError(
             f"{nonce_page}: the '{name}' button ({value!r}) is not on the page read for the write nonce "
             "(the page changed since it was planned); nothing was sent"
+        )
+    if any(posted != value for posted in values):
+        raise NoncePageRefusedError(
+            f"{nonce_page}: the '{name}' button appears more than once with different values on the page "
+            "read for the write nonce; nothing was sent"
         )
 
 

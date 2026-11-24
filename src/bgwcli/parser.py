@@ -102,6 +102,10 @@ class Element:
     truncated: bool = field(default=False, repr=False)
     # Set when ``text()`` stopped at the text bound with more text beneath this element.
     text_cut: bool = field(default=False, repr=False)
+    # Form controls: the open form when the control was read (a browser's form element pointer).
+    form_pointer: Element | None = field(default=None, repr=False)
+    # A <form> start tag read while another form was open: a browser ignores it (no form element).
+    form_ignored: bool = field(default=False, repr=False)
 
     def attr(self, name: str) -> str | None:
         return self.attrs.get(name)
@@ -208,6 +212,18 @@ class RawTextHTMLParser(HTMLParser):
     def set_cdata_mode(self, *args: Any, **kwargs: Any) -> None:
         """The stdlib's own raw-text modes are off (they differ between Python releases): see parse_starttag."""
 
+    def parse_comment(self, i: int, report: Any = True) -> int:
+        """``<!-->`` and ``<!--->`` are empty comments to a browser; releases before 3.13 read them as
+        the start of a comment that hides the page up to the next ``-->``. Handled here, where the
+        tokenizer has found a comment, so the same characters inside an attribute value or raw text
+        are never touched."""
+        for empty in ("<!-->", "<!--->"):
+            if self.rawdata.startswith(empty, i):
+                if report:
+                    self.handle_comment("")
+                return i + len(empty)
+        return super().parse_comment(i, report)
+
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self.handle_starttag(tag, attrs)
         self._raw_tag = None  # a self-closed element has no content
@@ -242,6 +258,9 @@ class _TreeBuilder(RawTextHTMLParser):
         self._open_headings = 0
         # A table or heading was dropped for nesting past MAX_NESTING.
         self.nesting_cut = False
+        # A browser's form element pointer: set by a <form> start tag when none is open, cleared by any
+        # </form>. A <form> read while it is set is ignored, so the first </form> ends the outer form.
+        self._form_pointer: Element | None = None
 
     @property
     def _current(self) -> Element:
@@ -300,6 +319,13 @@ class _TreeBuilder(RawTextHTMLParser):
         # Attribute values stay raw (a value posted back must round-trip byte for byte); display
         # paths normalise whitespace, U+00A0 included, where they read an attribute.
         element = Element(tag, {name: value or "" for name, value in attrs}, self._tick())
+        if tag == "form":
+            if self._form_pointer is None:
+                self._form_pointer = element
+            else:
+                element.form_ignored = True
+        elif tag in CONTROL_TAGS:
+            element.form_pointer = self._form_pointer
         self._current.children.append(element)
         self.elements.append(element)
         if tag in _VOID_TAGS:
@@ -320,6 +346,8 @@ class _TreeBuilder(RawTextHTMLParser):
             self._pop_to(len(self._stack) - 1)
 
     def handle_endtag(self, tag: str) -> None:
+        if tag == "form":
+            self._form_pointer = None
         if not self._open.get(tag):
             return
         for index in range(len(self._stack) - 1, 0, -1):
@@ -653,6 +681,8 @@ class _Doc:
         # Everything inside a redacted element is secret too: a table nested in a secret cell.
         self._covered: set[int] = self._covered_by(self.replacements)
         self._index: _DocIndex | None = None
+        self._form_positions: dict[int, int] | None = None
+        self._ids: dict[str, Element] = {}
 
     def grid(self, table: Element) -> list[TableGridRow[Element]]:
         grid = self._grids.get(id(table))
@@ -738,6 +768,25 @@ class _Doc:
         if id(el) in self._covered:
             return REDACTED if el.text() else ""
         return self.replacements.get(id(el)) or el.text(self.replacements)
+
+    def form_index(self, el: Element) -> int | None:
+        """The page's form (index into its forms, document order) a browser submits control ``el`` with:
+        the form its ``form`` attribute names (the first element with that id must be a form, else
+        there is none), otherwise the form open when ``el`` was read; None for a form-less control."""
+        if self._form_positions is None:
+            self._form_positions = {id(form): i for i, form in enumerate(self.root.find_all("form"))}
+            for element in self.root.iter_elements():
+                key = element.attrs.get("id")
+                # An ignored nested <form> is no element in a browser's document.
+                if key and not element.form_ignored:
+                    self._ids.setdefault(key, element)
+        if el.has("form"):
+            owner = self._ids.get(el.attr("form") or "")
+            if owner is None or owner.tag != "form":
+                return None
+        else:
+            owner = el.form_pointer
+        return None if owner is None else self._form_positions.get(id(owner))
 
     def label_text(self, el: Element) -> str:
         """Like ``text`` for a label or header cell: any secret the cell holds is redacted, and a cell inside
@@ -938,6 +987,7 @@ def parse_page(page: str, html: str, include_secrets: bool = False) -> ParsedPag
         forms=forms,
         links=links,
         truncated=True if doc.is_truncated() else None,
+        _form_owners_known=True,
     )
 
 
@@ -1254,6 +1304,7 @@ def _parse_fields(doc: _Doc) -> list[ParsedField]:
                 disabled=_flag(el, "disabled"),
                 read_only=_flag(el, "readonly"),
                 _value_omitted=not el.has("value"),
+                _form_index=doc.form_index(el),
             )
         )
     return fields
@@ -1297,6 +1348,7 @@ def _parse_selects(doc: _Doc) -> list[ParsedSelect]:
                     for o in options
                 ],
                 disabled=_flag(el, "disabled"),
+                _form_index=doc.form_index(el),
             )
         )
     return selects
@@ -1317,6 +1369,7 @@ def _parse_textareas(doc: _Doc) -> list[ParsedTextarea]:
                 sensitive=is_sensitive_name(name) or bool(secret),
                 disabled=_flag(el, "disabled"),
                 read_only=_flag(el, "readonly"),
+                _form_index=doc.form_index(el),
             )
         )
     return textareas
@@ -1345,6 +1398,7 @@ def _parse_buttons(doc: _Doc) -> list[ParsedButton]:
                 label=redact_value(name, normalize_whitespace(value) or name, include_secrets, secret),
                 sensitive=is_sensitive_name(name) or scoped,
                 disabled=_flag(el, "disabled"),
+                _form_index=doc.form_index(el),
             )
         )
     for el in root.find_all("button"):
@@ -1363,6 +1417,7 @@ def _parse_buttons(doc: _Doc) -> list[ParsedButton]:
                 label=redact_value(name, label or value_attr or name, include_secrets, secret),
                 sensitive=is_sensitive_name(name) or scoped,
                 disabled=_flag(el, "disabled"),
+                _form_index=doc.form_index(el),
             )
         )
     return buttons

@@ -74,6 +74,9 @@ class ParsedField:
     read_only: bool | None = None
     # Live HTML provenance only; old dumps cannot distinguish absent and explicit empty values.
     _value_omitted: bool = field(default=False, repr=False, compare=False, metadata={"serialize": False})
+    # The page's form (index into ``ParsedPage.forms``) a browser submits this control with; live HTML
+    # provenance only (see ``ParsedPage._form_owners_known``), never serialized.
+    _form_index: int | None = field(default=None, repr=False, compare=False, metadata={"serialize": False})
 
 
 @dataclass(frozen=True)
@@ -92,6 +95,9 @@ class ParsedSelect:
     sensitive: bool
     option_details: list[SelectOption] | None = None
     disabled: bool | None = None
+    # The page's form (index into ``ParsedPage.forms``) a browser submits this control with; live HTML
+    # provenance only (see ``ParsedPage._form_owners_known``), never serialized.
+    _form_index: int | None = field(default=None, repr=False, compare=False, metadata={"serialize": False})
 
 
 @dataclass(frozen=True)
@@ -101,6 +107,9 @@ class ParsedTextarea:
     sensitive: bool
     disabled: bool | None = None
     read_only: bool | None = None
+    # The page's form (index into ``ParsedPage.forms``) a browser submits this control with; live HTML
+    # provenance only (see ``ParsedPage._form_owners_known``), never serialized.
+    _form_index: int | None = field(default=None, repr=False, compare=False, metadata={"serialize": False})
 
 
 @dataclass(frozen=True)
@@ -111,6 +120,9 @@ class ParsedButton:
     label: str
     sensitive: bool
     disabled: bool | None = None
+    # The page's form (index into ``ParsedPage.forms``) a browser submits this control with; live HTML
+    # provenance only (see ``ParsedPage._form_owners_known``), never serialized.
+    _form_index: int | None = field(default=None, repr=False, compare=False, metadata={"serialize": False})
 
 
 @dataclass(frozen=True)
@@ -158,6 +170,9 @@ class ParsedPage:
     # headings nested past 256 (the deeper markup is text), or an element's text past 5000 pieces /
     # 100000 characters. Nothing past a cut is ever shown unredacted. Absent otherwise.
     truncated: bool | None = None
+    # True when the controls' ``_form_index`` was read from live HTML by the parser (a form-less control
+    # then has None); False for a page rebuilt from JSON, where form ownership is unknown.
+    _form_owners_known: bool = field(default=False, repr=False, compare=False, metadata={"serialize": False})
 
 
 @dataclass(frozen=True)
