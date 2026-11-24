@@ -715,7 +715,7 @@ def test_help_mentions_version():
 
 
 def test_version_is_0_2_0():
-    assert bgwcli.__version__ == "0.4.5"
+    assert bgwcli.__version__ == "0.4.6"
 
 
 def test_readme_install_mentions_version_check():
