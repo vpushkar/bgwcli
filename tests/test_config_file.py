@@ -55,8 +55,8 @@ def test_parse_keeps_quoted_text_literally_and_lets_a_later_line_win():
     [
         ("BGW_HSOT='x'", "unknown setting BGW_HSOT"),
         ("BGW_CONFIG='x'", "unknown setting BGW_CONFIG"),
-        ("just text", "expected KEY='value'"),
-        ("=value", "expected KEY='value'"),
+        ("just text", "not a KEY='value' line"),
+        ("=value", "not a KEY='value' line"),
         ("BGW_HOST='open", "unterminated or doubly quoted"),
         ("BGW_HOST='it''s'", "unterminated or doubly quoted"),
         ("BGW_HOST=two words", "needs quotes"),

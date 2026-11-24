@@ -73,7 +73,9 @@ def parse_config_text(text: str, source: str) -> dict[str, str]:
         key, separator, rest = line.partition("=")
         key = key.strip()
         if not separator or not _KEY_RE.fullmatch(key):
-            raise UsageError(f"{where}: expected KEY='value', got {line!r}")
+            # The line itself is never quoted: it may hold an access code.
+            hint = " (drop the leading `export`)" if key.split()[:1] == ["export"] else ""
+            raise UsageError(f"{where}: not a KEY='value' line{hint}; write KEY='value'")
         if key not in CONFIG_KEYS:
             raise UsageError(
                 f"{where}: unknown setting {key}; the file accepts the BGW_* variables listed in the README"

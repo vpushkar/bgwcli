@@ -1131,7 +1131,10 @@ def normalize_origin(host: str) -> str:
     invalid host name, a bad port or IPv6 literal) is a UsageError: it is never silently reduced to a
     different origin, and credentials in it are never dropped quietly."""
     def malformed(reason: str) -> UsageError:
-        return UsageError(f"Invalid router host {host!r}: {reason}.")
+        # Credentials in the host (user:password@) are never echoed back.
+        shown = re.sub(r"^((?:[a-z][a-z0-9+.-]*:)?//)?[^/?#]*@", lambda m: (m.group(1) or "") + "<credentials>@",
+                       host, flags=re.IGNORECASE)
+        return UsageError(f"Invalid router host {shown!r}: {reason}.")
 
     if re.search(r"[\x00-\x20\x7f]", host):
         raise malformed("whitespace and control characters are not allowed")
