@@ -20,9 +20,10 @@
     "description": "Clear inactive devices from the device list.",
     "confirmToken": "CLEAR-DEVICES",
     "payload": {
-      "Clear": "Clear Device List"
+      "Clear": "Clear and Rescan for Devices"
     },
-    "dangerous": false
+    "dangerous": false,
+    "formButton": "Clear"
   },
   {
     "name": "run-speed-test",

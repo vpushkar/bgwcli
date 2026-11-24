@@ -41,7 +41,7 @@ def test_confirm_tokens_pages_payloads_and_dangerous_flags_preserved():
     by_name = {a.name: a for a in ROUTER_ACTIONS}
     expected = {
         "restart": ("restart", "RESTART", {"Restart": "Restart"}, True),
-        "clear-device-list": ("devices", "CLEAR-DEVICES", {"Clear": "Clear Device List"}, False),
+        "clear-device-list": ("devices", "CLEAR-DEVICES", {"Clear": "Clear and Rescan for Devices"}, False),
         "run-speed-test": ("speed", "SPEED", {"run": "Run Speed Test"}, False),
         "detect-wifi-congestion-2.4": (
             "lanstatistics", "CONGESTION-2.4", {"Congestion": "Congestion Detection 2.4 GHz"}, False,

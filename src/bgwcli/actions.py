@@ -60,8 +60,11 @@ ROUTER_ACTIONS: tuple[RouterAction, ...] = (
         page="devices",
         description="Clear inactive devices from the device list.",
         confirm_token="CLEAR-DEVICES",
-        payload={"Clear": "Clear Device List"},
+        # devices.ha renders <input type="submit" name="Clear" value="Clear and Rescan for Devices">
+        # (fw 6.35.8); the button is read from the live form.
+        payload={"Clear": "Clear and Rescan for Devices"},
         dangerous=False,
+        form_button="Clear",
     ),
     RouterAction(
         name="run-speed-test",

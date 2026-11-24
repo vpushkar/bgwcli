@@ -51,6 +51,12 @@ def _handler(action, answer):
             )
         if action.name == "restart":
             return html(RESTART_FORM)
+        if action.form_button and action.page != "wconfig":
+            button = action.form_button
+            return html(
+                f'<form action="/cgi-bin/{action.page}.ha"><input name="nonce" value="abc123">'
+                f'<input type="submit" name="{button}" value="{action.payload[button]}"></form>'
+            )
         return html(SCAN_FORM if action.form_button else form(action.page, "old"))
 
     handler.state = state
