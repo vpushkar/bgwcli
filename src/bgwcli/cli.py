@@ -3161,6 +3161,10 @@ _ALIAS_TO_COMMAND = {alias: name for name, aliases in SECTION_COMMANDS.items() f
 _OUT_COMMANDS: tuple[str, ...] = ("sweep", "scan", "schema", "dump", "fixtures-capture")
 
 
+# Commands whose page selection is --include (--pages is the sweep family's traversal limit).
+_INCLUDE_COMMANDS = ("dump", "diff", "restore", "autorestore")
+
+
 def parse_args(argv: list[str]) -> Command:
     parser = build_parser()
     namespace, leftover = parser.parse_known_args(argv)
@@ -3220,6 +3224,10 @@ def parse_args(argv: list[str]) -> Command:
         pages = [page.strip() for page in opt("pages").split(",") if page.strip()]
         if not pages:
             raise UsageError("--pages needs at least one page id.")
+    if pages is not None and name in _INCLUDE_COMMANDS:
+        # These commands select pages with --include; a --pages they would ignore must never widen a restore
+        # (or a dump/diff) to every page.
+        raise UsageError(f"--pages is not used by {name}; select pages with --include <csv|all>.")
     include = None
     if opt("include") is not None:
         include = [page.strip() for page in opt("include").split(",") if page.strip()]
