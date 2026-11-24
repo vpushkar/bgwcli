@@ -27,7 +27,6 @@ after RECOVERY_IDLE_RUN_LIMIT consecutive runs that sent nothing or after RECOVE
 from __future__ import annotations
 
 import hashlib
-import inspect
 import json
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -474,14 +473,6 @@ class _RunFacts:
     sent: bool = False
 
 
-def _accepts_scope(method: Any) -> bool:
-    """True when a checkpoint's begin() takes the recovery scope (older checkpoints do not)."""
-    try:
-        return callable(method) and "scope" in inspect.signature(method).parameters
-    except (TypeError, ValueError):
-        return False
-
-
 def _call_optional(checkpoint: Any, name: str, *args: Any, **kwargs: Any) -> Any:
     method = getattr(checkpoint, name, None)
     return method(*args, **kwargs) if callable(method) else None
@@ -691,9 +682,9 @@ def _run_autorestore(
         if checkpoint is None:
             return True
         try:
-            if action == "begin" and _accepts_scope(getattr(checkpoint, "begin", None)):
-                # A checkpoint that keeps a scope records what this recovery covers (kept on resume).
-                checkpoint.begin(scope=scope)  # type: ignore[call-arg]
+            if action == "begin":
+                # The checkpoint records what this recovery covers (kept when the intent resumes).
+                checkpoint.begin(scope=scope)
             else:
                 getattr(checkpoint, action)()
         except OSError as exc:

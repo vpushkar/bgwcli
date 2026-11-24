@@ -302,7 +302,7 @@ def test_later_pass_run_limit_says_before_the_next_restore_step(tmp_path, monkey
     begins = {"n": 0}
 
     class SlowSecondBegin(RecoveryCheckpoint):
-        def begin(self):
+        def begin(self, scope=None):
             super().begin()
             begins["n"] += 1
             if begins["n"] == 2:

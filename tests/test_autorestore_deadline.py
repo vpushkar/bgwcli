@@ -325,7 +325,7 @@ def _slow_begin_store(tmp_path, clock, seconds, *, begun):
     from bgwcli.recovery_state import RecoveryCheckpoint
 
     class SlowBegin(RecoveryCheckpoint):
-        def begin(self):
+        def begin(self, scope=None):
             super().begin()
             clock.now += seconds
 
@@ -484,7 +484,7 @@ def test_no_pass_two_step_starts_when_the_first_checkpoint_is_prepared_in_pass_t
     begins: list[int] = []
 
     class SlowSecondBegin(RecoveryCheckpoint):
-        def begin(self):
+        def begin(self, scope=None):
             super().begin()
             begins.append(1)
             if len(begins) == 2:  # pass 1 sent nothing and dropped its unused intent: this is the first real publish
