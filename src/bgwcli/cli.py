@@ -40,6 +40,7 @@ from .client import (
     RouterResponseError,
     observe_post,
     pool_full_metadata,
+    router_sessions_full,
     session_pool_full_error,
 )
 from .config import (
@@ -660,7 +661,8 @@ def _run_action(client: Any, command: Command) -> None:
             action.page, page_result.parsed, action.form_button, [], command.options.include_secrets
         )
         outcome = _post_and_confirm(
-            client, action.page, plan.raw_payload, read_redirect=not action.drops_web_server, evidence=sent
+            client, action.page, plan.raw_payload, read_redirect=not action.drops_web_server, evidence=sent,
+            follow_warning=action.page.startswith("wconfig"),
         )
     elif action.post_path:
         post_path = action.post_path
@@ -702,10 +704,18 @@ def _run_action(client: Any, command: Command) -> None:
                 "so its answer page was not read."
             ),
         )
-        if action.follow_redirect:
-            handoff = _request_redirect_handoff(client, location)
+        if action.follow_redirect and status_code in _GET_REDIRECT_STATUSES:
+            posted_path = f"/cgi-bin/{action.post_path or action.page + '.ha'}"
+            handoff = _request_redirect_handoff(client, location, posted_path)
             if handoff is not None:
-                result = replace(result, result=handoff)
+                failed_exit, text = handoff
+                if failed_exit is None:
+                    result = replace(result, result=text)
+                else:
+                    command.exit_code = failed_exit
+                    result = replace(
+                        result, committed=False, outcome="failed", answer_read=True, warning=text, result=None
+                    )
     if action.opener:
         result = replace(
             result, committed=False, outcome="opened", write_attempted=True, write_response_received=True,
@@ -714,27 +724,48 @@ def _run_action(client: Any, command: Command) -> None:
     command.output(fmt.operation_output(result), lambda: fmt.print_operation(result))
 
 
-def _request_redirect_handoff(client: Any, location: str | None) -> str | None:
-    """Load the page a restart POST redirected to, as the browser does (the reboot belongs to that
-    hand-off). Returns the result text, or None when nothing was requested (no location, or one that
-    leaves the gateway). Its answer is never parsed: the gateway is going down, so a dropped
-    connection or an error status is the expected end, not a failure of the action."""
+_GET_REDIRECT_STATUSES = (301, 302, 303)
+
+
+def _request_redirect_handoff(
+    client: Any, location: str | None, posted_path: str
+) -> tuple[int | None, str] | None:
+    """Load the page a restart POST redirected to, as the browser does (the reboot may belong to
+    that hand-off). None when nothing was requested (no location, another origin, outside /cgi-bin/).
+    Otherwise (exit code or None, text): a readable refusal is reported as one - a lost session
+    (401/403, Login page) is no answer (exit 2), a rejection banner a negative answer (exit 1), a full
+    session pool raises. A dropped connection, a 5xx or a page without a refusal is the gateway
+    accepting the request and going down: the restart is requested, the reboot is not verified."""
+    unverified = (
+        "The reboot itself is not verified; 'Time Since Last Reboot' on sysinfo confirms it once the gateway is back."
+    )
     try:
-        response = client.get_redirect_target(location or "")
+        response = client.get_redirect_target(location or "", posted_path)
     except RouterSessionPoolFullError:
         raise
-    except (BgwError, OSError) as exc:
-        return (
+    except (RouterConnectionError, OSError) as exc:
+        return None, (
             f"Restart requested: the gateway redirected to {location} and dropped the connection while "
-            f"serving it ({exc}), as it does when it goes down for the reboot. Expect it back in a few "
-            "minutes; 'Time Since Last Reboot' on sysinfo confirms the restart."
+            f"serving it ({exc}), as it does when it goes down for the reboot. {unverified}"
         )
+    except BgwError as exc:
+        return NO_ANSWER, f"the restart hand-off page {location} could not be read ({exc}); verify the gateway state"
     if response is None:
         return None
-    return (
+    body = response.body or ""
+    if router_sessions_full(body):
+        raise session_pool_full_error()
+    if response.status_code in (401, 403) or looks_like_login(body):
+        return NO_ANSWER, (
+            f"the restart hand-off page {location} answered with the login page or HTTP {response.status_code}: "
+            "the session was lost and the restart is unconfirmed; verify the gateway state"
+        )
+    banner = router_error_banner(body)
+    if banner and not no_changes_text(banner):
+        return NEGATIVE_ANSWER, f"{WRITE_REJECTED_PREFIX}{banner}"
+    return None, (
         f"Restart requested: the gateway redirected to {location} and answered it with HTTP "
-        f"{response.status_code}. It should go down for the reboot now; 'Time Since Last Reboot' on "
-        "sysinfo confirms the restart once it is back."
+        f"{response.status_code}. {unverified}"
     )
 
 
@@ -1219,13 +1250,15 @@ def _with_attempts(step: RestoreStepResult, attempts: int | None) -> RestoreStep
 
 def _confirm_response(
     client: Any, page: str, payload: dict[str, str], response: Any, *, read_redirect: bool = True,
-    attempts: int | None = None,
+    attempts: int | None = None, follow_warning: bool = True,
 ) -> tuple[int, str | None, Any | None]:
     """The acknowledgement half of `_confirm_save` for a POST the gateway answered 2xx/3xx.
     `attempts` is the POST count of a write re-sent after a Login-page answer (None for one POST):
     every step and raised failure below carries it."""
     status_code, location = response.status_code, _location(response.headers)
-    if is_confirmation_redirect(location):
+    # `follow_warning=False` (actions not on a Wi-Fi page): their confirmation token never authorizes the
+    # Wi-Fi Warning's Continue POST to wconfig.ha.
+    if follow_warning and is_confirmation_redirect(location):
         step = _with_attempts(
             confirm_warning_page(client, location, status_code=status_code, page=page, write_attempts=attempts),
             attempts,
@@ -1398,7 +1431,7 @@ def _write_failure_step(page: str, exc: Exception, evidence: PostWriteEvidence) 
 
 def _post_and_confirm(
     client: Any, page: str, payload: dict[str, str], *, read_redirect: bool = True,
-    evidence: PostWriteEvidence | None = None,
+    evidence: PostWriteEvidence | None = None, follow_warning: bool = True,
 ) -> tuple[int, str | None] | RestoreStepResult:
     """`_confirm_save` for callers that only need an applied write (actions), which have no plan to
     verify against. Returns (status_code, location) for an applied write. Every other outcome is
@@ -1412,7 +1445,7 @@ def _post_and_confirm(
         return posted
     status_code, location, step = _confirm_response(
         client, page, payload, posted, read_redirect=read_redirect,
-        attempts=_resent_attempts(evidence) if evidence is not None else None,
+        attempts=_resent_attempts(evidence) if evidence is not None else None, follow_warning=follow_warning,
     )
     if step is None or step.status == "applied":
         return status_code, location

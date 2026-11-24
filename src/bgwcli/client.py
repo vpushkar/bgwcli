@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import http.client
 import ipaddress
+import posixpath
 import re
 import socket
 import ssl
@@ -715,21 +716,22 @@ class BGW320Client:
         to log in with; otherwise it is the final answer."""
         return self.options.wait_for_session is True and bool(self.options.access_code)
 
-    def get_redirect_target(self, location: str) -> HttpResponse | None:
-        """GET, once and without following further redirects, the /cgi-bin/ page an unfollowed POST
-        redirected to (``location`` as the gateway sent it). Returns None, sending nothing, when the
-        location is empty, leaves this gateway's origin, or is not a /cgi-bin/ path. Transport
-        failures raise like any other request (a restart drops the connection here)."""
+    def get_redirect_target(self, location: str, posted_path: str) -> HttpResponse | None:
+        """GET, once and without following further redirects, the /cgi-bin/ page a POST to
+        ``posted_path`` redirected to. ``location`` is resolved against the POST's URL like a browser
+        does, dot segments are removed, and the path that is validated is the one requested. Returns
+        None, sending nothing, when the location is empty, resolves to another origin (scheme, host
+        and port compared normalized) or leaves /cgi-bin/. Transport failures raise like any other
+        request (a restart drops the connection here)."""
         if not location:
             return None
-        target = urlsplit(urljoin(self._origin + "/", location))
-        origin = urlsplit(self._origin)
-        if (target.scheme, target.netloc) != (origin.scheme, origin.netloc):
+        target = urlsplit(urljoin(urljoin(self._origin + "/", posted_path), location))
+        if _normalized_origin(target) != _normalized_origin(urlsplit(self._origin)):
             return None
-        if not target.path.startswith("/cgi-bin/"):
+        path = posixpath.normpath(target.path) if target.path else "/"
+        if not path.startswith("/cgi-bin/"):
             return None
-        path = target.path + (f"?{target.query}" if target.query else "")
-        return self._request(path, "GET", follow_redirects=False)
+        return self._request(path + (f"?{target.query}" if target.query else ""), "GET", follow_redirects=False)
 
     def post_cgi_page(self, page: str, fields: Mapping[str, str]) -> HttpResponse:
         """POST a page's own form: nonce from GET <page>.ha, POST to /cgi-bin/<page>.ha."""
@@ -1162,6 +1164,11 @@ def _nonce_value(raw: str) -> str | None:
     return None
 
 
+_NON_MARKUP = re.compile(
+    r"<!--.*?(?:-->|$)|<(script|style)\b[^>]*>.*?(?:</\1\s*>|$)", re.IGNORECASE | re.DOTALL
+)
+
+
 def _scan_forms(html: str) -> list[tuple[str, list[str], list[str]]]:
     """(action, nonce values, input/button names, both in document order) of every form, in one
     pass. A form ends at its closing tag or at the end of the document. A <form> start tag met while
@@ -1170,7 +1177,9 @@ def _scan_forms(html: str) -> list[tuple[str, list[str], list[str]]]:
     to the outer form's action."""
     forms: list[tuple[str, list[str], list[str]]] = []
     current: tuple[str, list[str], list[str]] | None = None
-    for match in _TAG.finditer(html):
+    # Comments and script/style text are not markup to a browser: a commented-out <form> opener must
+    # not open a form that captures the next real form's controls and nonce.
+    for match in _TAG.finditer(_NON_MARKUP.sub("", html)):
         closing, tag, raw = match.group(1), match.group(2).lower(), match.group(3)
         if tag == "form":
             if closing:
@@ -1217,6 +1226,16 @@ def _select_write_nonces(html: str, nonce_page: str, post_path: str, fields: Map
     page_nonce = extract_nonce(html)
     no_nonce = f"{nonce_page}: no write nonce found for {post_path}; nothing was sent"
 
+    # A posted control that only another form holds belongs to that form (a browser would post it
+    # there): the target's own form nonce is not its nonce.
+    posted_controls = [name for name in fields if name not in ("nonce", "hashpassword")]
+    foreign = [form for form in forms if form_target(form[0]) != target and any(n in form[2] for n in posted_controls)]
+    if matching and foreign and not any(any(n in form[2] for n in posted_controls) for form in matching):
+        raise NoncePageRefusedError(
+            f"{nonce_page}: {', '.join(posted_controls)} belongs to the form posting to {foreign[0][0]!r}, not to "
+            f"/cgi-bin/{post_path}; another form's nonce is never sent; nothing was sent"
+        )
+
     if len(matching) == 1:
         if matching[0][1]:
             return matching[0][1]
@@ -1260,6 +1279,16 @@ def extract_nonce(html: str) -> str | None:
             if nonce is not None:
                 return nonce
     return None
+
+
+def _normalized_origin(parts) -> tuple[str, str, int | None]:
+    """(scheme, host, port) with case folded and the scheme's default port made explicit."""
+    scheme = (parts.scheme or "").lower()
+    try:
+        port = parts.port
+    except ValueError:
+        return (scheme, "\0invalid", None)
+    return (scheme, (parts.hostname or "").lower(), port or {"http": 80, "https": 443}.get(scheme))
 
 
 def _is_login_url(url: str) -> bool:

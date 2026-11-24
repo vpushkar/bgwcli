@@ -237,3 +237,33 @@ def test_live_nested_wifi_restart_form_posts_both_of_its_nonces():
     error, posts = run(LIVE_HOME_WIFI, "wrestart.ha?2", {"WRestart2": "Restart"})
     assert error is None
     assert posts == [{"WRestart2": ["Restart"], "nonce": ["bb0001", "bb0002"]}]
+
+
+def test_a_commented_out_form_opener_never_captures_the_next_form():
+    page = (
+        "<title>Status</title>"
+        '<!-- <form method="post" action="/cgi-bin/wrestart.ha?1"> -->'
+        '<script>var t = \'<form action="/cgi-bin/wrestart.ha?1">\';</script>'
+        f'<form method="post" action="/cgi-bin/wrestart.ha?2">{nonce_input("dd0002")}'
+        '<input type="submit" name="WRestart2" value="Restart"></form>'
+    )
+    assert [form[0] for form in _scan_forms(page)] == ["/cgi-bin/wrestart.ha?2"]
+    error, posts = run(page, "wrestart.ha?2", {"WRestart2": "Restart"})
+    assert error is None and posts == [{"WRestart2": ["Restart"], "nonce": ["dd0002"]}]
+    error, posts = run(page, "wrestart.ha?1", {"WRestart1": "Restart"})
+    assert error is not None and posts == []
+
+
+def test_a_button_a_browser_would_post_elsewhere_never_borrows_the_targets_other_form_nonce():
+    # The inner restart.ha opener is ignored (the Restart button belongs to other.ha's form, as in a
+    # browser); the only form posting to restart.ha holds Cancel. Its nonce is not Restart's.
+    page = (
+        "<title>Restart</title>"
+        f'<form method="post" action="/cgi-bin/other.ha">{nonce_input("ee0001")}'
+        '<form method="post" action="/cgi-bin/restart.ha"><input type="submit" name="Restart" value="Restart">'
+        "</form></form>"
+        f'<form method="post" action="/cgi-bin/restart.ha">{nonce_input("ee0002")}'
+        '<input type="submit" name="Cancel" value="Cancel"></form>'
+    )
+    error, posts = run(page, "restart.ha", {"Restart": "Restart"}, nonce_page="restart")
+    assert error is not None and posts == []
