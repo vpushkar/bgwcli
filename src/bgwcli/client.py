@@ -1240,11 +1240,17 @@ class _FormScanner(HTMLParser):
                 self._current[3].setdefault(name, value or " ".join("".join(text).split()) or name)
 
 
+_STRAY_LT = re.compile(r"<(?![A-Za-z/!?])")
+
+
 def _scan(html: str) -> _FormScanner:
     scanner = _FormScanner()
     # <!--> and <!---> are empty comments to a browser; older stdlib tokenizers read them as the start
     # of a comment that hides the rest of the page.
-    scanner.feed(html.replace("<!--->", "<!---->").replace("<!-->", "<!---->"))
+    # A "<" that cannot start a tag (not followed by a letter, "/", "!" or "?") is text to a browser;
+    # escaping it first keeps the stdlib tokenizer on its fast path for hostile "<<<<" bodies (an
+    # attribute value decodes it back).
+    scanner.feed(_STRAY_LT.sub("&lt;", html.replace("<!--->", "<!---->").replace("<!-->", "<!---->")))
     scanner.close()
     return scanner
 
