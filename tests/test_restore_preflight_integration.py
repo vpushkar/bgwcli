@@ -662,14 +662,15 @@ def test_real_cli_clear_pool_response_is_recorded_and_starts_session_cooldown(
 def test_restore_retains_clear_evidence_when_refreshed_snapshot_extraction_fails(orchestration, monkeypatch, capsys):
     client = Router()
     refreshed = pages(fresh=True)
-    refreshed["apphosting"] = apphosting_page(rows=[("ssh", "unresolved-host")], device_options=[])
+    # An unresolvable forward is skipped on the live side (2026-11-24); a non-numeric port still fails.
+    refreshed["services"] = services_page(rows=[("ssh", "x-y", "22", "TCP")])
     fetcher = Fetcher(pages(), refreshed)
     command = run_restore(monkeypatch, client, fetcher)
     output = json.loads(capsys.readouterr().out)
     report = output["allocationPreflight"]
     assert command.exit_code == 2
     assert report["error"]["type"] == "SnapshotExtractionError"
-    assert "unresolved-host" in report["error"]["message"]
+    assert "not a port number" in report["error"]["message"]
     assert report["clearAttempted"] is True
     assert report["clearResponseReceived"] is True
     assert report["rescanPerformed"] is True
@@ -687,7 +688,8 @@ def test_restore_without_rescan_keeps_its_snapshot_extraction_exception_contract
 
     client = Router(holder_mac=TARGET_MAC)
     malformed = pages()
-    malformed["apphosting"] = apphosting_page(rows=[("ssh", "unresolved-host")], device_options=[])
-    with pytest.raises(SnapshotExtractionError, match="unresolved-host"):
+    # An unresolvable forward is skipped on the live side (2026-11-24); a non-numeric port still fails.
+    malformed["services"] = services_page(rows=[("ssh", "x-y", "22", "TCP")])
+    with pytest.raises(SnapshotExtractionError, match="not a port number"):
         run_restore(monkeypatch, client, Fetcher(malformed))
     assert client.posts == []

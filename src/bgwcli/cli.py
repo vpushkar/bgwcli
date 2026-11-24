@@ -171,7 +171,7 @@ from .snapshot import (
     truncated_page_problem,
 )
 from .snapshot import resolve_include as resolve_dump_include
-from .snapshot_diff import diff_snapshots, pages_missing_from_dump
+from .snapshot_diff import diff_snapshots, pages_missing_from_dump, skipped_forward_warnings
 from .snapshot_diff import resolve_include as resolve_restore_include
 from .sweep import (
     SweepOptions,
@@ -2028,6 +2028,15 @@ def _dump_optional_pages(dump: Snapshot) -> tuple[str, ...]:
     return tuple(page for page in OPTIONAL_FORM_PAGES if page in dump.forms)
 
 
+def _warn_skipped_forwards(diff: Any) -> list[str]:
+    """Print (stderr) and return one warning per live forward whose device could not be resolved:
+    that section was skipped, everything else was compared as usual."""
+    warnings = skipped_forward_warnings(diff)
+    for warning in warnings:
+        sys.stderr.write(f"warning: {sanitize_terminal_text(warning, single_line=True)}\n")
+    return warnings
+
+
 def _warn_missing_pages(missing: list[str]) -> None:
     for page in missing:
         sys.stderr.write(
@@ -2066,11 +2075,17 @@ def _run_diff(client: Any, command: Command) -> None:
     if failures:
         _report_fetch_failures(command, failures)
         return
-    live = extract_snapshot(parsed, **_snapshot_meta(command), include=optional, selected_pages=pages)
+    live = extract_snapshot(
+        parsed, **_snapshot_meta(command), include=optional, selected_pages=pages, unresolved_forwards="skip"
+    )
     diff = diff_snapshots(dump, live, pages=pages)
+    warnings = _warn_skipped_forwards(diff)
     command.exit_code = 0 if diff.identical else 1
     command.output(
-        {**fmt.display_diff(diff, command.options.include_secrets), "missingPages": missing},
+        {
+            **fmt.display_diff(diff, command.options.include_secrets), "missingPages": missing,
+            **({"warnings": warnings} if warnings else {}),
+        },
         lambda: fmt.print_snapshot_diff(diff, include_secrets=command.options.include_secrets),
     )
 
@@ -2175,7 +2190,9 @@ def _run_restore(client: Any, command: Command) -> dict[str, Any] | None:
     include_secrets = command.options.include_secrets
     restore_options = RestoreOptions(prune=command.prune, include_secrets=include_secrets, pages=pages)
     try:
-        live = extract_snapshot(parsed, **_snapshot_meta(command), include=optional, selected_pages=pages)
+        live = extract_snapshot(
+            parsed, **_snapshot_meta(command), include=optional, selected_pages=pages, unresolved_forwards="skip"
+        )
         diff = diff_snapshots(dump, live, pages=pages)
         steps = build_restore_plan(diff, dump, parsed, restore_options)
     except BgwError as exc:
@@ -2188,6 +2205,7 @@ def _run_restore(client: Any, command: Command) -> dict[str, Any] | None:
             reason="Allocation ownership verified; restore plan built from refreshed pages.",
         )
 
+    warnings = _warn_skipped_forwards(diff)
     if not command.commit:
         plan = restore_dry_run(steps, RESTORE_CONFIRM_TOKEN)
 
@@ -2200,6 +2218,7 @@ def _run_restore(client: Any, command: Command) -> dict[str, Any] | None:
                 "steps": fmt.display_restore_steps(steps, include_secrets),
                 "operation": fmt.operation_output(plan),
                 "missingPages": missing,
+                **({"warnings": warnings} if warnings else {}),
             },
             print_plan,
         )
@@ -2241,7 +2260,10 @@ def _run_restore(client: Any, command: Command) -> dict[str, Any] | None:
         if not after_failures:
             after_diff = diff_snapshots(
                 dump,
-                extract_snapshot(after_parsed, **_snapshot_meta(command), include=optional, selected_pages=pages),
+                extract_snapshot(
+                    after_parsed, **_snapshot_meta(command), include=optional, selected_pages=pages,
+                    unresolved_forwards="skip",
+                ),
                 pages=pages,
             )
     except BgwError as exc:
@@ -2293,6 +2315,7 @@ def _run_restore(client: Any, command: Command) -> dict[str, Any] | None:
             **coordination,
             "operation": fmt.operation_output(result),
             "missingPages": missing,
+            **({"warnings": warnings} if warnings else {}),
             **({"allocationPreflight": preflight_report} if preflight_report is not None else {}),
         }
     )

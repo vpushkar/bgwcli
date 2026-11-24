@@ -7,7 +7,7 @@ import stat
 from dataclasses import replace
 
 import pytest
-from page_builders import apphosting_page, services_page
+from page_builders import services_page
 from test_autorestore import FakeRouter, Fetcher, full_pages, make_dump, reset_pages
 
 from bgwcli import filesystem
@@ -147,7 +147,8 @@ def test_closing_verification_error_keeps_execution_and_marks_diff_unavailable(e
 
 def test_actual_closing_extraction_error_retains_checkpoint_and_execution(tmp_path):
     broken = full_pages()
-    broken["apphosting"] = apphosting_page(rows=[("custom_ssh", "offline-host")], device_options=[])
+    # An unresolvable forward is skipped on the live side (2026-11-24); a non-numeric port still fails.
+    broken["services"] = services_page(rows=[("custom_ssh", "x-y", "22", "TCP")])
     store = checkpoint(tmp_path)
     result, router = run(Fetcher(reset_pages(), broken), store=store)
     assert router.posts and result.status == "error" and result.final_diff is None

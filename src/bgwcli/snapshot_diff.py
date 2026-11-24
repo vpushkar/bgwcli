@@ -71,6 +71,12 @@ class SnapshotDiff:
     reservations: ReservationDiff
     forms: dict[str, list[FormFieldDiff]]
     firmware_changed: bool
+    # The live forwards could not be resolved (see Snapshot.unresolved_forwards): the forwards
+    # section was not compared, is never restored or pruned, and does not vote for a reset. One
+    # message per unresolved forward; callers surface them as warnings. Not part of to_json_dict.
+    skipped_forwards: list[str] = dataclasses.field(
+        default_factory=list, compare=False, metadata={"serialize": False}
+    )
 
 
 def resolve_include(value: str | Sequence[str] | None) -> tuple[str, ...] | None:
@@ -115,8 +121,11 @@ def diff_snapshots(dump: Snapshot, live: Snapshot, *, pages: Sequence[str] | Non
     services = (
         _set_difference(dump.services, live.services, service_key) if _selected(pages, "services") else EntryDiff()
     )
+    skipped_forwards = list(live.unresolved_forwards) if _selected(pages, "apphosting") else []
     forwards = (
-        _set_difference(dump.forwards, live.forwards, forward_key) if _selected(pages, "apphosting") else EntryDiff()
+        _set_difference(dump.forwards, live.forwards, forward_key)
+        if _selected(pages, "apphosting") and not skipped_forwards
+        else EntryDiff()
     )
     reservations = (
         _diff_reservations(dump.reservations, live.reservations) if _selected(pages, "ipalloc") else ReservationDiff()
@@ -192,7 +201,13 @@ def diff_snapshots(dump: Snapshot, live: Snapshot, *, pages: Sequence[str] | Non
         firmware_changed=bool(
             dump.meta.firmware and live.meta.firmware and dump.meta.firmware != live.meta.firmware
         ),
+        skipped_forwards=skipped_forwards,
     )
+
+
+def skipped_forward_warnings(diff: SnapshotDiff) -> list[str]:
+    """One warning per live forward whose device could not be resolved (the section was skipped)."""
+    return [f"forwards section skipped (not compared, restored or pruned): {item}" for item in diff.skipped_forwards]
 
 
 def is_unchecked_marker(snapshot: Snapshot, page: str, name: str, value: str | None) -> bool:

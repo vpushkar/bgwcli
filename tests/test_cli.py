@@ -1559,7 +1559,8 @@ def test_restore_closing_verification_exception_retains_json_execution(
         if calls == 2:
             if failure == "extraction":
                 malformed = dict(snapshot_fetcher["pages"])
-                malformed["apphosting"] = apphosting_page(rows=[("custom_ssh", "offline-host")], device_options=[])
+                # An unresolvable forward is skipped on the live side; a non-numeric port still fails.
+                malformed["services"] = services_page(rows=[("custom_ssh", "x-y", "22", "TCP")])
                 return malformed, []
             if failure == "pool":
                 raise session_pool_full_error()

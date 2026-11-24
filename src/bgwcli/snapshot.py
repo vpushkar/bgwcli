@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from typing import Literal
 
 from .errors import SnapshotExtractionError, UsageError
 from .html import normalize_whitespace
@@ -86,6 +87,13 @@ class Snapshot:
     # has no control types or omitted-value facts, so a loaded dump cannot supply evidence.
     live_form_evidence: dict[str, LiveFormEvidence] = field(
         default_factory=dict, repr=False, compare=False, metadata={"serialize": False}
+    )
+    # Live captures only (extract_snapshot(unresolved_forwards="skip")): one message per NAT/Gaming
+    # forward whose device label the router's device list cannot resolve (device offline, or two
+    # devices sharing the name). When non-empty, `forwards` is empty and means "not known": diff and
+    # restore skip the forwards section instead of reporting every dumped forward as missing.
+    unresolved_forwards: list[str] = field(
+        default_factory=list, repr=False, compare=False, metadata={"serialize": False}
     )
 
 
@@ -296,7 +304,11 @@ def extract_snapshot(
     all_clients: bool = False,
     include: Iterable[str] = (),
     selected_pages: Sequence[str] | None = None,
+    unresolved_forwards: Literal["raise", "skip"] = "raise",
 ) -> Snapshot:
+    """`unresolved_forwards="raise"` (dump: a baseline must be complete) makes a forward whose device
+    label cannot be resolved a SnapshotExtractionError; "skip" (the live side of diff, restore and
+    autorestore) records it in `unresolved_forwards` and leaves the forwards section unknown."""
     # A collector may supply extra pages. Project before extracting anything: an unrelated
     # malformed table must not block selected sections, and unrequested metadata stays unknown.
     # Preserve the full ParsedPage for each selection, including forward identity dropdowns.
@@ -340,16 +352,22 @@ def extract_snapshot(
         if page == "ipalloc" and not all_clients:
             rows = [row for row in rows if _is_fixed_allocation_row(row)]
         tables[page] = rows
+    forwards, unresolved = (
+        _extract_forwards(pages["apphosting"], skip_unresolved=unresolved_forwards == "skip")
+        if "apphosting" in pages
+        else ([], [])
+    )
     return Snapshot(
         meta=SnapshotMeta(schema=2, firmware=_firmware_version(pages.get("sysinfo")), ts=ts, router_host=router_host),
         services=_extract_services(pages["services"]) if "services" in pages else [],
-        forwards=_extract_forwards(pages["apphosting"]) if "apphosting" in pages else [],
+        forwards=forwards,
         reservations=_extract_reservations(pages["ipalloc"]) if "ipalloc" in pages else [],
         forms=forms,
         tables=tables,
         form_secrets=form_secrets,
         form_unchecked_text=form_unchecked_text,
         live_form_evidence=live_form_evidence,
+        unresolved_forwards=unresolved,
     )
 
 
@@ -504,12 +522,18 @@ def _device_select(parsed: ParsedPage) -> ParsedSelect | None:
     return None
 
 
-def _extract_forwards(parsed: ParsedPage) -> list[SnapshotForward]:
+def _extract_forwards(
+    parsed: ParsedPage, *, skip_unresolved: bool = False
+) -> tuple[list[SnapshotForward], list[str]]:
+    """(forwards, unresolved). With `skip_unresolved`, an unresolvable device label is collected
+    instead of raised, and any such label leaves the whole section unknown (an empty forwards list):
+    a partial list would make the resolvable rest look like the complete set."""
     select = _device_select(parsed)
     macs_by_label: dict[str, list[str]] = {}
     for option in (select.option_details if select else None) or []:
         macs_by_label.setdefault(option.label.strip(), []).append(option.value.lower())
     forwards: list[SnapshotForward] = []
+    unresolved: list[str] = []
     recognized = 0
     for row in parsed.tables:
         service_col = find_column(row, FORWARD_COLUMNS["service"])
@@ -529,18 +553,32 @@ def _extract_forwards(parsed: ParsedPage) -> list[SnapshotForward]:
         # and extra — and `restore --prune` would delete the forward the dump was meant to preserve
         # while its compensating add stayed blocked. A dump must never contain an unresolved device.
         if len(macs) > 1:
-            raise SnapshotExtractionError(
+            problem = (
                 f"apphosting: device label '{_safe(device_label)}' is ambiguous ({len(macs)} devices); "
                 "cannot dump forwards safely"
             )
-        if not macs:
-            raise SnapshotExtractionError(
+            skipped = (
+                f"forward '{_safe(service)}' -> '{_safe(device_label)}': {len(macs)} devices share that name"
+            )
+        elif not macs:
+            problem = (
                 f"apphosting: device label '{_safe(device_label)}' (service '{_safe(service)}') is not in the "
                 "router's device list; reconnect the device or delete that forward in the gateway UI, then re-run dump"
             )
-        forwards.append(SnapshotForward(service=service, device_label=device_label, device_mac=macs[0]))
+            skipped = (
+                f"forward '{_safe(service)}' -> '{_safe(device_label)}': device not in the router's device list "
+                "(offline?)"
+            )
+        else:
+            forwards.append(SnapshotForward(service=service, device_label=device_label, device_mac=macs[0]))
+            continue
+        if not skip_unresolved:
+            raise SnapshotExtractionError(problem)
+        unresolved.append(skipped)
     _require_recognized_rows("apphosting", parsed.tables, recognized, "service/device")
-    return forwards
+    if unresolved:
+        return [], unresolved
+    return forwards, []
 
 
 # Mirrors base_payload in mutations.py (disabled controls omitted) with TWO deliberate exceptions:

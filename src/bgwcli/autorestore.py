@@ -64,7 +64,7 @@ from .snapshot import (
     service_key,
     snapshot_read_pages,
 )
-from .snapshot_diff import SnapshotDiff, diff_snapshots, holds_convergence_open
+from .snapshot_diff import SnapshotDiff, diff_snapshots, holds_convergence_open, skipped_forward_warnings
 from .types import ParsedPage, to_json_dict
 from .write_outcome import unanswered_write_step
 
@@ -121,6 +121,8 @@ class ResetSignature:
         totals: dict[str, int] = {}
         for label, dump_attr, diff_attr in _SECTIONS:
             selected = pages is None or _SECTION_PAGE[label] in pages
+            if label == "forwards" and diff.skipped_forwards:
+                selected = False  # not compared (unresolvable live forwards): the section abstains
             totals[label] = len(getattr(dump, dump_attr)) if selected else 0
             gone = getattr(diff, diff_attr).missing
             if label == "services":
@@ -426,7 +428,10 @@ def run_autorestore(
     restore_options = RestoreOptions(prune=False, include_secrets=False, pages=options.pages)
 
     def snapshot(parsed: Mapping[str, ParsedPage]) -> SnapshotDiff:
-        live = extract_snapshot(parsed, ts=ts, router_host=router_host, include=optional, selected_pages=options.pages)
+        live = extract_snapshot(
+            parsed, ts=ts, router_host=router_host, include=optional, selected_pages=options.pages,
+            unresolved_forwards="skip",
+        )
         return diff_snapshots(dump, live, pages=options.pages)
 
     try:
@@ -467,7 +472,9 @@ def run_autorestore(
         return AutorestoreResult(
             status="error", reason=reason, detected=detected, used_fallback_code=used_fallback, final_diff=diff,
         )
-    warnings: list[str] = []
+    warnings: list[str] = skipped_forward_warnings(diff)
+    for warning in warnings:
+        log(f"warning: {warning}")
     if used_fallback:
         # The fallback code only corroborates a reset-shaped diff or an unfinished recovery: the
         # sticker code also works after someone set it back by hand, and ordinary drift must stay.
